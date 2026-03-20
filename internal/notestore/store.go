@@ -31,6 +31,14 @@ type NoteStore interface {
 	// UpsertFile ensures a single file is present in the notes table.
 	// Used by the pipeline watcher to satisfy the jobs FK constraint before enqueueing.
 	UpsertFile(ctx context.Context, path string) error
+	// SetHash stores the SHA-256 hex digest for the file at path.
+	// Called by the worker after successful job completion and by the pipeline
+	// after a job is transferred to a new path.
+	SetHash(ctx context.Context, path, hash string) error
+	// LookupByHash returns the path and job status of any note whose sha256 matches hash
+	// and which has a completed (done) job. Returns found=false if no match exists.
+	// Used at enqueue time to detect moved or renamed files.
+	LookupByHash(ctx context.Context, hash string) (path string, found bool, err error)
 }
 
 // Store implements NoteStore against a SQLite database.
@@ -146,6 +154,31 @@ func (s *Store) List(ctx context.Context, relPath string) ([]NoteFile, error) {
 		})
 	}
 	return result, rows.Err()
+}
+
+// SetHash stores the SHA-256 hex digest for the file at path.
+func (s *Store) SetHash(ctx context.Context, path, hash string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE notes SET sha256=? WHERE path=?", hash, path)
+	return err
+}
+
+// LookupByHash returns the path of any note whose sha256 matches hash and which has
+// a done job. Returns found=false with nil error if no match exists.
+func (s *Store) LookupByHash(ctx context.Context, hash string) (path string, found bool, err error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT n.path
+		FROM notes n
+		JOIN jobs j ON j.note_path = n.path
+		WHERE n.sha256 = ? AND j.status = 'done'
+		LIMIT 1`, hash)
+	err = row.Scan(&path)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return path, true, nil
 }
 
 func scanRow(row *sql.Row) (*NoteFile, error) {

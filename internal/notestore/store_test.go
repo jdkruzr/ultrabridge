@@ -271,3 +271,139 @@ func TestScan_PrunesOrphans(t *testing.T) {
 		t.Errorf("expected ErrNotFound after prune, got %v", err)
 	}
 }
+
+// TestSetHash verifies that SetHash writes the sha256 column for the given path.
+func TestSetHash(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Seed a notes row.
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO notes (path, rel_path, file_type, size_bytes, mtime, created_at, updated_at)
+		VALUES (?, ?, 'note', 0, ?, ?, ?)`, "/a.note", "a.note", now, now, now)
+	if err != nil {
+		t.Fatalf("seed notes: %v", err)
+	}
+
+	if err := s.SetHash(ctx, "/a.note", "abc123"); err != nil {
+		t.Fatalf("SetHash: %v", err)
+	}
+
+	var got string
+	if err := s.db.QueryRowContext(ctx, "SELECT sha256 FROM notes WHERE path=?", "/a.note").Scan(&got); err != nil {
+		t.Fatalf("read sha256: %v", err)
+	}
+	if got != "abc123" {
+		t.Errorf("sha256 = %q, want abc123", got)
+	}
+}
+
+// TestLookupByHash_Found verifies LookupByHash returns the path when a matching
+// sha256 exists with a done job.
+func TestLookupByHash_Found(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Seed notes row + done job + hash.
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO notes (path, rel_path, file_type, size_bytes, mtime, created_at, updated_at)
+		VALUES (?, ?, 'note', 0, ?, ?, ?)`, "/a.note", "a.note", now, now, now)
+	if err != nil {
+		t.Fatalf("seed notes: %v", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO jobs (note_path, status, queued_at) VALUES (?, 'done', ?)`, "/a.note", now)
+	if err != nil {
+		t.Fatalf("seed jobs: %v", err)
+	}
+	if err := s.SetHash(ctx, "/a.note", "deadbeef"); err != nil {
+		t.Fatalf("SetHash: %v", err)
+	}
+
+	path, found, err := s.LookupByHash(ctx, "deadbeef")
+	if err != nil {
+		t.Fatalf("LookupByHash: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if path != "/a.note" {
+		t.Errorf("path = %q, want /a.note", path)
+	}
+}
+
+// TestLookupByHash_NotFound verifies LookupByHash returns found=false for an unknown hash.
+func TestLookupByHash_NotFound(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	_, found, err := s.LookupByHash(ctx, "notfound")
+	if err != nil {
+		t.Fatalf("LookupByHash: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for unknown hash")
+	}
+}
+
+// TestLookupByHash_NoJob verifies LookupByHash returns found=false when a note has
+// a matching sha256 but no associated job record.
+func TestLookupByHash_NoJob(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO notes (path, rel_path, file_type, size_bytes, mtime, created_at, updated_at)
+		VALUES (?, ?, 'note', 0, ?, ?, ?)`, "/a.note", "a.note", now, now, now)
+	if err != nil {
+		t.Fatalf("seed notes: %v", err)
+	}
+	if err := s.SetHash(ctx, "/a.note", "deadbeef"); err != nil {
+		t.Fatalf("SetHash: %v", err)
+	}
+
+	// No jobs row — LookupByHash should return found=false.
+	_, found, err := s.LookupByHash(ctx, "deadbeef")
+	if err != nil {
+		t.Fatalf("LookupByHash: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false when no job exists")
+	}
+}
+
+// TestLookupByHash_PendingJob verifies LookupByHash returns found=false when the job
+// exists but is not yet done (pending/in_progress/failed).
+// This ensures in-flight jobs are not misidentified as completed moves.
+func TestLookupByHash_PendingJob(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO notes (path, rel_path, file_type, size_bytes, mtime, created_at, updated_at)
+		VALUES (?, ?, 'note', 0, ?, ?, ?)`, "/a.note", "a.note", now, now, now)
+	if err != nil {
+		t.Fatalf("seed notes: %v", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO jobs (note_path, status, queued_at) VALUES (?, 'pending', ?)`, "/a.note", now)
+	if err != nil {
+		t.Fatalf("seed jobs: %v", err)
+	}
+	if err := s.SetHash(ctx, "/a.note", "deadbeef"); err != nil {
+		t.Fatalf("SetHash: %v", err)
+	}
+
+	// Pending job — LookupByHash should return found=false (only done jobs count).
+	_, found, err := s.LookupByHash(ctx, "deadbeef")
+	if err != nil {
+		t.Fatalf("LookupByHash: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for pending job (only done jobs should match)")
+	}
+}
