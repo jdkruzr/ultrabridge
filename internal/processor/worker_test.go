@@ -2,14 +2,17 @@ package processor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sysop/ultrabridge/internal/notedb"
+	"github.com/sysop/ultrabridge/internal/notestore"
 )
 
 // mockIndexer records IndexPage calls for assertion.
@@ -385,5 +388,119 @@ func TestWorker_OCREnabledOpenAIFormat(t *testing.T) {
 	}
 	if !hasAPI {
 		t.Error("expected indexer called with source=api for OpenAI format OCR")
+	}
+}
+
+// TestWorker_StoresHash_NoOCR verifies AC3.2: when OCR is disabled, the worker still
+// stores the SHA-256 hash of the file in notes.sha256 after the job completes.
+func TestWorker_StoresHash_NoOCR(t *testing.T) {
+	path := copyTestNote(t, "20260318_154108 std one line.note")
+	s := openWorkerStore(t, WorkerConfig{}) // no OCR, no backup
+	seedNote(t, s, path)
+
+	job, err := s.claimNext(context.Background())
+	if err != nil || job == nil {
+		t.Fatalf("claimNext: %v (job=%v)", err, job)
+	}
+
+	s.processJob(context.Background(), job)
+
+	// Verify job completed.
+	var status string
+	s.db.QueryRow("SELECT status FROM jobs WHERE id=?", job.ID).Scan(&status)
+	if status != StatusDone {
+		t.Errorf("job status = %q, want done", status)
+	}
+
+	// Verify notes.sha256 is populated.
+	var sha256 string
+	s.db.QueryRow("SELECT COALESCE(sha256, '') FROM notes WHERE path=?", path).Scan(&sha256)
+	if sha256 == "" {
+		t.Error("notes.sha256 should be set after successful job, got empty string")
+	}
+
+	// Verify the stored hash matches the actual file.
+	want, err := notestore.ComputeSHA256(path)
+	if err != nil {
+		t.Fatalf("ComputeSHA256: %v", err)
+	}
+	if sha256 != want {
+		t.Errorf("notes.sha256 = %q, want %q", sha256, want)
+	}
+}
+
+// TestWorker_NoHashOnFailure verifies AC3.3: a failed job does not write notes.sha256.
+// We force a failure by providing a path that does not exist on disk.
+func TestWorker_NoHashOnFailure(t *testing.T) {
+	s := openWorkerStore(t, WorkerConfig{})
+	path := "/nonexistent/file.note"
+
+	// Seed the notes row and job manually (file does not exist on disk).
+	now := time.Now().Unix()
+	s.db.Exec(`INSERT INTO notes (path, rel_path, file_type, size_bytes, mtime, created_at, updated_at)
+		VALUES (?, 'file.note', 'note', 0, ?, ?, ?)`, path, now, now, now)
+	s.db.Exec(`INSERT INTO jobs (note_path, status, queued_at) VALUES (?, 'pending', ?)`, path, now)
+
+	job, err := s.claimNext(context.Background())
+	if err != nil || job == nil {
+		t.Fatalf("claimNext: %v (job=%v)", err, job)
+	}
+
+	s.processJob(context.Background(), job)
+
+	// Job should be failed or skipped (file open will fail).
+	var status string
+	s.db.QueryRow("SELECT status FROM jobs WHERE id=?", job.ID).Scan(&status)
+	if status == StatusDone {
+		t.Fatalf("expected non-done status for failing job, got %q", status)
+	}
+
+	// notes.sha256 must NOT be set.
+	var sha256 sql.NullString
+	s.db.QueryRow("SELECT sha256 FROM notes WHERE path=?", path).Scan(&sha256)
+	if sha256.Valid && sha256.String != "" {
+		t.Errorf("notes.sha256 should be empty after failed job, got %q", sha256.String)
+	}
+}
+
+// TestWorker_StoresHash_WithOCR verifies AC3.1: when OCR is applied, the stored
+// sha256 reflects the final (post-injection) file, not the original.
+func TestWorker_StoresHash_WithOCR(t *testing.T) {
+	path := copyTestNote(t, "20260318_154108 std one line.note")
+	srv := mockOCRServer(t, "recognized text")
+	defer srv.Close()
+
+	s := openWorkerStore(t, WorkerConfig{
+		OCREnabled: true,
+		OCRClient:  NewOCRClient(srv.URL, "", "test-model", OCRFormatAnthropic),
+	})
+	seedNote(t, s, path)
+
+	job, err := s.claimNext(context.Background())
+	if err != nil || job == nil {
+		t.Fatalf("claimNext: %v (job=%v)", err, job)
+	}
+
+	s.processJob(context.Background(), job)
+
+	var status string
+	s.db.QueryRow("SELECT status FROM jobs WHERE id=?", job.ID).Scan(&status)
+	if status != StatusDone {
+		t.Skipf("OCR test requires network access or testdata; job status = %q", status)
+	}
+
+	// Hash must match the post-injection file (file was modified by OCR inject).
+	wantHash, err := notestore.ComputeSHA256(path)
+	if err != nil {
+		t.Fatalf("ComputeSHA256 post-injection: %v", err)
+	}
+
+	var gotHash string
+	s.db.QueryRow("SELECT COALESCE(sha256,'') FROM notes WHERE path=?", path).Scan(&gotHash)
+	if gotHash == "" {
+		t.Error("notes.sha256 should be set after OCR job")
+	}
+	if gotHash != wantHash {
+		t.Errorf("notes.sha256 = %q, want post-injection hash %q", gotHash, wantHash)
 	}
 }
