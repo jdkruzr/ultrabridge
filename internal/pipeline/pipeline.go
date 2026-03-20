@@ -99,6 +99,23 @@ func (p *Pipeline) enqueue(ctx context.Context, path string) {
 	if err == nil && job != nil && job.Status == processor.StatusDone {
 		return
 	}
+
+	// Hash-based move/rename detection (best-effort: any failure falls through to normal enqueue).
+	// Compute SHA-256 of the file and check if another path was already processed with
+	// identical content. If so, transfer the job record rather than re-processing.
+	if hash, hashErr := notestore.ComputeSHA256(path); hashErr == nil {
+		if oldPath, found, _ := p.store.LookupByHash(ctx, hash); found && oldPath != path {
+			if transferErr := p.store.TransferJob(ctx, oldPath, path); transferErr == nil {
+				if setErr := p.store.SetHash(ctx, path, hash); setErr != nil {
+					p.logger.Warn("failed to set hash after job transfer", "path", path, "err", setErr)
+				}
+				p.logger.Info("detected moved file, transferred job", "old", oldPath, "new", path)
+				return
+			}
+			p.logger.Warn("job transfer failed, will re-process", "old", oldPath, "new", path)
+		}
+	}
+
 	if err := p.proc.Enqueue(ctx, path); err != nil {
 		p.logger.Warn("pipeline enqueue failed", "path", path, "err", err)
 	}
