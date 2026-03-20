@@ -39,6 +39,11 @@ type NoteStore interface {
 	// and which has a completed (done) job. Returns found=false if no match exists.
 	// Used at enqueue time to detect moved or renamed files.
 	LookupByHash(ctx context.Context, hash string) (path string, found bool, err error)
+	// TransferJob moves the job record for oldPath to newPath by updating the FK.
+	// Used when move detection identifies that newPath contains the same content
+	// as an already-processed oldPath. newPath must already exist in the notes table.
+	// Returns an error if no job exists for oldPath or the FK constraint is violated.
+	TransferJob(ctx context.Context, oldPath, newPath string) error
 }
 
 // Store implements NoteStore against a SQLite database.
@@ -179,6 +184,21 @@ func (s *Store) LookupByHash(ctx context.Context, hash string) (path string, fou
 		return "", false, err
 	}
 	return path, true, nil
+}
+
+// TransferJob moves the job record for oldPath to newPath.
+// The notes row for newPath must already exist (caller's responsibility).
+func (s *Store) TransferJob(ctx context.Context, oldPath, newPath string) error {
+	result, err := s.db.ExecContext(ctx,
+		"UPDATE jobs SET note_path=? WHERE note_path=?", newPath, oldPath)
+	if err != nil {
+		return fmt.Errorf("transfer job %s → %s: %w", oldPath, newPath, err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("no job found for path %s", oldPath)
+	}
+	return nil
 }
 
 func scanRow(row *sql.Row) (*NoteFile, error) {

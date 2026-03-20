@@ -130,6 +130,8 @@ func (m *mockNoteStore) LookupByHash(_ context.Context, _ string) (string, bool,
 	return "", false, nil
 }
 
+func (m *mockNoteStore) TransferJob(_ context.Context, _, _ string) error { return nil }
+
 // mockSearchIndex implements SearchIndex for testing
 type mockSearchIndex struct{}
 
