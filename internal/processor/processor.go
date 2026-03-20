@@ -18,13 +18,24 @@ type Indexer interface {
 	IndexPage(ctx context.Context, path string, pageIdx int, source, bodyText, titleText, keywords string) error
 }
 
+// CatalogUpdater is the interface the worker uses to update the SPC MariaDB
+// catalog after a successful OCR injection. A nil CatalogUpdater disables
+// catalog sync. Defined here (not in a separate package) to avoid circular imports.
+type CatalogUpdater interface {
+	// AfterInject updates the SPC MariaDB catalog to reflect a file that
+	// was modified server-side by OCR injection. All DB operations are
+	// best-effort: errors are logged but do not propagate.
+	AfterInject(ctx context.Context, path string) error
+}
+
 // WorkerConfig holds runtime configuration for the OCR worker.
 type WorkerConfig struct {
-	OCREnabled bool
-	BackupPath string
-	MaxFileMB  int
-	OCRClient  *OCRClient // nil = OCR disabled
-	Indexer    Indexer    // nil = indexing disabled
+	OCREnabled     bool
+	BackupPath     string
+	MaxFileMB      int
+	OCRClient      *OCRClient // nil = OCR disabled
+	Indexer        Indexer    // nil = indexing disabled
+	CatalogUpdater CatalogUpdater // nil = SPC catalog sync disabled
 }
 
 // Processor manages the background OCR job queue.
