@@ -1,6 +1,6 @@
 # UltraBridge
 
-Last verified: 2026-03-19
+Last verified: 2026-03-20
 
 Go sidecar service for Supernote Private Cloud. Two subsystems:
 1. **CalDAV task sync** -- reads/writes the Supernote MariaDB, pushes STARTSYNC via Engine.IO
@@ -24,7 +24,7 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 - `internal/logging/` -- structured slog, file rotation, syslog, WebSocket broadcast
 - `internal/web/` -- HTML UI: task list, Files tab, Search tab, processor C&C, SSE log stream
 - `internal/notedb/` -- SQLite DB opener + schema migrations for notes pipeline (see domain CLAUDE.md)
-- `internal/notestore/` -- file inventory (scan, list, get) against SQLite notes table (see domain CLAUDE.md)
+- `internal/notestore/` -- file inventory (scan, list, get), content hashing, job transfer against SQLite notes table (see domain CLAUDE.md)
 - `internal/processor/` -- background OCR job queue: backup, extract, render, OCR, inject (see domain CLAUDE.md)
 - `internal/search/` -- FTS5 full-text search over note content (see domain CLAUDE.md)
 - `internal/pipeline/` -- file detection: fsnotify watcher, reconciler, Engine.IO listener (see domain CLAUDE.md)
@@ -56,4 +56,5 @@ go vet -C /home/sysop/src/ultrabridge/.worktrees/note-ingest-search ./...
 - Job statuses: pending -> in_progress -> done|failed|skipped
 - Backup before modification: original .note copied to backup tree, never overwritten
 - OCR source tracking: "myScript" (device RECOGNTEXT) vs "api" (vision API result)
+- Content hash dedup: SHA-256 stored on job completion; pipeline detects moved/renamed files and transfers job records instead of re-processing
 - Pipeline env vars: UB_NOTES_PATH, UB_DB_PATH, UB_BACKUP_PATH, UB_OCR_*
