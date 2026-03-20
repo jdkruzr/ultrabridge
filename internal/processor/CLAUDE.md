@@ -1,18 +1,18 @@
 # Processor
 
-Last verified: 2026-03-19
+Last verified: 2026-03-20
 
 ## Purpose
 Background OCR job queue. Processes .note files through a pipeline of backup,
 text extraction, optional vision-API OCR, RECOGNTEXT injection, and search indexing.
 
 ## Contracts
-- **Exposes**: `Processor` interface (Start, Stop, Status, Enqueue, Skip, Unskip, GetJob), `Job` model, `ProcessorStatus`, `OCRClient`, `Indexer` interface.
-- **Guarantees**: Single worker loop claims jobs atomically. Watchdog reclaims stuck jobs (>10 min in_progress). Backup before any file modification. Graceful shutdown waits for current job.
-- **Expects**: SQLite `*sql.DB` with `notes` and `jobs` tables. `WorkerConfig` with optional OCRClient and Indexer.
+- **Exposes**: `Processor` interface (Start, Stop, Status, Enqueue, Skip, Unskip, GetJob), `Job` model, `ProcessorStatus`, `OCRClient`, `Indexer` interface, `CatalogUpdater` interface, `NewSPCCatalog`.
+- **Guarantees**: Single worker loop claims jobs atomically. Watchdog reclaims stuck jobs (>10 min in_progress). Backup before any file modification. Graceful shutdown waits for current job. SPC catalog updates are best-effort (logged, never fail the job).
+- **Expects**: SQLite `*sql.DB` with `notes` and `jobs` tables. `WorkerConfig` with optional OCRClient, Indexer, and CatalogUpdater.
 
 ## Dependencies
-- **Uses**: `notedb` schema, `go-sn/note` (parse/render/inject), vision API (Anthropic/OpenRouter)
+- **Uses**: `notedb` schema, `go-sn/note` (parse/render/inject), vision API (Anthropic/OpenRouter), SPC MariaDB (f_user_file, f_file_action, f_capacity -- via CatalogUpdater)
 - **Used by**: `pipeline` (Enqueue), `web` (Start/Stop/Status/Skip/Unskip/GetJob for C&C routes)
 - **Boundary**: Does not own file discovery -- that is `pipeline`'s responsibility.
 
@@ -24,6 +24,7 @@ text extraction, optional vision-API OCR, RECOGNTEXT injection, and search index
   - Configured via `UB_OCR_FORMAT`; defaults to `anthropic`
 - Two-source indexing: "myScript" (existing RECOGNTEXT) indexed first, then "api" (OCR result) overwrites
 - File reloaded after each page injection: .note format offsets shift when RECOGNTEXT is written
+- SPC catalog sync after successful injection: updates f_user_file (size, md5, update_time), inserts f_file_action audit row, adjusts f_capacity quota delta. Each step independent -- one failure does not block others.
 
 ## Invariants
 - Job statuses: pending -> in_progress -> done|failed|skipped
@@ -32,6 +33,6 @@ text extraction, optional vision-API OCR, RECOGNTEXT injection, and search index
 - Only .note files are processable (enforced by pipeline enqueue filter)
 
 ## Gotchas
-- `Indexer` interface defined here (not in search) to avoid circular import
+- `Indexer` and `CatalogUpdater` interfaces defined here (not in their impl packages) to avoid circular imports
 - Both OCR formats use `Authorization: Bearer` — no header difference from the caller's perspective
 - Worker polls every 5s when queue is empty; watchdog runs every 2 min

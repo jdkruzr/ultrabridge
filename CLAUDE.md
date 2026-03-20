@@ -1,6 +1,6 @@
 # UltraBridge
 
-Last verified: 2026-03-19
+Last verified: 2026-03-20
 
 Go sidecar service for Supernote Private Cloud. Two subsystems:
 1. **CalDAV task sync** -- reads/writes the Supernote MariaDB, pushes STARTSYNC via Engine.IO
@@ -25,7 +25,7 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 - `internal/web/` -- HTML UI: task list, Files tab, Search tab, processor C&C, SSE log stream
 - `internal/notedb/` -- SQLite DB opener + schema migrations for notes pipeline (see domain CLAUDE.md)
 - `internal/notestore/` -- file inventory (scan, list, get) against SQLite notes table (see domain CLAUDE.md)
-- `internal/processor/` -- background OCR job queue: backup, extract, render, OCR, inject (see domain CLAUDE.md)
+- `internal/processor/` -- background OCR job queue: backup, extract, render, OCR, inject, SPC catalog sync (see domain CLAUDE.md)
 - `internal/search/` -- FTS5 full-text search over note content (see domain CLAUDE.md)
 - `internal/pipeline/` -- file detection: fsnotify watcher, reconciler, Engine.IO listener (see domain CLAUDE.md)
 - `tests/` -- integration tests (require real DB)
@@ -33,9 +33,9 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 ## Build & Test
 
 ```bash
-go build -C /home/sysop/src/ultrabridge/.worktrees/note-ingest-search ./cmd/ultrabridge/
-go test -C /home/sysop/src/ultrabridge/.worktrees/note-ingest-search ./...
-go vet -C /home/sysop/src/ultrabridge/.worktrees/note-ingest-search ./...
+go build -C /home/sysop/src/ultrabridge/.worktrees/spc-catalog-sync ./cmd/ultrabridge/
+go test -C /home/sysop/src/ultrabridge/.worktrees/spc-catalog-sync ./...
+go vet -C /home/sysop/src/ultrabridge/.worktrees/spc-catalog-sync ./...
 ```
 
 ## Conventions
@@ -50,8 +50,9 @@ go vet -C /home/sysop/src/ultrabridge/.worktrees/note-ingest-search ./...
 - Supernote quirk: `completed_time` holds creation time; `last_modified` holds actual completion time
 - Soft deletes only: `is_deleted = 'Y'`, never hard delete
 
-### Notes Pipeline (SQLite)
+### Notes Pipeline (SQLite + MariaDB catalog sync)
 - Two databases: MariaDB for tasks, SQLite for notes pipeline (separate concerns)
+- After OCR injection, processor updates SPC MariaDB catalog (f_user_file, f_file_action, f_capacity) so the device sees correct file size/md5 -- best-effort, failures logged not propagated
 - SQLite in WAL mode, MaxOpenConns=1 (single-writer)
 - Job statuses: pending -> in_progress -> done|failed|skipped
 - Backup before modification: original .note copied to backup tree, never overwritten
