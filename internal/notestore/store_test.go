@@ -407,3 +407,68 @@ func TestLookupByHash_PendingJob(t *testing.T) {
 		t.Fatal("expected found=false for pending job (only done jobs should match)")
 	}
 }
+
+// TestTransferJob verifies that TransferJob moves the job record from oldPath to newPath,
+// verifying AC4.1 (job retains fields) and AC4.2 (old path job is gone).
+func TestTransferJob(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Seed two notes rows.
+	for _, path := range []string{"/old.note", "/new.note"} {
+		_, err := s.db.ExecContext(ctx, `
+			INSERT INTO notes (path, rel_path, file_type, size_bytes, mtime, created_at, updated_at)
+			VALUES (?, ?, 'note', 0, ?, ?, ?)`, path, filepath.Base(path), now, now, now)
+		if err != nil {
+			t.Fatalf("seed notes %s: %v", path, err)
+		}
+	}
+
+	// Seed a done job for /old.note with ocr_source and api_model set.
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO jobs (note_path, status, ocr_source, api_model, queued_at, finished_at)
+		VALUES (?, 'done', 'api', 'test-model', ?, ?)`, "/old.note", now, now)
+	if err != nil {
+		t.Fatalf("seed job: %v", err)
+	}
+
+	// Transfer job to /new.note.
+	if err := s.TransferJob(ctx, "/old.note", "/new.note"); err != nil {
+		t.Fatalf("TransferJob: %v", err)
+	}
+
+	// AC4.2: old path has no job.
+	var count int
+	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM jobs WHERE note_path=?", "/old.note").Scan(&count)
+	if count != 0 {
+		t.Errorf("old path still has %d job(s), want 0", count)
+	}
+
+	// AC4.1: new path has the job with original fields intact.
+	var status, ocrSource, apiModel string
+	s.db.QueryRowContext(ctx,
+		"SELECT status, COALESCE(ocr_source,''), COALESCE(api_model,'') FROM jobs WHERE note_path=?",
+		"/new.note").Scan(&status, &ocrSource, &apiModel)
+	if status != "done" {
+		t.Errorf("status = %q, want done", status)
+	}
+	if ocrSource != "api" {
+		t.Errorf("ocr_source = %q, want api", ocrSource)
+	}
+	if apiModel != "test-model" {
+		t.Errorf("api_model = %q, want test-model", apiModel)
+	}
+}
+
+// TestTransferJob_NoJob verifies TransferJob returns an error when no job exists
+// for the given old path.
+func TestTransferJob_NoJob(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	err := s.TransferJob(ctx, "/nonexistent.note", "/new.note")
+	if err == nil {
+		t.Error("expected error when no job exists for old path")
+	}
+}
