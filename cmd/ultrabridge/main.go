@@ -97,6 +97,9 @@ func main() {
 		MaxFileMB:  cfg.OCRMaxFileMB,
 		Indexer:    si,
 	}
+	if database != nil {
+		workerCfg.CatalogUpdater = processor.NewSPCCatalog(database)
+	}
 	if cfg.OCREnabled && cfg.OCRAPIURL != "" {
 		workerCfg.OCRClient = processor.NewOCRClient(cfg.OCRAPIURL, cfg.OCRAPIKey, cfg.OCRModel, cfg.OCRFormat)
 	}
