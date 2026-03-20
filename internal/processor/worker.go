@@ -16,6 +16,7 @@ import (
 	"time"
 
 	gosnote "github.com/jdkruzr/go-sn/note"
+	"github.com/sysop/ultrabridge/internal/notestore"
 )
 
 // processJob executes the full pipeline for one job.
@@ -31,6 +32,16 @@ func (s *Store) processJob(ctx context.Context, job *Job) {
 	if err != nil {
 		s.markDone(ctx, job.ID, err.Error())
 	} else {
+		// Store SHA-256 of the final file state for move/rename detection (AC3.1, AC3.2).
+		// Hash failure is non-critical — log and continue.
+		if hash, hashErr := notestore.ComputeSHA256(job.NotePath); hashErr == nil {
+			if _, dbErr := s.db.ExecContext(ctx,
+				"UPDATE notes SET sha256=? WHERE path=?", hash, job.NotePath); dbErr != nil {
+				s.logger.Warn("failed to store content hash", "path", job.NotePath, "err", dbErr)
+			}
+		} else {
+			s.logger.Warn("failed to compute content hash", "path", job.NotePath, "err", hashErr)
+		}
 		s.markDone(ctx, job.ID, "")
 	}
 }
