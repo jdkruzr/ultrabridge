@@ -42,6 +42,11 @@ func (s *Store) processJob(ctx context.Context, job *Job) {
 		} else {
 			s.logger.Warn("failed to compute content hash", "path", job.NotePath, "err", hashErr)
 		}
+		if s.cfg.CatalogUpdater != nil {
+			if err := s.cfg.CatalogUpdater.AfterInject(ctx, job.NotePath); err != nil {
+				s.logger.Warn("spc catalog update failed", "path", job.NotePath, "err", err)
+			}
+		}
 		s.markDone(ctx, job.ID, "")
 	}
 }
