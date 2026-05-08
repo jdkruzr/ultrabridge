@@ -95,21 +95,41 @@ func (c *Client) Login(ctx context.Context) error {
 	return nil
 }
 
-// FetchTasks returns all tasks from SPC.
+// FetchTasks returns all tasks from SPC, walking pages until exhausted.
+// SPC's /task/all paginates with default maxResults=20 ordered by last_modified
+// ASC; the response carries nextPageToken (singular) when more rows exist, while
+// requests submit nextPageTokens (plural) — preserve the asymmetry. Earlier
+// versions of this client posted {} once, which silently capped UB at 20 rows
+// and produced what looked like missing remote tasks.
 func (c *Client) FetchTasks(ctx context.Context) ([]SPCTask, error) {
-	var resp struct {
-		Success      bool      `json:"success"`
-		ErrorMsg     string    `json:"errorMsg"`
-		Code         string    `json:"code"`
-		ScheduleTask []SPCTask `json:"scheduleTask"`
+	const maxPages = 1000 // ~20k tasks at default page size; protective cap
+	var all []SPCTask
+	pageToken := ""
+	for pages := 0; pages < maxPages; pages++ {
+		var resp struct {
+			Success       bool      `json:"success"`
+			ErrorMsg      string    `json:"errorMsg"`
+			Code          string    `json:"code"`
+			ScheduleTask  []SPCTask `json:"scheduleTask"`
+			NextPageToken string    `json:"nextPageToken"`
+		}
+		body := map[string]any{}
+		if pageToken != "" {
+			body["nextPageTokens"] = pageToken
+		}
+		if err := c.postJSON(ctx, "/api/file/schedule/task/all", body, &resp, true); err != nil {
+			return nil, fmt.Errorf("fetch tasks: %w", err)
+		}
+		if !resp.Success {
+			return nil, fmt.Errorf("fetch tasks: SPC rejected (code=%q msg=%q)", resp.Code, resp.ErrorMsg)
+		}
+		all = append(all, resp.ScheduleTask...)
+		if resp.NextPageToken == "" {
+			return all, nil
+		}
+		pageToken = resp.NextPageToken
 	}
-	if err := c.postJSON(ctx, "/api/file/schedule/task/all", map[string]any{}, &resp, true); err != nil {
-		return nil, fmt.Errorf("fetch tasks: %w", err)
-	}
-	if !resp.Success {
-		return nil, fmt.Errorf("fetch tasks: SPC rejected (code=%q msg=%q)", resp.Code, resp.ErrorMsg)
-	}
-	return resp.ScheduleTask, nil
+	return nil, fmt.Errorf("fetch tasks: exceeded %d pages without termination", maxPages)
 }
 
 // CreateTask creates a single task on SPC. Returns an error if SPC reports

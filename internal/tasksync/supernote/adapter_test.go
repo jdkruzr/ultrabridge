@@ -708,6 +708,69 @@ func TestClient_BugFix_CreateChecksSuccess(t *testing.T) {
 	}
 }
 
+// TestClient_FetchTasks_Paginates verifies that FetchTasks follows SPC's
+// nextPageToken across multiple pages. SPC's /task/all defaults to 20 results
+// per page; previously FetchTasks read only page 1. Note the field-name asymmetry:
+// requests carry `nextPageTokens` (plural), responses carry `nextPageToken`
+// (singular) — this is a SPC quirk discovered in the decompiled service source.
+func TestClient_FetchTasks_Paginates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.RequestURI {
+		case "/api/official/user/query/random/code":
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "randomCode": "x", "timestamp": int64(1)})
+		case "/api/official/user/account/login/new":
+			json.NewEncoder(w).Encode(map[string]any{"success": true, "token": "tok"})
+		case "/api/file/schedule/task/all":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			page := body["nextPageTokens"]
+			switch page {
+			case nil, "":
+				json.NewEncoder(w).Encode(map[string]any{
+					"success":       true,
+					"scheduleTask":  []SPCTask{{ID: "a", Title: "a"}, {ID: "b", Title: "b"}},
+					"nextPageToken": "2",
+				})
+			case "2":
+				json.NewEncoder(w).Encode(map[string]any{
+					"success":       true,
+					"scheduleTask":  []SPCTask{{ID: "c", Title: "c"}},
+					"nextPageToken": "3",
+				})
+			case "3":
+				json.NewEncoder(w).Encode(map[string]any{
+					"success":      true,
+					"scheduleTask": []SPCTask{{ID: "d", Title: "d"}},
+					// no nextPageToken: this is the last page
+				})
+			default:
+				t.Fatalf("unexpected page token: %v", page)
+			}
+		default:
+			t.Fatalf("unexpected path: %s", r.RequestURI)
+		}
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "u", "p", testLogger())
+	ctx := context.Background()
+	if err := c.Login(ctx); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	tasks, err := c.FetchTasks(ctx)
+	if err != nil {
+		t.Fatalf("FetchTasks: %v", err)
+	}
+	if len(tasks) != 4 {
+		t.Fatalf("expected 4 tasks across 3 pages, got %d: %+v", len(tasks), tasks)
+	}
+	for i, want := range []string{"a", "b", "c", "d"} {
+		if tasks[i].ID != want {
+			t.Errorf("tasks[%d].ID = %q, want %q", i, tasks[i].ID, want)
+		}
+	}
+}
+
 // TestClient_BugFix_UpdateChecksSuccess: same guarantee for the bulk update.
 func TestClient_BugFix_UpdateChecksSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
