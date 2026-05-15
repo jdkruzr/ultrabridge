@@ -64,6 +64,9 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 - `internal/web/` -- HTML UI: setup wizard, settings, task list, Files tab, Search tab, Chat tab, processor C&C, sync status, Boox render/versions, JSON API, config/sources API, MCP token management, SSE log stream (see domain CLAUDE.md)
 - `internal/mcpauth/` -- MCP bearer token store: SHA-256 hashed tokens in SQLite, CRUD + validation (see domain CLAUDE.md)
 
+### SPC Server (UB-as-SPC refactor, Phase 0+)
+- `internal/spcserver/` -- Device-facing Supernote Private Cloud protocol reimplementation; currently stub-only (see domain CLAUDE.md). Spec source: `docs/spc-protocol.md` and `/home/sysop/spc-rev/cfr-decrypted/`. Design plan: `/home/sysop/.claude/plans/okay-so-we-have-sunny-flame.md`.
+
 ### Infrastructure
 - `internal/sync/` -- Engine.IO v3 notifier: STARTSYNC push + inbound events (see domain CLAUDE.md)
 - `internal/auth/` -- Basic Auth middleware (bcrypt)
