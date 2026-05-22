@@ -297,9 +297,9 @@ func TestBoolParsing(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name      string
-		dbValue   string
-		expected  bool
+		name     string
+		dbValue  string
+		expected bool
 	}{
 		{"true", "true", true},
 		{"false", "false", false},
@@ -387,41 +387,41 @@ func TestRoundtrip(t *testing.T) {
 
 	// Create a config with non-default values.
 	original := &Config{
-		Username:         "alice",
-		PasswordHash:     "hashed_password",
-		OCREnabled:       true,
-		OCRAPIURL:        "https://api.anthropic.com",
-		OCRAPIKey:        "secret_key",
-		OCRModel:         "claude-3",
-		OCRConcurrency:   8,
-		OCRMaxFileMB:     100,
-		OCRFormat:        "openai",
-		EmbedEnabled:     true,
-		OllamaURL:        "http://custom:11434",
-		OllamaEmbedModel: "custom-model",
-		ChatEnabled:      true,
-		ChatAPIURL:       "http://custom-chat:8000",
-		ChatModel:        "custom-chat-model",
-		SNSyncEnabled:    true,
-		SNSyncInterval:   600,
-		SNAPIURL:         "http://custom-sn:8080",
-		SNAccount:        "account123",
-		SNPassword:       "password123",
-		LogLevel:         "debug",
-		LogFormat:        "text",
-		LogFile:          "/var/log/app.log",
-		LogFileMaxMB:     100,
-		LogFileMaxAge:    60,
-		LogFileMaxBackup: 10,
-		LogSyslogAddr:       "localhost:514",
+		Username:             "alice",
+		PasswordHash:         "hashed_password",
+		OCREnabled:           true,
+		OCRAPIURL:            "https://api.anthropic.com",
+		OCRAPIKey:            "secret_key",
+		OCRModel:             "claude-3",
+		OCRConcurrency:       8,
+		OCRMaxFileMB:         100,
+		OCRFormat:            "openai",
+		EmbedEnabled:         true,
+		OllamaURL:            "http://custom:11434",
+		OllamaEmbedModel:     "custom-model",
+		ChatEnabled:          true,
+		ChatAPIURL:           "http://custom-chat:8000",
+		ChatModel:            "custom-chat-model",
+		SNSyncEnabled:        true,
+		SNSyncInterval:       600,
+		SNAPIURL:             "http://custom-sn:8080",
+		SNAccount:            "account123",
+		SNPassword:           "password123",
+		LogLevel:             "debug",
+		LogFormat:            "text",
+		LogFile:              "/var/log/app.log",
+		LogFileMaxMB:         100,
+		LogFileMaxAge:        60,
+		LogFileMaxBackup:     10,
+		LogSyslogAddr:        "localhost:514",
 		CalDAVCollectionName: "My Tasks",
-		DueTimeMode:         "date_only",
-		WebEnabled:          false,
-		SocketIOURL:         "ws://custom:8080/socket.io/",
-		DBHost:              "custom-db",
-		DBPort:              "5432",
-		DBEnvPath:           "/custom/.dbenv",
-		UserID:              999,
+		DueTimeMode:          "date_only",
+		WebEnabled:           false,
+		SocketIOURL:          "ws://custom:8080/socket.io/",
+		DBHost:               "custom-db",
+		DBPort:               "5432",
+		DBEnvPath:            "/custom/.dbenv",
+		UserID:               999,
 	}
 
 	// Save it.
@@ -497,6 +497,88 @@ func TestEnvironmentVariableOverride(t *testing.T) {
 	}
 	if cfg.OCRConcurrency != 4 {
 		t.Errorf("expected OCRConcurrency=4 (from env), got %d", cfg.OCRConcurrency)
+	}
+}
+
+// TestSPCServerConfigDefaults verifies the SPC server keys default to a
+// regression-safe state: client mode (no listener) and the :8089 listen addr.
+// Covers: spc-phase-1.AC1.2
+func TestSPCServerConfigDefaults(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	cfg, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.SPCMode != "client" {
+		t.Errorf("expected SPCMode=client (default), got %q", cfg.SPCMode)
+	}
+	if cfg.SPCListenAddr != ":8089" {
+		t.Errorf("expected SPCListenAddr=:8089 (default), got %q", cfg.SPCListenAddr)
+	}
+	if cfg.SPCTLSCert != "" || cfg.SPCTLSKey != "" {
+		t.Errorf("expected empty TLS cert/key by default, got cert=%q key=%q", cfg.SPCTLSCert, cfg.SPCTLSKey)
+	}
+}
+
+// TestSPCServerConfigRoundtrip verifies all four SPC server keys survive
+// Save → Load via the settings DB.
+func TestSPCServerConfigRoundtrip(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	cfg, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	cfg.SPCMode = "server"
+	cfg.SPCListenAddr = ":9999"
+	cfg.SPCTLSCert = "/etc/ssl/spc.crt"
+	cfg.SPCTLSKey = "/etc/ssl/spc.key"
+
+	if _, err := Save(ctx, db, cfg); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	reloaded, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if reloaded.SPCMode != "server" {
+		t.Errorf("expected SPCMode=server after roundtrip, got %q", reloaded.SPCMode)
+	}
+	if reloaded.SPCListenAddr != ":9999" {
+		t.Errorf("expected SPCListenAddr=:9999 after roundtrip, got %q", reloaded.SPCListenAddr)
+	}
+	if reloaded.SPCTLSCert != "/etc/ssl/spc.crt" {
+		t.Errorf("expected SPCTLSCert preserved, got %q", reloaded.SPCTLSCert)
+	}
+	if reloaded.SPCTLSKey != "/etc/ssl/spc.key" {
+		t.Errorf("expected SPCTLSKey preserved, got %q", reloaded.SPCTLSKey)
+	}
+}
+
+// TestSPCModeEnvOverride verifies UB_SPC_MODE=server overrides a DB value of
+// client (env beats DB), so an operator can force server mode without touching
+// the settings table.
+func TestSPCModeEnvOverride(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := notedb.SetSetting(ctx, db, KeySPCMode, "client"); err != nil {
+		t.Fatalf("SetSetting failed: %v", err)
+	}
+
+	t.Setenv("UB_SPC_MODE", "server")
+	cfg, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.SPCMode != "server" {
+		t.Errorf("expected SPCMode=server (from env), got %q", cfg.SPCMode)
 	}
 }
 

@@ -63,16 +63,23 @@ const (
 	KeyDBEnvPath = "dbenv_path"
 	KeyUserID    = "user_id"
 
+	// SPC server (UB-as-SPC refactor). Mode defaults to "client" = no listener,
+	// so UB behaves exactly as today unless explicitly switched to "server".
+	KeySPCMode       = "spc_mode"
+	KeySPCListenAddr = "spc_listen_addr"
+	KeySPCTLSCert    = "spc_tls_cert"
+	KeySPCTLSKey     = "spc_tls_key"
+
 	// Runtime-configurable (existing keys, read at job time via closures — NOT loaded into Config struct)
 	// These are included here for completeness but are accessed via notedb.GetSetting directly.
-	KeySNInjectEnabled    = "sn_inject_enabled"
-	KeySNOCRPrompt        = "sn_ocr_prompt"
-	KeyBooxOCRPrompt      = "boox_ocr_prompt"
-	KeyBooxTodoEnabled    = "boox_todo_enabled"
-	KeyBooxTodoPrompt     = "boox_todo_prompt"
-	KeyBooxImportPath     = "boox_import_path"
-	KeyBooxImportNotes    = "boox_import_notes"
-	KeyBooxImportPDFs     = "boox_import_pdfs"
+	KeySNInjectEnabled     = "sn_inject_enabled"
+	KeySNOCRPrompt         = "sn_ocr_prompt"
+	KeyBooxOCRPrompt       = "boox_ocr_prompt"
+	KeyBooxTodoEnabled     = "boox_todo_enabled"
+	KeyBooxTodoPrompt      = "boox_todo_prompt"
+	KeyBooxImportPath      = "boox_import_path"
+	KeyBooxImportNotes     = "boox_import_notes"
+	KeyBooxImportPDFs      = "boox_import_pdfs"
 	KeyBooxImportOnyxPaths = "boox_import_onyx_paths"
 	// KeyBooxExternalBaseURL is the externally-reachable base URL of this
 	// UltraBridge deployment (e.g. https://ub.example.com). Prepended to
@@ -124,33 +131,39 @@ var envVarForKey = map[string]string{
 	KeyDBEnvPath:            "UB_SUPERNOTE_DBENV_PATH",
 	KeyUserID:               "UB_USER_ID",
 	KeyMCPPort:              "UB_MCP_PORT",
+	KeySPCMode:              "UB_SPC_MODE",
+	KeySPCListenAddr:        "UB_SPC_LISTEN_ADDR",
+	KeySPCTLSCert:           "UB_SPC_TLS_CERT",
+	KeySPCTLSKey:            "UB_SPC_TLS_KEY",
 }
 
 // defaultValues provides the default for each setting key when neither DB nor env var is set.
 // Keys not in this map default to empty string.
 var defaultValues = map[string]string{
-	KeyOCRFormat:             "anthropic",
-	KeyOCRConcurrency:        "1",
-	KeyOCRMaxFileMB:          "0",
-	KeyOllamaURL:             "http://localhost:11434",
-	KeyOllamaEmbedModel:      "nomic-embed-text:v1.5",
-	KeyChatAPIURL:            "http://localhost:8000",
-	KeyChatModel:             "Qwen/Qwen3-8B",
-	KeySNSyncInterval:        "300",
-	KeySNAPIURL:              "http://supernote-service:8080",
-	KeyLogLevel:              "info",
-	KeyLogFormat:             "json",
-	KeyLogFileMaxMB:          "50",
-	KeyLogFileMaxAge:         "30",
-	KeyLogFileMaxBackup:      "5",
-	KeyCalDAVCollectionName:  "Tasks",
-	KeyDueTimeMode:           "preserve",
-	KeyWebEnabled:            "true",
-	KeySocketIOURL:           "ws://supernote-service:8080/socket.io/",
-	KeyDBHost:                "mariadb",
-	KeyDBPort:                "3306",
-	KeyDBEnvPath:             "/run/secrets/dbenv",
-	KeyMCPPort:               "8081",
+	KeyOCRFormat:            "anthropic",
+	KeyOCRConcurrency:       "1",
+	KeyOCRMaxFileMB:         "0",
+	KeyOllamaURL:            "http://localhost:11434",
+	KeyOllamaEmbedModel:     "nomic-embed-text:v1.5",
+	KeyChatAPIURL:           "http://localhost:8000",
+	KeyChatModel:            "Qwen/Qwen3-8B",
+	KeySNSyncInterval:       "300",
+	KeySNAPIURL:             "http://supernote-service:8080",
+	KeyLogLevel:             "info",
+	KeyLogFormat:            "json",
+	KeyLogFileMaxMB:         "50",
+	KeyLogFileMaxAge:        "30",
+	KeyLogFileMaxBackup:     "5",
+	KeyCalDAVCollectionName: "Tasks",
+	KeyDueTimeMode:          "preserve",
+	KeyWebEnabled:           "true",
+	KeySocketIOURL:          "ws://supernote-service:8080/socket.io/",
+	KeyDBHost:               "mariadb",
+	KeyDBPort:               "3306",
+	KeyDBEnvPath:            "/run/secrets/dbenv",
+	KeyMCPPort:              "8081",
+	KeySPCMode:              "client",
+	KeySPCListenAddr:        ":8089",
 }
 
 // restartRequired is the set of keys whose changes require a restart to take effect.
@@ -187,4 +200,8 @@ var restartRequired = map[string]bool{
 	KeyDBEnvPath:            true,
 	KeyUserID:               true,
 	KeyCalDAVCollectionName: true,
+	KeySPCMode:              true,
+	KeySPCListenAddr:        true,
+	KeySPCTLSCert:           true,
+	KeySPCTLSKey:            true,
 }

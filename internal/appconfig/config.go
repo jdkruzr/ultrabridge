@@ -52,7 +52,7 @@ type Config struct {
 
 	// Supernote device sync
 	SNSyncEnabled  bool
-	SNSyncInterval int    // seconds
+	SNSyncInterval int // seconds
 	SNAPIURL       string
 	SNAccount      string
 	SNPassword     string
@@ -83,6 +83,12 @@ type Config struct {
 	DBPort    string
 	DBEnvPath string
 	UserID    int64
+
+	// SPC server (UB-as-SPC refactor)
+	SPCMode       string // "client" (default, no listener) | "server"
+	SPCListenAddr string
+	SPCTLSCert    string
+	SPCTLSKey     string
 }
 
 // SaveResult reports the outcome of a Save operation.
@@ -165,6 +171,10 @@ func loadConfigFromDB(ctx context.Context, db *sql.DB, applyEnv bool) (*Config, 
 		DBEnvPath:            dbVals[KeyDBEnvPath],
 		UserID:               parseInt64(dbVals[KeyUserID]),
 		MCPPort:              parseIntWithDefault(dbVals[KeyMCPPort], 8081),
+		SPCMode:              dbVals[KeySPCMode],
+		SPCListenAddr:        dbVals[KeySPCListenAddr],
+		SPCTLSCert:           dbVals[KeySPCTLSCert],
+		SPCTLSKey:            dbVals[KeySPCTLSKey],
 	}
 
 	return cfg, nil
@@ -287,11 +297,15 @@ func configToMap(cfg *Config) map[string]string {
 		KeyDueTimeMode:          cfg.DueTimeMode,
 		KeyWebEnabled:           boolToString(cfg.WebEnabled),
 		KeySocketIOURL:          cfg.SocketIOURL,
-		KeyDBHost:    cfg.DBHost,
-		KeyDBPort:    cfg.DBPort,
-		KeyDBEnvPath: cfg.DBEnvPath,
-		KeyUserID:    strconv.FormatInt(cfg.UserID, 10),
-		KeyMCPPort:   strconv.Itoa(cfg.MCPPort),
+		KeyDBHost:               cfg.DBHost,
+		KeyDBPort:               cfg.DBPort,
+		KeyDBEnvPath:            cfg.DBEnvPath,
+		KeyUserID:               strconv.FormatInt(cfg.UserID, 10),
+		KeyMCPPort:              strconv.Itoa(cfg.MCPPort),
+		KeySPCMode:              cfg.SPCMode,
+		KeySPCListenAddr:        cfg.SPCListenAddr,
+		KeySPCTLSCert:           cfg.SPCTLSCert,
+		KeySPCTLSKey:            cfg.SPCTLSKey,
 	}
 	return m
 }
