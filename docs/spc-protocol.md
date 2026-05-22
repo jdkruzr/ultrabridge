@@ -2,7 +2,7 @@
 
 Working specification for re-implementing Supernote Private Cloud (SPC) endpoints in UltraBridge so the Supernote device cannot tell the difference. Built from CFR-decompiled output of `supernote-service.jar` v2.1.4.RELEASE. All citations are `<FQN.java>:<line>` against `/home/sysop/spc-rev/cfr-decrypted/`.
 
-**Status:** Phase 0 in progress. 0a (CFR + endpoint enumeration) and 0d (OSS HMAC) closed by CFR inspection. 0b (device wire observations) and 0c (JWT acceptance verdict) pending physical-device sessions.
+**Status:** Phase 0 complete (2026-05-22). 0a (CFR + endpoint enumeration), 0d (OSS HMAC, empirically validated), 0b (device wire observations), 0c (JWT acceptance: PASS) all done. Every risk R1–R6 closed. See §11 for the device-traffic summary.
 
 ---
 
@@ -35,26 +35,51 @@ All REST responses extend `BaseVO` (`com/ratta/vo/BaseVO.java`):
   - `JWT_TTL_8` = 28800000 ms (8h, used elsewhere)
   - `JWT_DAY_TTL` = 2592000000 ms (30 days)
   - `JWT_REFRESH_INTERVAL` = 3300000 ms (55min refresh threshold)
-- **Terminal tokens are non-expiring at the JWT level.** Per `JwtTokenUserUtil.createToken` (`JwtTokenUserUtil.java:97-110`): if `equipmentNo` is provided (i.e., device login), the token is signed **without** `.withExpiresAt(...)`. Non-terminal tokens (web UI flows, where `equipmentNo` is null) **do** include `exp`. Effective TTL for terminal devices comes from Redis state keyed by the `key` claim.
-- Claim shape (terminal token, observed in `JwtTokenUserUtil.java:107`):
+- **Two token flavors** (`JwtTokenUserUtil.createToken`, `JwtTokenUserUtil.java:97-110`):
+  - **equipmentNo branch** (device/terminal login): claims `{userId, createTime, equipmentNo, key}`, signed **without** `.withExpiresAt(...)`. Effective TTL comes from Redis state keyed by the `key` claim.
+  - **no-equipmentNo branch** (web flows): claims `{userId, createTime, key, exp}` — `exp` set to a far-future date.
+- `key` claim format: `{userId}_{createTime_seconds}_{baseTokenCreateTime_ms}` and, in the equipmentNo branch, `+ "_" + equipmentNo`.
+- **Real captured token (0b socket handshake)** decodes to:
   ```json
-  {"userId": "<string>", "createTime": <unix-seconds>, "equipmentNo": "<string>", "key": "<redis cache key>"}
+  {"createTime":1775346068, "exp":2086386068, "userId":"1184673925533868032",
+   "key":"1184673925533868032_1775346068_1774555792279"}
   ```
-  Real token captured in the JAR's test code (`JwtTokenUserUtil.java:59`) decodes to:
-  ```json
-  {"createTime": 1752550338, "equipmentNo": "SN100C1000531", "userId": "1104633280458842112"}
-  ```
-  (No `key` claim in that sample — looks like the test omitted it.)
-- Login response VO field name for the JWT is **`token`** (`LoginVO.token`), not `jwtToken` or `accessToken`.
+  i.e. the device's live socket used the **exp-bearing** flavor (`exp` = 2036, ~60 yr out), no `equipmentNo`.
+- Login response VO field name for the JWT is **`token`** (`LoginVO.token`), not `jwtToken` or `accessToken`. `LoginVO` fields: `token`, `counts`, `userName`, `avatarsUrl`, `lastUpdateTime`, `isBind`, `isBindEquipment`, `soldOutCount` (all alongside the three BaseVO fields).
 
-**JWT acceptance test (0c) is still required** to confirm an unmodified device accepts tokens signed with `Constant.SECRET` and the above claim shape.
+**JWT acceptance — CONFIRMED (0c, 2026-05-22).** An unmodified device (Supernote Nomad, `SN078C10034074`) accepted a token we minted with `Constant.SECRET` and the claim shape above, then made authenticated calls carrying it in `x-access-token` and opened its Engine.IO socket. R2 closed. The device performs **no client-side JWT validation** — it stores and echoes whatever `token` the login response returns.
+
+### Login handshake sequence (observed 0c)
+
+The device runs this on a fresh login (after a logout, which is `POST /api/terminal/equipment/unlink` `{equipmentNo}`):
+
+1. `POST /api/official/user/check/exists/server` — `{email, version}`
+2. `POST /api/official/user/query/random/code` — `{account, version}` → returns a random code (challenge)
+3. `POST /api/official/user/account/login/equipment` — `{account, password:<64-hex>, equipmentNo, equipment:3, loginMethod:"2", timestamp, version}`. `password` is a 64-char hex (sha256) — almost certainly `sha256(rawpw + randomCode)` or similar; exact recipe is a Phase 1b desk-check (the `loginEquipment` service body is a classfinal stub). Since UB is single-user, Phase 1b may accept credentials and issue a token without replicating the hash.
+4. `POST /api/terminal/user/bindEquipment` — `{account, equipmentNo, flag:"1", label:[…folder manifest…], name:"Supernote Nomad", totalCapacity:"25485312", version}`. The `label` manifest observed: `["DOCUMENT/Document","NOTE/Note","NOTE/MyStyle","EXPORT","SCREENSHOT","INBOX"]`.
+5. First authenticated call (`POST /api/user/query`) carries the new token in `x-access-token`.
+6. Engine.IO socket opens; `ratta_ping` every 5 s.
+
+`equipment=3` = terminal, `loginMethod="2"` = email.
 
 ## 3. Engine.IO
 
-- Protocol version: **Engine.IO v3** (confirmed live on the wire: access log shows `EIO=3&transport=websocket`).
+- Protocol version: **Engine.IO v3** (confirmed live: handshake query `EIO=3&transport=websocket`).
 - Server library: `corundumstudio/netty-socketio` 2.0.3.
 - Ping cadence: `socket.pinginterval = 5000` ms, `socket.pingtimeout = 25000` ms.
-- Custom keepalive event: `ratta_ping`.
+- **`permessage-deflate` is negotiated** (stateful, context-takeover). UB's Engine.IO server must support it. (Frames captured in 0b decompress as raw deflate with `00 00 ff ff` appended; the stream is stateful so frames don't decode in isolation.)
+- **Heartbeat observed (0b/0c): every 5 s the device sends BOTH** the Engine.IO native ping packet `2` (server replies `3`) **and** a Socket.IO event frame `42["ratta_ping"]`. Confirmed over ~80 s of idle.
+
+### Socket handshake + auth (observed 0b)
+
+The WebSocket connects to:
+```
+/socket.io/?token=<JWT>&type=ANDROID<uuid>&random=<unix_ms>&sign=<sig>&EIO=3&transport=websocket
+```
+- `token` — the JWT (in the **query string**, not the `x-access-token` header, for the socket).
+- `type` — `ANDROID` + a UUID.
+- `random` — unix-ms timestamp / nonce.
+- `sign` — `SignVerifierSocketIO.signData(data)` where `data = token + "_ANDROID_" + random` (`SignVerifierSocketIO.java:26,33`). That is: `HMAC-SHA256(data, "K+5xFzxbnB1iSZWqmu3Etw==")` → standard Base64 → strip all non-`[a-zA-Z0-9]`. **Same `K+5x…` secret as the OSS signer** (§6), distinct from `Constant.SECRET` (the JWT secret). Phase 1c can validate this or accept-and-ignore.
 
 ### Channels and ports (per `SocketIoConstant.java`)
 
@@ -64,7 +89,7 @@ All REST responses extend `BaseVO` (`com/ratta/vo/BaseVO.java`):
 | `_digestSocket_` | 18072 (same bean as file) | `digest` |
 | `_todoSocket_` | 18073 (`socketIOServerStask` bean) | `to-do` |
 
-**Deployment caveat (this dev install):** SPC container's internal nginx routes `/socket.io/*` to **port 18072 only**. Port 18073 is bound inside the container but unreachable externally. See `memory/reference_spc_dev_topology.md`. The device-side use of the task channel needs to be confirmed by 0b boot-trace.
+**Task channel is not used by the device (confirmed 0b/0c).** SPC's internal nginx routes all `/socket.io/*` to port 18072, and the device only ever opened **one** socket.io connection (to that single endpoint). It never attempted a separate task-channel URL. Tasks sync via REST polling (`POST /api/file/schedule/task/all`, seen 7× in one 0b session), not Engine.IO push. **Phase 1c should implement a single Engine.IO listener** (file+digest namespace); the task port (`socketIOServerStask`/18073) is not needed for device compatibility.
 
 ### Frame payload structure
 
@@ -170,16 +195,24 @@ Mutations:
 
 ### Stubs (canned success or 404)
 
-- Sharing: `F_ShareController` (1 endpoint)
-- Summary: `F_SummaryController` (16 endpoints; all under `/api/file/(add|delete|query|download)/summary/*`)
-- Dictionary / Reference: `B_DictionaryController` (5), `B_ReferenceController` (4)
-- Email server: `U_EmailServerController` (4)
-- User registration / password / valid-code / sensitive ops: `U_UserRegisterController`, `U_PasswordController`, `U_ValidCodeController`, `U_SensitiveOperationController`, `U_FigureVaildCodeController`
-- Web file controller (humans only): `F_FileLocalWebController` (17) — most likely 404 from device perspective
+- **Summary: `F_SummaryController` — MUST be stubbed, not 404'd.** 0b observed the device hitting `POST /api/file/query/summary/hash`, `/summary/group`, and `/summary/id` during normal sync. These need canned well-formed responses (empty payload + `success:true`) or the device may error. Originally "scope dropped"; reclassified to "scope stubbed." The `add/delete/download/summary*` variants were not seen and can 404.
+- Login challenge endpoints (device hits on fresh login, see §2): `POST /api/official/user/check/exists/server`, `POST /api/official/user/query/random/code` — must return well-formed responses, not 404.
+- Equipment: `POST /api/equipment/bind/status` (polled ~4×/session by the device — must succeed), `POST /api/terminal/user/bindEquipment` (login flow — must succeed), `POST /api/terminal/equipment/unlink` (logout).
+- Sharing: `F_ShareController` (1 endpoint) — not seen; 404 OK.
+- Dictionary / Reference: `B_DictionaryController` (5), `B_ReferenceController` (4) — not seen; 404 OK.
+- Email server: `U_EmailServerController` (4) — not seen; 404 OK.
+- User registration / password / valid-code / sensitive ops: `U_UserRegisterController`, `U_PasswordController`, `U_ValidCodeController`, `U_SensitiveOperationController`, `U_FigureVaildCodeController` — not seen; 404 OK.
+- Web file controller (humans only): `F_FileLocalWebController` (17) — not hit by device; 404 OK.
 
 ## 6. OSS HMAC (signing primitive for upload/download URLs)
 
 Specified in `com/ratta/util/SignVerifier.java` (full decompilation; ~80 lines, all readable). **Note:** despite the file name, the actual upload/download URL signing is plain SHA-256, **not** HMAC — the secret is concatenated into the data and the result hex-encoded. The class also contains a separate static HMAC-SHA256 + Base64 method (`signData` / `verifySignature`) for a different code path; do not confuse them.
+
+**EMPIRICALLY VALIDATED against live device traffic (0b, 2026-05-22).** Two real signed URLs the device sent through the tap proxy were reproduced byte-for-byte by the algorithm below:
+- Upload: path `L05PVEUvTm90ZQ` (`/NOTE/Note`), ts `1779425962069`, nonce `b4c1c01d-…`, fileSize `0` → sig `61e646…e98a5` ✓
+- Download: path `Tk9URS9Ob3RlL1BlcnNvbmFsLy9JTUdf…` (`NOTE/Note/Personal//IMG_…jpg`), ts `1779426063967`, nonce `b4b5306c-…` → sig `79ef6d…bccad` ✓
+
+(Note the download path's **double slash** `Personal//IMG` — the device emits non-normalized paths; UB path handling must tolerate this.)
 
 ### Constants
 
@@ -288,7 +321,41 @@ device → supernote.broken.works:443 (Let's Encrypt, NPM on hydrae 192.168.9.30
 
 R3 (TLS pinning) closed by this topology — device accepts the public LE cert NPM serves.
 
-## 11. Open items pending 0b/0c (device-required)
+## 11. Device wire observations (0b + 0c, 2026-05-22)
 
-- 0b — full endpoint-list-the-device-actually-hits, path encoding (NFC/NFD), Engine.IO frame contents (does device open multiple socket.io connections / different paths?), which upload variant the device uses, whether device hits note→pdf/png endpoints.
-- 0c — does an unmodified device accept a JWT signed with `Constant.SECRET`?
+Captured via a Go tap proxy (`/home/sysop/spc-rev/tap/`) and a JWT stub (`/home/sysop/spc-rev/jwt-test/`) inserted on the cleartext leg. Raw captures preserved at `/home/sysop/spc-rev/tap/tap-0b-*.jsonl` and `/home/sysop/spc-rev/jwt-test/0c-capture-*.log`. Device: Supernote Nomad, `SN078C10034074`.
+
+**Endpoints the device actually hit in one full sync session (0b):**
+```
+ 7  POST /api/file/schedule/task/all          (tasks via REST polling)
+ 4  POST /api/equipment/bind/status
+ 3  POST /api/file/schedule/group/all
+ 3  POST /api/file/3/files/query/by/path_v3
+ 2  PUT  /api/file/schedule/task/list
+ 2  POST /api/oss/upload                       (signed; validated §6)
+ 2  POST /api/file/query/summary/hash
+ 2  POST /api/file/query/summary/group
+ 2  POST /api/file/3/files/upload/apply        ← UPLOAD VARIANT (not terminal/*)
+ 2  POST /api/file/3/files/query_v3
+ 2  POST /api/file/2/files/upload/finish
+ 2  POST /api/file/2/files/synchronous/start
+ 2  POST /api/file/2/files/synchronous/end
+ 2  POST /api/file/2/files/list_folder
+ 1  POST /api/user/query
+ 1  POST /api/file/query/summary/id
+ 1  POST /api/file/query/server
+ 1  POST /api/file/capacity/query
+ 1  POST /api/file/3/files/download_v3
+ 1  POST /api/file/3/files/delete_folder_v3
+ 1  GET  /api/oss/download                     (signed; validated §6)
+```
+
+**Resolved questions:**
+- **Upload variant:** the device uses `/api/file/3/files/upload/apply` + `/api/oss/upload` + `/api/file/2/files/upload/finish`. The `/api/file/terminal/upload/*` variants are **not** used. → Phase 4b.
+- **Engine.IO:** single socket.io connection, EIO v3, permessage-deflate, 5 s heartbeat (`2`/`3` + `42["ratta_ping"]`). No task channel. → Phase 1c single listener.
+- **note→pdf/png:** not hit during normal sync. → Phase 5c stays conditional/skippable.
+- **Summary endpoints ARE hit** (`query/summary/{hash,group,id}`). → must stub (see §5).
+- **JWT acceptance: YES** (0c). Device accepts `Constant.SECRET`-signed token, no client-side validation.
+- **Path normalization:** device emits non-normalized paths with double slashes (`Personal//IMG_…`). UB must tolerate.
+
+**Phase 0 risk table — all closed:** R1 (OSS, validated), R2 (JWT accepted), R3 (LE cert, no pinning), R4 (EIO v3), R5 (E0330 + error enums), R6 (path encoding observed).
