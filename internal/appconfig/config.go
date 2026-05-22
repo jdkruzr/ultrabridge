@@ -89,6 +89,11 @@ type Config struct {
 	SPCListenAddr string
 	SPCTLSCert    string
 	SPCTLSKey     string
+
+	// SPC auth (1b)
+	SPCJWTSecret      string // defaults to Constant.SECRET
+	SPCDeviceAccount  string // expected terminal-login account ("" = accept any)
+	SPCDevicePassword string // raw account password; UB computes md5Hex(raw)
 }
 
 // SaveResult reports the outcome of a Save operation.
@@ -175,6 +180,9 @@ func loadConfigFromDB(ctx context.Context, db *sql.DB, applyEnv bool) (*Config, 
 		SPCListenAddr:        dbVals[KeySPCListenAddr],
 		SPCTLSCert:           dbVals[KeySPCTLSCert],
 		SPCTLSKey:            dbVals[KeySPCTLSKey],
+		SPCJWTSecret:         dbVals[KeySPCJWTSecret],
+		SPCDeviceAccount:     dbVals[KeySPCDeviceAccount],
+		SPCDevicePassword:    dbVals[KeySPCDevicePassword],
 	}
 
 	return cfg, nil
@@ -306,6 +314,9 @@ func configToMap(cfg *Config) map[string]string {
 		KeySPCListenAddr:        cfg.SPCListenAddr,
 		KeySPCTLSCert:           cfg.SPCTLSCert,
 		KeySPCTLSKey:            cfg.SPCTLSKey,
+		KeySPCJWTSecret:         cfg.SPCJWTSecret,
+		KeySPCDeviceAccount:     cfg.SPCDeviceAccount,
+		KeySPCDevicePassword:    cfg.SPCDevicePassword,
 	}
 	return m
 }

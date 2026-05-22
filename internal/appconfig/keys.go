@@ -70,6 +70,14 @@ const (
 	KeySPCTLSCert    = "spc_tls_cert"
 	KeySPCTLSKey     = "spc_tls_key"
 
+	// SPC auth (1b). KeySPCJWTSecret defaults to Constant.SECRET so UB-minted
+	// tokens verify against the same secret the device expects. DeviceAccount/
+	// DevicePassword hold the raw account+password UB validates terminal logins
+	// against (UB computes md5Hex(raw) internally; see docs/spc-protocol.md §2.1).
+	KeySPCJWTSecret      = "spc_jwt_secret"
+	KeySPCDeviceAccount  = "spc_device_account"
+	KeySPCDevicePassword = "spc_device_password"
+
 	// Runtime-configurable (existing keys, read at job time via closures — NOT loaded into Config struct)
 	// These are included here for completeness but are accessed via notedb.GetSetting directly.
 	KeySNInjectEnabled     = "sn_inject_enabled"
@@ -135,6 +143,9 @@ var envVarForKey = map[string]string{
 	KeySPCListenAddr:        "UB_SPC_LISTEN_ADDR",
 	KeySPCTLSCert:           "UB_SPC_TLS_CERT",
 	KeySPCTLSKey:            "UB_SPC_TLS_KEY",
+	KeySPCJWTSecret:         "UB_SPC_JWT_SECRET",
+	KeySPCDeviceAccount:     "UB_SPC_DEVICE_ACCOUNT",
+	KeySPCDevicePassword:    "UB_SPC_DEVICE_PASSWORD",
 }
 
 // defaultValues provides the default for each setting key when neither DB nor env var is set.
@@ -164,6 +175,9 @@ var defaultValues = map[string]string{
 	KeyMCPPort:              "8081",
 	KeySPCMode:              "client",
 	KeySPCListenAddr:        ":8089",
+	// Constant.SECRET (com/ratta/constants/Constant.java:46) — the SPC JWT
+	// signing secret (NOT the 32-char JWT_SECRET). Load-bearing for device auth.
+	KeySPCJWTSecret: "suernotea1hK52bgkf9N7PQ5E3KDqKeCIT719a6kh04eSTSBLv7e9tPtw2L8S6pEDMy7lAIv2CYjg5Ncy7ep5zDS7hH9CDAZnLieo66g7F8iZmClK9a1xEEPewXLhkM4KTKI7pz2Lkl7Cds4MpClNvNCVHPbfWKNyiFSGUztbnmqDWgNAinPBNamwDUQpT8RwCO1wc9vYTTQsmXm8ByioHC3QkRMZtHZnIWWCkIWECPzSJGOowNliAavzVCMsKadYnsH322n",
 }
 
 // restartRequired is the set of keys whose changes require a restart to take effect.
@@ -204,4 +218,7 @@ var restartRequired = map[string]bool{
 	KeySPCListenAddr:        true,
 	KeySPCTLSCert:           true,
 	KeySPCTLSKey:            true,
+	KeySPCJWTSecret:         true,
+	KeySPCDeviceAccount:     true,
+	KeySPCDevicePassword:    true,
 }

@@ -582,6 +582,83 @@ func TestSPCModeEnvOverride(t *testing.T) {
 	}
 }
 
+// constantSECRET is the verbatim com/ratta/constants/Constant.java:46 SECRET —
+// the SPC JWT signing secret. UB's default for KeySPCJWTSecret must equal it so
+// UB-minted tokens verify against the same secret the device's tokens were
+// signed with. A drift here silently breaks device auth, so we lock it exactly.
+const constantSECRET = "suernotea1hK52bgkf9N7PQ5E3KDqKeCIT719a6kh04eSTSBLv7e9tPtw2L8S6pEDMy7lAIv2CYjg5Ncy7ep5zDS7hH9CDAZnLieo66g7F8iZmClK9a1xEEPewXLhkM4KTKI7pz2Lkl7Cds4MpClNvNCVHPbfWKNyiFSGUztbnmqDWgNAinPBNamwDUQpT8RwCO1wc9vYTTQsmXm8ByioHC3QkRMZtHZnIWWCkIWECPzSJGOowNliAavzVCMsKadYnsH322n"
+
+// TestSPCAuthConfigDefaults verifies the 1b auth keys default correctly: the
+// JWT secret defaults to Constant.SECRET, account/password default empty.
+func TestSPCAuthConfigDefaults(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	cfg, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.SPCJWTSecret != constantSECRET {
+		t.Errorf("SPCJWTSecret default must equal Constant.SECRET\n got  %q\n want %q", cfg.SPCJWTSecret, constantSECRET)
+	}
+	if cfg.SPCDeviceAccount != "" || cfg.SPCDevicePassword != "" {
+		t.Errorf("expected empty account/password by default, got account=%q password=%q", cfg.SPCDeviceAccount, cfg.SPCDevicePassword)
+	}
+}
+
+// TestSPCAuthConfigRoundtrip verifies the three 1b auth keys survive Save→Load.
+func TestSPCAuthConfigRoundtrip(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	cfg, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	cfg.SPCJWTSecret = "custom-secret"
+	cfg.SPCDeviceAccount = "starkruzr@gmail.com"
+	cfg.SPCDevicePassword = "ehh1701jqb"
+
+	if _, err := Save(ctx, db, cfg); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	reloaded, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if reloaded.SPCJWTSecret != "custom-secret" {
+		t.Errorf("SPCJWTSecret not preserved: got %q", reloaded.SPCJWTSecret)
+	}
+	if reloaded.SPCDeviceAccount != "starkruzr@gmail.com" {
+		t.Errorf("SPCDeviceAccount not preserved: got %q", reloaded.SPCDeviceAccount)
+	}
+	if reloaded.SPCDevicePassword != "ehh1701jqb" {
+		t.Errorf("SPCDevicePassword not preserved: got %q", reloaded.SPCDevicePassword)
+	}
+}
+
+// TestSPCJWTSecretEnvOverride verifies UB_SPC_JWT_SECRET overrides the DB value.
+func TestSPCJWTSecretEnvOverride(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	if err := notedb.SetSetting(ctx, db, KeySPCJWTSecret, "db-secret"); err != nil {
+		t.Fatalf("SetSetting failed: %v", err)
+	}
+
+	t.Setenv("UB_SPC_JWT_SECRET", "env-secret")
+	cfg, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.SPCJWTSecret != "env-secret" {
+		t.Errorf("expected SPCJWTSecret=env-secret (from env), got %q", cfg.SPCJWTSecret)
+	}
+}
+
 // TestIsSetupRequiredWithEmptyDB verifies that IsSetupRequired returns true when
 // DB is empty and no env vars are set.
 // Covers: platform-neutral-config.AC3.3

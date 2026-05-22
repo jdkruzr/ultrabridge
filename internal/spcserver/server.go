@@ -6,6 +6,7 @@
 package spcserver
 
 import (
+	"database/sql"
 	"log/slog"
 	"net/http"
 
@@ -19,7 +20,10 @@ type Config struct {
 	ListenAddr string
 	TLSCert    string
 	TLSKey     string
-	Logger     *slog.Logger
+	// DB is the shared notedb handle. Handlers persist/read SPC runtime state
+	// (e.g. the harvested spc_user_id) through it via notedb.GetSetting/SetSetting.
+	DB     *sql.DB
+	Logger *slog.Logger
 }
 
 // Server is the SPC HTTP (and, from 1c, Engine.IO) server. It is constructed
