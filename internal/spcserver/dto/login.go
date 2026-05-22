@@ -45,6 +45,13 @@ type RandomCodeVO struct {
 	Timestamp  int64  `json:"timestamp"`
 }
 
+// QueryTokenVO is the /user/query/token response
+// (com/ratta/user/vo/QueryTokenVO.java): BaseVO + a single token field.
+type QueryTokenVO struct {
+	envelope.BaseVO
+	Token string `json:"token"`
+}
+
 // UserCheckVO is the check/exists/server response
 // (com/ratta/user/vo/UserCheckVO.java). dms and uniqueMachineId are SPC
 // multi-server/sharding hints UB does not use; the device proceeds on a
