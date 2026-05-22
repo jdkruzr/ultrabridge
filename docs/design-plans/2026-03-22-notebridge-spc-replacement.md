@@ -1,5 +1,8 @@
 # NoteBridge: Supernote Private Cloud Replacement
 
+> **SUPERSEDED (2026-05-15) by [`2026-05-15-ub-as-spc-refactor.md`](2026-05-15-ub-as-spc-refactor.md).**
+> That plan revives this vision as a phased refactor of UltraBridge itself (rather than a separate "NoteBridge" service), grounded in the now-decompiled SPC source. Read it instead. This doc is kept for historical context only.
+
 ## Summary
 
 NoteBridge is a Go service that replaces Supernote Private Cloud (SPC) — the manufacturer's self-hosted sync server — with a leaner, self-contained alternative. Where SPC requires four Docker containers (application server, MariaDB, Redis, and a note library), NoteBridge runs as a single container backed entirely by SQLite. The tablet points at NoteBridge instead of SPC with only a hostname change; all device-facing API endpoints, error codes, and port numbers are protocol-compatible with the existing tablet firmware.

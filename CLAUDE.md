@@ -65,7 +65,7 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 - `internal/mcpauth/` -- MCP bearer token store: SHA-256 hashed tokens in SQLite, CRUD + validation (see domain CLAUDE.md)
 
 ### SPC Server (UB-as-SPC refactor, Phase 0+)
-- `internal/spcserver/` -- Device-facing Supernote Private Cloud protocol reimplementation; currently stub-only (see domain CLAUDE.md). Spec source: `docs/spc-protocol.md` and `/home/sysop/spc-rev/cfr-decrypted/`. Design plan: `/home/sysop/.claude/plans/okay-so-we-have-sunny-flame.md`.
+- `internal/spcserver/` -- Device-facing Supernote Private Cloud protocol reimplementation; currently stub-only (see domain CLAUDE.md). Spec source: `docs/spc-protocol.md` and `/home/sysop/spc-rev/cfr-decrypted/`. Design plan: `docs/design-plans/2026-05-15-ub-as-spc-refactor.md` (Phase 0 complete; Phase 1 = skeleton + auth + tasks).
 
 ### Infrastructure
 - `internal/sync/` -- Engine.IO v3 notifier: STARTSYNC push + inbound events (see domain CLAUDE.md)

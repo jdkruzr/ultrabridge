@@ -36,6 +36,6 @@ This package does **not** own:
 
 ## Spec source
 
-Everything in this package is reverse-engineered from `/home/sysop/spc-rev/cfr-decrypted/` (CFR-decompiled SPC `supernote-service.jar` v2.1.4.RELEASE). When implementing a new endpoint or DTO, cite `<FQN.java>:<line>` in the code comment that pins the spec to the source. Read `docs/spc-protocol.md` for the protocol-level summary.
+Everything in this package is reverse-engineered from `/home/sysop/spc-rev/cfr-decrypted/` (CFR-decompiled SPC `supernote-service.jar` v2.1.4.RELEASE). When implementing a new endpoint or DTO, cite `<FQN.java>:<line>` in the code comment that pins the spec to the source. Read `docs/spc-protocol.md` for the protocol-level summary, and `docs/design-plans/2026-05-15-ub-as-spc-refactor.md` for the phased build plan.
 
 When SPC's behavior surprises you, read the corresponding `.java` first — do not guess.
