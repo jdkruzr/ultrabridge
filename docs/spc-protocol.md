@@ -55,12 +55,34 @@ The device runs this on a fresh login (after a logout, which is `POST /api/termi
 
 1. `POST /api/official/user/check/exists/server` — `{email, version}`
 2. `POST /api/official/user/query/random/code` — `{account, version}` → returns a random code (challenge)
-3. `POST /api/official/user/account/login/equipment` — `{account, password:<64-hex>, equipmentNo, equipment:3, loginMethod:"2", timestamp, version}`. `password` is a 64-char hex (sha256) — almost certainly `sha256(rawpw + randomCode)` or similar; exact recipe is a Phase 1b desk-check (the `loginEquipment` service body is a classfinal stub). Since UB is single-user, Phase 1b may accept credentials and issue a token without replicating the hash.
+3. `POST /api/official/user/account/login/equipment` — `{account, password:<64-hex>, equipmentNo, equipment:3, loginMethod:"2", timestamp, version}`. `password` is the `webPassword` of the recipe in §2.1.
 4. `POST /api/terminal/user/bindEquipment` — `{account, equipmentNo, flag:"1", label:[…folder manifest…], name:"Supernote Nomad", totalCapacity:"25485312", version}`. The `label` manifest observed: `["DOCUMENT/Document","NOTE/Note","NOTE/MyStyle","EXPORT","SCREENSHOT","INBOX"]`.
 5. First authenticated call (`POST /api/user/query`) carries the new token in `x-access-token`.
 6. Engine.IO socket opens; `ratta_ping` every 5 s.
 
 `equipment=3` = terminal, `loginMethod="2"` = email.
+
+### 2.1 Password verification recipe (RECOVERED 2026-05-22 via javap)
+
+`loginEquipment` / `login` / `isPassword` resist **both** CFR and JADX — they carry control-flow obfuscation that trips decompiler block analysis ("Found unreachable blocks"). **Bytecode disassembly reads straight through it:** `javap -p -c -classpath /home/sysop/spc-rev/decrypted-classes com.ratta.user.info.LoginUtil`. The same applies to `SHA256Util` / `MD5StrUtil`. Use `javap` for any method the decompilers refuse.
+
+Recovered from `LoginUtil.isPassword(servicePassword, random, webPassword, userId, key)`:
+
+```
+computed = servicePassword                              # stored DB credential
+if random (the method arg) is NOT empty:                # web-login path (login())
+    computed = MD5_hex(servicePassword + random)
+else:                                                   # terminal/device path (loginEquipment(), random arg = null)
+    randomCode = redis.get(key)                         # one-time code issued by /query/random/code
+    computed = SHA256_hex(servicePassword + randomCode)
+    redis.delete(key)                                   # one-time use
+valid = computed.trim().equals(webPassword.trim())
+```
+
+- The **device/terminal flow takes the else branch**: `webPassword == SHA256_hex(servicePassword + randomCode)`. `webPassword` is `LoginDTO.password`.
+- `SHA256_hex` (`SHA256Util.getSHA256Str` → `byte2Hex`) and `MD5_hex` (`MD5StrUtil`) are **standard lowercase zero-padded hex** of the digest over UTF-8 bytes. `byte2Hex` explicitly pads single-nibble bytes (`if (hex.length()==1) append("0")`) — no non-standard-hex quirk to replicate.
+- On success the server zeroes the redis password-error counter; on failure it increments it and locks the account after a configurable count (`UserParamEnum.P002`/`P003`). UB can ignore lockout (single-user).
+- **`servicePassword = MD5_hex(rawPassword)` — RESOLVED 2026-05-22.** No capture needed: UB's existing SPC *client* (`internal/tasksync/supernote/client.go:61-66`), which authenticates against real SPC in production, computes the login password as `SHA256_hex(MD5_hex(rawPassword) + randomCode)` (comment there: "SPC stores MD5(password)"). So the stored credential is `MD5_hex(rawPassword)` and the full device-side recipe is `webPassword = SHA256_hex( MD5_hex(rawPassword) + randomCode )`. UB-as-SPC stores the raw password and computes `servicePassword = MD5_hex(raw)` at validation time. (`MD5_hex`/`SHA256_hex` are both standard lowercase zero-padded hex.)
 
 ## 3. Engine.IO
 
