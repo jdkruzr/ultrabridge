@@ -40,6 +40,8 @@ import (
 	"github.com/sysop/ultrabridge/internal/source/boox"
 	"github.com/sysop/ultrabridge/internal/source/supernote"
 	"github.com/sysop/ultrabridge/internal/spcserver"
+	spcauth "github.com/sysop/ultrabridge/internal/spcserver/auth"
+	"github.com/sysop/ultrabridge/internal/spcserver/notify"
 	"github.com/sysop/ultrabridge/internal/sync"
 	"github.com/sysop/ultrabridge/internal/taskdb"
 	"github.com/sysop/ultrabridge/internal/tasksync"
@@ -420,7 +422,38 @@ func main() {
 		}
 	}
 
-	backend := ubcaldav.NewBackend(store, "/caldav", cfg.CalDAVCollectionName, cfg.DueTimeMode, notifier)
+	// In server mode, construct the SPC server now so its Engine.IO registry can
+	// back the STARTSYNC notifier the CalDAV backend and task service use; the
+	// listener itself is launched later. In client mode the existing
+	// sync.Notifier is used and wiring is unchanged (regression-safe).
+	var spcSrv *spcserver.Server
+	var taskNotifier interface {
+		Notify(context.Context) error
+	} = notifier
+	if cfg.SPCMode == "server" {
+		spcSrv = spcserver.New(spcserver.Config{
+			Mode:           cfg.SPCMode,
+			ListenAddr:     cfg.SPCListenAddr,
+			TLSCert:        cfg.SPCTLSCert,
+			TLSKey:         cfg.SPCTLSKey,
+			DB:             noteDB,
+			JWTSecret:      cfg.SPCJWTSecret,
+			DeviceAccount:  cfg.SPCDeviceAccount,
+			DevicePassword: cfg.SPCDevicePassword,
+			TaskStore:      store,
+			CollectionName: cfg.CalDAVCollectionName,
+			Logger:         logger,
+		})
+		taskNotifier = notify.NewSocketNotifier(
+			spcSrv.SocketRegistry(),
+			func(ctx context.Context) (string, error) {
+				return notedb.GetSetting(ctx, noteDB, spcauth.UserIDSettingKey)
+			},
+			logger,
+		)
+	}
+
+	backend := ubcaldav.NewBackend(store, "/caldav", cfg.CalDAVCollectionName, cfg.DueTimeMode, taskNotifier)
 	caldavHandler := &gocaldav.Handler{
 		Backend: backend,
 		Prefix:  "/caldav",
@@ -554,7 +587,7 @@ func main() {
 	{
 		// Create Services
 		// 1. Task Service
-		taskSvc := service.NewTaskService(store, notifier)
+		taskSvc := service.NewTaskService(store, taskNotifier)
 
 		// 2. Note Service
 		// We need to identify Supernote and Boox components from sources
@@ -647,23 +680,9 @@ func main() {
 	logHandler := logging.RequestID(logger)(mux)
 	handler := web.SetupMiddleware(noteDB, logHandler)
 
-	// Optionally spawn the device-facing SPC server (UB-as-SPC refactor). In
-	// the default "client" mode nothing is started, so UB behaves exactly as
-	// before. Only "server" mode binds the SPC listener.
-	if cfg.SPCMode == "server" {
-		spcSrv := spcserver.New(spcserver.Config{
-			Mode:           cfg.SPCMode,
-			ListenAddr:     cfg.SPCListenAddr,
-			TLSCert:        cfg.SPCTLSCert,
-			TLSKey:         cfg.SPCTLSKey,
-			DB:             noteDB,
-			JWTSecret:      cfg.SPCJWTSecret,
-			DeviceAccount:  cfg.SPCDeviceAccount,
-			DevicePassword: cfg.SPCDevicePassword,
-			TaskStore:      store,
-			CollectionName: cfg.CalDAVCollectionName,
-			Logger:         logger,
-		})
+	// Launch the device-facing SPC listener (constructed above in server mode).
+	// In client mode spcSrv is nil and nothing starts — UB behaves as before.
+	if spcSrv != nil {
 		go func() {
 			logger.Info("spc server starting", "addr", cfg.SPCListenAddr, "tls", cfg.SPCTLSCert != "")
 			if err := spcSrv.Run(); err != nil {
