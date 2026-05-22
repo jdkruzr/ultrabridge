@@ -11,6 +11,8 @@ import (
 	"net/http"
 
 	"github.com/sysop/ultrabridge/internal/spcserver/auth"
+	"github.com/sysop/ultrabridge/internal/spcserver/dedup"
+	"github.com/sysop/ultrabridge/internal/spcserver/groups"
 	"github.com/sysop/ultrabridge/internal/spcserver/handlers"
 	"github.com/sysop/ultrabridge/internal/spcserver/login"
 	"github.com/sysop/ultrabridge/internal/spcserver/socketio"
@@ -32,6 +34,11 @@ type Config struct {
 	// DeviceAccount "" accepts any account. DevicePassword is the raw password.
 	DeviceAccount  string
 	DevicePassword string
+	// TaskStore is the CalDAV task store the schedule handlers map to/from.
+	TaskStore handlers.TaskStore
+	// CollectionName titles the single synthesized task group (the CalDAV
+	// collection name).
+	CollectionName string
 	Logger         *slog.Logger
 }
 
@@ -87,8 +94,36 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/file/query/server", lh.FileQueryServer)
 
 	// Protected probe — requires a valid x-access-token (1b).
-	s.mux.Handle("POST /api/user/query",
-		auth.Middleware(s.cfg.JWTSecret, store, http.HandlerFunc(handlers.UserQuery)))
+	protect := func(fn http.HandlerFunc) http.Handler {
+		return auth.Middleware(s.cfg.JWTSecret, store, fn)
+	}
+	s.mux.Handle("POST /api/user/query", protect(handlers.UserQuery))
+
+	// Schedule: groups, tasks, sort, summary stubs (1d) — all JWT-protected.
+	sched := &handlers.ScheduleHandler{
+		Store:  s.cfg.TaskStore,
+		Groups: groups.NewSingle(s.cfg.CollectionName),
+		Dedup:  dedup.NewChecker(),
+	}
+	s.mux.Handle("POST /api/file/schedule/group/all", protect(sched.GroupAll))
+	s.mux.Handle("POST /api/file/schedule/group", protect(sched.GroupNoOp))
+	s.mux.Handle("PUT /api/file/schedule/group", protect(sched.GroupNoOp))
+	s.mux.Handle("DELETE /api/file/schedule/group/{taskListId}", protect(sched.GroupNoOp))
+	s.mux.Handle("POST /api/file/schedule/group/clear", protect(sched.GroupNoOp))
+	s.mux.Handle("GET /api/file/schedule/group/{taskListId}", protect(sched.GroupNoOp))
+	s.mux.Handle("POST /api/file/schedule/task/all", protect(sched.TaskAll))
+	s.mux.Handle("POST /api/file/schedule/task", protect(sched.TaskCreate))
+	s.mux.Handle("PUT /api/file/schedule/task", protect(sched.TaskUpdate))
+	s.mux.Handle("PUT /api/file/schedule/task/list", protect(sched.TaskListUpdate))
+	s.mux.Handle("DELETE /api/file/schedule/task/{taskId}", protect(sched.TaskDelete))
+	s.mux.Handle("GET /api/file/schedule/task/{taskId}", protect(sched.TaskGet))
+	s.mux.Handle("POST /api/file/schedule/sort", protect(sched.SortNoOp))
+	s.mux.Handle("PUT /api/file/schedule/sort", protect(sched.SortNoOp))
+	s.mux.Handle("DELETE /api/file/schedule/sort/{taskListId}", protect(sched.SortNoOp))
+	s.mux.Handle("POST /api/file/query/schedule/sort", protect(sched.QuerySort))
+	s.mux.Handle("POST /api/file/query/summary/hash", protect(sched.SummaryStub))
+	s.mux.Handle("POST /api/file/query/summary/group", protect(sched.SummaryStub))
+	s.mux.Handle("POST /api/file/query/summary/id", protect(sched.SummaryStub))
 
 	// Engine.IO v3 websocket on the same listener (1c). The device connects to
 	// /socket.io/ directly over websocket; demux is by path.

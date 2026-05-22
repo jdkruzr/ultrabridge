@@ -660,6 +660,8 @@ func main() {
 			JWTSecret:      cfg.SPCJWTSecret,
 			DeviceAccount:  cfg.SPCDeviceAccount,
 			DevicePassword: cfg.SPCDevicePassword,
+			TaskStore:      store,
+			CollectionName: cfg.CalDAVCollectionName,
 			Logger:         logger,
 		})
 		go func() {
