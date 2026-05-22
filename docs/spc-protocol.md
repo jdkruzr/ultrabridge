@@ -381,3 +381,10 @@ Captured via a Go tap proxy (`/home/sysop/spc-rev/tap/`) and a JWT stub (`/home/
 - **Path normalization:** device emits non-normalized paths with double slashes (`Personal//IMG_…`). UB must tolerate.
 
 **Phase 0 risk table — all closed:** R1 (OSS, validated), R2 (JWT accepted), R3 (LE cert, no pinning), R4 (EIO v3), R5 (E0330 + error enums), R6 (path encoding observed).
+
+### 1b device-login test (2026-05-22, against UB server mode)
+
+Real device flipped to UB (NPM `13.conf` `$port` 19072→8089) logged in and made authenticated calls. Wire facts confirmed:
+- **Real-SPC tokens verify under `Constant.SECRET`.** Reproduced the device's own token's HMAC-SHA256 signature exactly with `Constant.SECRET` — so real device tokens (not just UB-minted ones) verify under the same secret. The token shape is `{createTime, equipmentNo, userId, key:"<userId>_<createTime>_<ms>_<equipmentNo>"}` with **no `exp`** (terminal tokens are non-expiring) — UB's `Verify` must not require `exp`.
+- **Login flow observed:** `check/exists/server → query/random/code → account/login/equipment → terminal/user/bindEquipment`, all 200; then `/api/user/query` with the new token. (Note: UB writes error envelopes as HTTP 200 + `success:false`, so NPM access-log status alone does not indicate auth pass/fail.)
+- **Engine.IO (1c preview):** post-login the device repeats `GET /socket.io/?sign=…&random=…&EIO=3&transport=websocket&type=<equipmentNo>&token=<JWT>` every ~5 s (404 until 1c) and converges on the new UB userId for both REST and socket — no userId split-brain.
