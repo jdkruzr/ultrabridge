@@ -1,4 +1,9 @@
-package spcserver
+// Package envelope holds the SPC response envelope (BaseVO) and JSON write
+// helpers. It is a leaf package: handlers, auth middleware, and the server all
+// import it, and it imports nothing from internal/spcserver — this breaks the
+// import cycle that would otherwise form between the spcserver package (which
+// wires the subpackages) and those subpackages (which need the envelope).
+package envelope
 
 import (
 	"encoding/json"

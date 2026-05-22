@@ -1,4 +1,4 @@
-package spcserver
+package envelope
 
 import (
 	"encoding/json"
