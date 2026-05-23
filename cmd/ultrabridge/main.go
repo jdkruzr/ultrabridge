@@ -41,6 +41,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/source/supernote"
 	"github.com/sysop/ultrabridge/internal/spcserver"
 	spcauth "github.com/sysop/ultrabridge/internal/spcserver/auth"
+	"github.com/sysop/ultrabridge/internal/spcserver/fileids"
 	"github.com/sysop/ultrabridge/internal/spcserver/notify"
 	"github.com/sysop/ultrabridge/internal/sync"
 	"github.com/sysop/ultrabridge/internal/taskdb"
@@ -431,6 +432,12 @@ func main() {
 		Notify(context.Context) error
 	} = notifier
 	if cfg.SPCMode == "server" {
+		// Phase 2 file listing: migrate the path↔id table (gated to server mode,
+		// like mcpauth.Migrate). Best-effort — a failure disables file listing
+		// but must not stop the server (task sync still works).
+		if err := fileids.Migrate(context.Background(), noteDB); err != nil {
+			logger.Error("spc fileids migration failed; file listing disabled", "err", err)
+		}
 		spcSrv = spcserver.New(spcserver.Config{
 			Mode:           cfg.SPCMode,
 			ListenAddr:     cfg.SPCListenAddr,
@@ -442,6 +449,8 @@ func main() {
 			DevicePassword: cfg.SPCDevicePassword,
 			TaskStore:      store,
 			CollectionName: cfg.CalDAVCollectionName,
+			FileRoot:       cfg.SPCFileRoot,
+			QuotaBytes:     cfg.SPCQuotaBytes,
 			Logger:         logger,
 		})
 		taskNotifier = notify.NewSocketNotifier(

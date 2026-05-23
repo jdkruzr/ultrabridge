@@ -11,7 +11,9 @@ import (
 	"net/http"
 
 	"github.com/sysop/ultrabridge/internal/spcserver/auth"
+	"github.com/sysop/ultrabridge/internal/spcserver/capacity"
 	"github.com/sysop/ultrabridge/internal/spcserver/dedup"
+	"github.com/sysop/ultrabridge/internal/spcserver/fileids"
 	"github.com/sysop/ultrabridge/internal/spcserver/groups"
 	"github.com/sysop/ultrabridge/internal/spcserver/handlers"
 	"github.com/sysop/ultrabridge/internal/spcserver/login"
@@ -39,7 +41,11 @@ type Config struct {
 	// CollectionName titles the single synthesized task group (the CalDAV
 	// collection name).
 	CollectionName string
-	Logger         *slog.Logger
+	// FileRoot is the dedicated storage root the device browses (Phase 2). Empty
+	// disables file listing. QuotaBytes is the fake total capacity reported.
+	FileRoot   string
+	QuotaBytes int64
+	Logger     *slog.Logger
 }
 
 // Server is the SPC HTTP + Engine.IO server, both served on one listener. It is
@@ -124,6 +130,26 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("POST /api/file/query/summary/hash", protect(sched.SummaryStub))
 	s.mux.Handle("POST /api/file/query/summary/group", protect(sched.SummaryStub))
 	s.mux.Handle("POST /api/file/query/summary/id", protect(sched.SummaryStub))
+
+	// File listing + capacity (Phase 2) — read path, all JWT-protected. Reads the
+	// filesystem under FileRoot directly; the registry/meter are constructed once
+	// here. An empty FileRoot leaves the handlers inert (empty/zero responses).
+	files := &handlers.FileHandler{
+		Root:   s.cfg.FileRoot,
+		Reg:    fileids.New(s.cfg.DB, s.cfg.FileRoot),
+		Meter:  capacity.New(s.cfg.FileRoot, s.cfg.QuotaBytes),
+		Logger: s.cfg.Logger,
+	}
+	s.mux.Handle("POST /api/file/2/files/synchronous/start", protect(files.SynchronousStart))
+	s.mux.Handle("POST /api/file/2/files/synchronous/end", protect(files.SynchronousEnd))
+	s.mux.Handle("POST /api/file/2/files/list_folder", protect(files.ListFolder))
+	s.mux.Handle("POST /api/file/3/files/list_folder_v3", protect(files.ListFolderV3))
+	s.mux.Handle("POST /api/file/3/files/query_v3", protect(files.QueryByID))
+	s.mux.Handle("POST /api/file/3/files/query/by/path_v3", protect(files.QueryByPath))
+	s.mux.Handle("POST /api/file/capacity/query", protect(files.CapacityQuery))
+	s.mux.Handle("POST /api/file/2/users/get_space_usage", protect(files.GetSpaceUsage))
+	s.mux.Handle("POST /api/file/2/files/create_folder_v2", protect(files.CreateFolderV2))
+	s.mux.Handle("POST /api/file/2/files/query/deleteApi", protect(files.QueryByIDDeleteAPI))
 
 	// Engine.IO v3 websocket on the same listener (1c). The device connects to
 	// /socket.io/ directly over websocket; demux is by path.
