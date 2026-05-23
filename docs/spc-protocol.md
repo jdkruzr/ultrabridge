@@ -321,6 +321,7 @@ Match these verbatim — do not "fix" them:
 | `content_hash` (snake_case) | `FileUploadFinishLocalDTO` | The only snake_case field observed |
 | `lastModify` (no trailing 'd') | `ScheduleSortDTO` | All other timestamps use `lastModified` |
 | Task IDs | `String` in requests, `Long` in responses | Don't unify |
+| **File IDs** | **`String` in requests** (`download_v3`/`query_v3` send `"id":"16"`), `Long`/`String` in responses | Decompiled DTO says `Long`, but the device sends a **quoted string**. Jackson coerces it server-side; Go's `encoding/json` rejects string→int64, so type the DTO field `string` and `ParseInt` in the handler. **Confirmed from device traffic 2026-05-23** — typing it `*int64` made `download_v3` silently return `E0321` for every real request. |
 | `token` | `LoginVO` | JWT field name |
 
 ## 9. Storage paths and timing constants (SPC-side, FYI)
