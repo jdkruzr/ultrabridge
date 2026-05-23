@@ -167,13 +167,15 @@ type FileQueryV2VO struct {
 }
 
 // FileDownloadLocalDTO is the download_v3 request
-// (com/ratta/file/dto/FileDownloadLocalDTO.java: equipmentNo, id Long @NotNull).
-// id is the numeric file id from the fileids registry (the device addresses
-// files by the Long id it received in list_folder/query_v3). A pointer so an
-// absent/null id is distinguishable from 0.
+// (com/ratta/file/dto/FileDownloadLocalDTO.java declares id as Long, but the
+// device sends it as a QUOTED STRING — the SPC String-in/Long-out gotcha (§8),
+// confirmed from device traffic 2026-05-23: {"equipmentNo":...,"id":"16"}.
+// Jackson coerces the quoted value to Long server-side; Go's encoding/json will
+// not unmarshal a string into int64, so id MUST be typed string here and parsed
+// in the handler — same as FileQueryLocalDTO.ID for query_v3).
 type FileDownloadLocalDTO struct {
 	EquipmentNo string `json:"equipmentNo"`
-	ID          *int64 `json:"id"`
+	ID          string `json:"id"`
 }
 
 // FileDownloadLocalVO is the download_v3 response

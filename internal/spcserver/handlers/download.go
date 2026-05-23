@@ -68,13 +68,15 @@ func (h *DownloadHandler) DownloadV3(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if req.ID == nil || h.Root == "" {
+	// The device sends id as a quoted string (§8 String-in/Long-out); parse it.
+	id, perr := strconv.ParseInt(req.ID, 10, 64)
+	if perr != nil || h.Root == "" {
 		notFound()
 		return
 	}
-	abs, found, err := h.Reg.PathFor(r.Context(), *req.ID)
+	abs, found, err := h.Reg.PathFor(r.Context(), id)
 	if err != nil {
-		h.log().Error("download_v3 PathFor", "id", *req.ID, "err", err)
+		h.log().Error("download_v3 PathFor", "id", id, "err", err)
 		notFound()
 		return
 	}

@@ -67,7 +67,7 @@ func TestDownloadV3Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := decodeMap(t, h.DownloadV3, `{"equipmentNo":"SN078","id":`+strconv.FormatInt(id, 10)+`}`)
+	out := decodeMap(t, h.DownloadV3, `{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`"}`)
 
 	if out["success"] != true {
 		t.Fatalf("success = %v; want true (body=%v)", out["success"], out)
@@ -113,10 +113,37 @@ func TestDownloadV3Success(t *testing.T) {
 	}
 }
 
+// TestDownloadV3StringID reproduces the device's exact wire format: it sends
+// id as a QUOTED STRING ("16"), not a JSON number — the SPC String-in/Long-out
+// gotcha (§8), captured from real device traffic 2026-05-23. The DTO must decode
+// a string id or download_v3 silently returns E0321 for every real request.
+// Covers: spc-phase-3.AC2.1
+func TestDownloadV3StringID(t *testing.T) {
+	root := t.TempDir()
+	abs := filepath.Join(root, "foo.note")
+	if err := os.WriteFile(abs, []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, reg := newDownloadHandler(t, root)
+	id, err := reg.IDFor(context.Background(), abs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// id as a quoted string, exactly as the device sends it.
+	body := `{"equipmentNo":"SN078C10034074","id":"` + strconv.FormatInt(id, 10) + `"}`
+	out := decodeMap(t, h.DownloadV3, body)
+	if out["success"] != true {
+		t.Fatalf("string id %q: success=%v errorCode=%v; want success (body=%v)", body, out["success"], out["errorCode"], out)
+	}
+	if out["name"] != "foo.note" {
+		t.Errorf("name = %v; want foo.note", out["name"])
+	}
+}
+
 // Covers: spc-phase-3.AC2.2
 func TestDownloadV3UnknownID(t *testing.T) {
 	h, _ := newDownloadHandler(t, t.TempDir())
-	out := decodeMap(t, h.DownloadV3, `{"equipmentNo":"SN078","id":99999}`)
+	out := decodeMap(t, h.DownloadV3, `{"equipmentNo":"SN078","id":"99999"}`)
 	if out["success"] != false {
 		t.Errorf("success = %v; want false for unknown id", out["success"])
 	}
@@ -140,7 +167,7 @@ func TestDownloadV3DeletedFile(t *testing.T) {
 	if err := os.Remove(abs); err != nil {
 		t.Fatal(err)
 	}
-	out := decodeMap(t, h.DownloadV3, `{"equipmentNo":"SN078","id":`+strconv.FormatInt(id, 10)+`}`)
+	out := decodeMap(t, h.DownloadV3, `{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`"}`)
 	if out["success"] != false || out["errorCode"] != "E0321" {
 		t.Errorf("deleted file: success=%v errorCode=%v; want false/E0321", out["success"], out["errorCode"])
 	}
