@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/sysop/ultrabridge/internal/notedb"
 	"github.com/sysop/ultrabridge/internal/spcserver/fileids"
@@ -186,5 +187,148 @@ func TestGenerateDownloadURL(t *testing.T) {
 	}
 	if out["signature"] != q.Get("signature") {
 		t.Errorf("VO signature %v != url signature %v", out["signature"], q.Get("signature"))
+	}
+}
+
+// signedParams builds valid /api/oss/download query params for a path_display,
+// signed with testOssSecret at the given timestamp.
+func signedParams(pathDisplay string, ts int64) url.Values {
+	enc := oss.EncryptPath(pathDisplay)
+	nonce := "11111111-1111-4111-8111-111111111111"
+	sig := (&oss.Signer{Secret: testOssSecret}).DownloadSignature(enc, ts, nonce)
+	q := url.Values{}
+	q.Set("path", enc)
+	q.Set("signature", sig)
+	q.Set("timestamp", strconv.FormatInt(ts, 10))
+	q.Set("nonce", nonce)
+	q.Set("pathId", "1")
+	return q
+}
+
+func getDownload(t *testing.T, h *DownloadHandler, q url.Values, rangeHeader string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/oss/download?"+q.Encode(), nil)
+	if rangeHeader != "" {
+		req.Header.Set("Range", rangeHeader)
+	}
+	rec := httptest.NewRecorder()
+	h.DownloadStream(rec, req)
+	return rec
+}
+
+// Covers: spc-phase-3.AC3.1
+func TestDownloadStreamRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Note"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("the quick brown fox jumps over the lazy dog")
+	if err := os.WriteFile(filepath.Join(root, "Note", "foo.note"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := newDownloadHandler(t, root)
+
+	rec := getDownload(t, h, signedParams("/Note/foo.note", time.Now().UnixMilli()), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200 (body=%q)", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != string(content) {
+		t.Errorf("body mismatch")
+	}
+	if md5Hex(t, rec.Body.Bytes()) != md5Hex(t, content) {
+		t.Errorf("round-trip md5 mismatch")
+	}
+}
+
+// Covers: spc-phase-3.AC3.4 (double-slash tolerance)
+func TestDownloadStreamDoubleSlash(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Note"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("dbl")
+	if err := os.WriteFile(filepath.Join(root, "Note", "x.jpg"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := newDownloadHandler(t, root)
+	rec := getDownload(t, h, signedParams("/Note//x.jpg", time.Now().UnixMilli()), "")
+	if rec.Code != http.StatusOK || rec.Body.String() != "dbl" {
+		t.Errorf("double-slash path: status=%d body=%q; want 200/dbl", rec.Code, rec.Body.String())
+	}
+}
+
+// Covers: spc-phase-3.AC3.2
+func TestDownloadStreamRange(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("0123456789abcdef")
+	if err := os.WriteFile(filepath.Join(root, "f.bin"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := newDownloadHandler(t, root)
+	rec := getDownload(t, h, signedParams("/f.bin", time.Now().UnixMilli()), "bytes=0-3")
+	if rec.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d; want 206", rec.Code)
+	}
+	if rec.Body.String() != "0123" {
+		t.Errorf("range body = %q; want 0123", rec.Body.String())
+	}
+	if rec.Header().Get("Content-Range") == "" {
+		t.Errorf("missing Content-Range header")
+	}
+}
+
+// Covers: spc-phase-3.AC3.3 (tampered signature)
+func TestDownloadStreamBadSignature(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("secret-bytes")
+	if err := os.WriteFile(filepath.Join(root, "f.bin"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := newDownloadHandler(t, root)
+	q := signedParams("/f.bin", time.Now().UnixMilli())
+	q.Set("signature", q.Get("signature")[:60]+"deadbeef") // tamper
+	rec := getDownload(t, h, q, "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d; want 500", rec.Code)
+	}
+	if rec.Body.String() == string(content) {
+		t.Errorf("file bytes leaked on bad signature")
+	}
+	if rec.Body.String() != "Signature verification failed." {
+		t.Errorf("body = %q; want SPC plain-text 'Signature verification failed.'", rec.Body.String())
+	}
+}
+
+// Covers: spc-phase-3.AC3.3 (expired window)
+func TestDownloadStreamExpired(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "f.bin"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := newDownloadHandler(t, root)
+	old := time.Now().Add(-25 * time.Hour).UnixMilli()
+	rec := getDownload(t, h, signedParams("/f.bin", old), "") // correctly signed but stale
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expired: status = %d; want 500", rec.Code)
+	}
+}
+
+// Covers: spc-phase-3.AC3.4 (traversal refused even with a valid signature)
+func TestDownloadStreamTraversalRefused(t *testing.T) {
+	root := t.TempDir()
+	// A secret file OUTSIDE the root.
+	outside := filepath.Join(filepath.Dir(root), "outside-secret")
+	if err := os.WriteFile(outside, []byte("TOPSECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(outside) })
+	h, _ := newDownloadHandler(t, root)
+	// Validly sign a traversal path; SafeResolve must still refuse it.
+	rec := getDownload(t, h, signedParams("/../outside-secret", time.Now().UnixMilli()), "")
+	if rec.Code == http.StatusOK {
+		t.Fatalf("traversal returned 200 — escaped the root")
+	}
+	if rec.Body.String() == "TOPSECRET" {
+		t.Errorf("traversal leaked file outside root")
 	}
 }

@@ -26,6 +26,16 @@ const (
 	errFileNotExistMsg  = "This file does not exist"
 )
 
+// The /api/oss/download byte-stream errors are NOT JSON envelopes: real SPC's
+// GlobalExceptionHandler maps FileDownloadException to a ResponseEntity<String>
+// with HTTP 500 and the bare message as the body (GlobalExceptionHandler.java:127,
+// O_OssLocalController.java:169). Match that exactly so the device behaves as
+// against real SPC.
+const (
+	msgSignatureFailed = "Signature verification failed."
+	msgDownloadFailed  = "File download failed."
+)
+
 // DownloadHandler serves the SPC download read-path (Phase 3): download_v3 and
 // generate/download/url mint a presigned /api/oss/download URL pointing back at
 // UB; the byte stream itself is served by DownloadStream (Task 5). It reads the
@@ -121,6 +131,63 @@ func (h *DownloadHandler) GenerateDownloadURL(w http.ResponseWriter, r *http.Req
 		Nonce:     nonce,
 		PathID:    pathID,
 	})
+}
+
+// DownloadStream serves the actual file bytes for a presigned URL.
+// GET /api/oss/download (O_OssLocalController.java:169). It is NOT behind the
+// JWT middleware — the query-string signature is its only auth (the device
+// fetches this URL opaquely, with no x-access-token). Range requests are
+// honored (resumable downloads) via http.ServeContent.
+func (h *DownloadHandler) DownloadStream(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	encPath := q.Get("path")
+	sig := q.Get("signature")
+	nonce := q.Get("nonce")
+
+	ts, err := strconv.ParseInt(q.Get("timestamp"), 10, 64)
+	if err != nil || !h.Signer.ValidateDownload(sig, ts, nonce, encPath) {
+		// Bad/expired/tampered signature — refuse before touching the filesystem.
+		downloadError(w, msgSignatureFailed)
+		return
+	}
+
+	decoded, err := oss.DecryptPath(encPath)
+	if err != nil {
+		downloadError(w, msgSignatureFailed)
+		return
+	}
+	abs, err := mapping.SafeResolve(h.Root, decoded)
+	if err != nil {
+		// Validly signed but escapes the root (traversal) — treat as a download
+		// failure; never serve bytes outside FileRoot.
+		h.log().Warn("oss download refused unsafe path", "path", decoded, "err", err)
+		downloadError(w, msgDownloadFailed)
+		return
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		downloadError(w, msgDownloadFailed)
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
+		downloadError(w, msgDownloadFailed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fi.Name()))
+	// ServeContent handles Range/If-Modified-Since/206 and sets Content-Length.
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+}
+
+// downloadError writes the SPC FileDownloadException response: HTTP 500 with the
+// bare message as a plain-text body (no JSON envelope).
+func downloadError(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "text/plain;charset=UTF-8")
+	w.WriteHeader(http.StatusInternalServerError)
+	_, _ = w.Write([]byte(msg))
 }
 
 // signedDownloadURL builds a presigned /api/oss/download URL for a path_display.
