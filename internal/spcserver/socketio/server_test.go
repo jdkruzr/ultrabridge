@@ -80,6 +80,7 @@ func TestPingPong(t *testing.T) {
 	}
 	defer c.Close()
 	readFrame(t, c) // open
+	readFrame(t, c) // proactive 40 connect
 
 	c.WriteMessage(websocket.TextMessage, []byte("2"))
 	if got := readFrame(t, c); got != "3" {
@@ -98,6 +99,7 @@ func TestRattaPing(t *testing.T) {
 	}
 	defer c.Close()
 	readFrame(t, c) // open
+	readFrame(t, c) // proactive 40 connect
 
 	c.WriteMessage(websocket.TextMessage, []byte(`42["ratta_ping"]`))
 	if got := readFrame(t, c); got != `42["ratta_ping","Received"]` {
@@ -131,6 +133,7 @@ func TestEmitReachesClient(t *testing.T) {
 	}
 	defer c.Close()
 	readFrame(t, c) // open
+	readFrame(t, c) // proactive 40 connect
 
 	// Wait until the handler has registered the conn, then emit.
 	deadline := time.Now().Add(2 * time.Second)
