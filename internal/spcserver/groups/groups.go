@@ -11,8 +11,12 @@ import (
 	"github.com/sysop/ultrabridge/internal/spcserver/dto"
 )
 
-// DefaultID is the stable taskListId of the single synthesized group.
-const DefaultID = "default"
+// DefaultID is the stable taskListId of the single synthesized group. It MUST
+// be a numeric (Long-parseable) string: the device parses taskListId as a Long
+// (real SPC uses snowflake ids), so a non-numeric value like "default" throws
+// NumberFormatException on the device and aborts task/data sync (observed
+// 2026-05-23). "1" is the smallest stable valid value.
+const DefaultID = "1"
 
 // GroupProvider supplies the device-visible task groups.
 type GroupProvider interface {

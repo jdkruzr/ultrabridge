@@ -45,7 +45,9 @@ type ScheduleTaskDTO struct {
 // ScheduleTaskAllVO is the /schedule/task/all response (ScheduleTaskAllVO.java).
 type ScheduleTaskAllVO struct {
 	envelope.BaseVO
-	NextPageToken string    `json:"nextPageToken"`
+	// NextPageToken is omitted when empty so the device sees "no more pages"
+	// (null) rather than an empty-string cursor it may loop on.
+	NextPageToken string    `json:"nextPageToken,omitempty"`
 	NextSyncToken int64     `json:"nextSyncToken"`
 	ScheduleTask  []SPCTask `json:"scheduleTask"`
 }
@@ -63,7 +65,7 @@ type ScheduleTaskGroupDO struct {
 // (ScheduleTaskGroupVO.java).
 type ScheduleTaskGroupVO struct {
 	envelope.BaseVO
-	PageToken         string                `json:"pageToken"`
+	PageToken         string                `json:"pageToken,omitempty"`
 	ScheduleTaskGroup []ScheduleTaskGroupDO `json:"scheduleTaskGroup"`
 }
 
