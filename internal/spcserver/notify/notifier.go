@@ -51,8 +51,11 @@ func (n *SocketNotifier) Notify(ctx context.Context) error {
 		return nil // no device has logged in yet
 	}
 	now := time.Now().UnixMilli()
+	// TASK-SYN (SocketIoConstant.MSG_TYPE_TASK) routes the device to its task/
+	// data sync; FILE-SYN routes to file sync (Phase 2). UB's notifier fires on
+	// task writes, so it nudges TASK-SYN.
 	payload := fmt.Sprintf(
-		`{"code":"200","timestamp":%d,"msgType":"FILE-SYN","data":[{"messageType":"STARTSYNC","equipmentNo":"ultrabridge","timestamp":%d}]}`,
+		`{"code":"200","timestamp":%d,"msgType":"TASK-SYN","data":[{"messageType":"STARTSYNC","equipmentNo":"ultrabridge","timestamp":%d}]}`,
 		now, now,
 	)
 	if n.reg.Emit(userID, "ServerMessage", payload) == 0 {

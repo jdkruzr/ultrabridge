@@ -38,7 +38,7 @@ func TestNotifyEmitsStartSync(t *testing.T) {
 		t.Fatalf("emit: calls=%d user=%q event=%q", em.calls, em.userID, em.event)
 	}
 	payload, _ := em.payload.(string)
-	for _, want := range []string{"STARTSYNC", "FILE-SYN", `"code":"200"`} {
+	for _, want := range []string{"STARTSYNC", "TASK-SYN", `"code":"200"`} {
 		if !strings.Contains(payload, want) {
 			t.Errorf("payload missing %q: %s", want, payload)
 		}
