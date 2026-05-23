@@ -438,6 +438,16 @@ func main() {
 		if err := fileids.Migrate(context.Background(), noteDB); err != nil {
 			logger.Error("spc fileids migration failed; file listing disabled", "err", err)
 		}
+		// Phase 3 download: ensure a persistent OSS signing secret exists
+		// (auto-generated on first boot). Best-effort — on failure we fall back
+		// to the (empty) configured value, which still works since UB both signs
+		// and verifies; persistence just keeps issued URLs valid across restart.
+		ossSecret := cfg.SPCOssSecret
+		if s, err := appconfig.EnsureSPCOssSecret(context.Background(), noteDB); err != nil {
+			logger.Error("spc oss secret generation failed", "err", err)
+		} else {
+			ossSecret = s
+		}
 		spcSrv = spcserver.New(spcserver.Config{
 			Mode:           cfg.SPCMode,
 			ListenAddr:     cfg.SPCListenAddr,
@@ -451,6 +461,7 @@ func main() {
 			CollectionName: cfg.CalDAVCollectionName,
 			FileRoot:       cfg.SPCFileRoot,
 			QuotaBytes:     cfg.SPCQuotaBytes,
+			OssSecret:      ossSecret,
 			Logger:         logger,
 		})
 		taskNotifier = notify.NewSocketNotifier(

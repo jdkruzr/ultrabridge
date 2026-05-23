@@ -17,6 +17,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/spcserver/groups"
 	"github.com/sysop/ultrabridge/internal/spcserver/handlers"
 	"github.com/sysop/ultrabridge/internal/spcserver/login"
+	"github.com/sysop/ultrabridge/internal/spcserver/oss"
 	"github.com/sysop/ultrabridge/internal/spcserver/socketio"
 )
 
@@ -45,7 +46,11 @@ type Config struct {
 	// disables file listing. QuotaBytes is the fake total capacity reported.
 	FileRoot   string
 	QuotaBytes int64
-	Logger     *slog.Logger
+	// OssSecret signs/verifies the presigned download URLs UB issues to itself
+	// (Phase 3). Auto-generated and persisted on first boot (see
+	// appconfig.EnsureSPCOssSecret); the device treats these URLs as opaque.
+	OssSecret string
+	Logger    *slog.Logger
 }
 
 // Server is the SPC HTTP + Engine.IO server, both served on one listener. It is
@@ -134,9 +139,10 @@ func (s *Server) registerRoutes() {
 	// File listing + capacity (Phase 2) — read path, all JWT-protected. Reads the
 	// filesystem under FileRoot directly; the registry/meter are constructed once
 	// here. An empty FileRoot leaves the handlers inert (empty/zero responses).
+	reg := fileids.New(s.cfg.DB, s.cfg.FileRoot)
 	files := &handlers.FileHandler{
 		Root:   s.cfg.FileRoot,
-		Reg:    fileids.New(s.cfg.DB, s.cfg.FileRoot),
+		Reg:    reg,
 		Meter:  capacity.New(s.cfg.FileRoot, s.cfg.QuotaBytes),
 		Logger: s.cfg.Logger,
 	}
@@ -150,6 +156,20 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("POST /api/file/2/users/get_space_usage", protect(files.GetSpaceUsage))
 	s.mux.Handle("POST /api/file/2/files/create_folder_v2", protect(files.CreateFolderV2))
 	s.mux.Handle("POST /api/file/2/files/query/deleteApi", protect(files.QueryByIDDeleteAPI))
+
+	// File download (Phase 3) — read path, byte transfer. download_v3 and
+	// generate/download/url mint presigned URLs (JWT-protected business calls);
+	// GET /api/oss/download streams the bytes and is authenticated by the
+	// query-string signature alone (NOT JWT — the device fetches it opaquely).
+	dl := &handlers.DownloadHandler{
+		Root:   s.cfg.FileRoot,
+		Reg:    reg,
+		Signer: &oss.Signer{Secret: s.cfg.OssSecret},
+		Logger: s.cfg.Logger,
+	}
+	s.mux.Handle("POST /api/file/3/files/download_v3", protect(dl.DownloadV3))
+	s.mux.Handle("POST /api/oss/generate/download/url", protect(dl.GenerateDownloadURL))
+	s.mux.HandleFunc("GET /api/oss/download", dl.DownloadStream)
 
 	// Engine.IO v3 websocket on the same listener (1c). The device connects to
 	// /socket.io/ directly over websocket; demux is by path.

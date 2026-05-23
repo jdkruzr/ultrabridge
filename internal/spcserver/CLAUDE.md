@@ -4,7 +4,7 @@ Last verified: 2026-05-23
 
 Device-facing reimplementation of the Supernote Private Cloud (SPC) protocol so an unmodified Supernote device talks to UltraBridge as if it were the real SPC server.
 
-**Status:** Phase 1 complete and validated on real hardware (Supernote Nomad SN078C10034074, 2026-05-23) — auth/login, the Engine.IO socket, and bidirectional task sync (incl. instant web→device push) all work. Phase 2 (file listing + capacity, **read path**) is complete and validated on real hardware (2026-05-23): the device browsed its native six-folder tree, walked it via `query_v3`, showed a sane capacity meter, and saw no Boox content; it then `download_v3`'d → 404 ("Private Cloud Sync Failed"), the exact read/download boundary. OSS download/upload/recycle/search are Phases 3–5 (not built). Gated by `UB_SPC_MODE` (default `client` = no listener; `server` = bind `:8089`).
+**Status:** Phase 1 complete and validated on real hardware (Supernote Nomad SN078C10034074, 2026-05-23) — auth/login, the Engine.IO socket, and bidirectional task sync (incl. instant web→device push) all work. Phase 2 (file listing + capacity, **read path**) is complete and hardware-validated (2026-05-23): the device browsed its native six-folder tree, walked it via `query_v3`, showed a sane capacity meter, and saw no Boox content. Phase 3 (file **download**) is code-complete and unit/wiring-tested (hardware acceptance pending): `download_v3`/`generate/download/url` mint presigned URLs and `GET /api/oss/download` streams the bytes (Range-aware) — this closes the Phase 2 `download_v3`→404 boundary. Upload/recycle/search are Phases 4–5 (not built). Gated by `UB_SPC_MODE` (default `client` = no listener; `server` = bind `:8089`).
 
 ## Layout
 
@@ -19,7 +19,8 @@ Device-facing reimplementation of the Supernote Private Cloud (SPC) protocol so 
 - `dedup/` — ResubmitCheck (1s TTL). `notify/` — STARTSYNC notifier over the socket registry.
 - `fileids/` — leaf package owning the `spc_file_ids` table (path↔id Long registry + lazy MD5 cache); migrated package-locally in server mode (à la `mcpauth.Migrate`), **not** by `notedb.Open`.
 - `capacity/` — leaf package: du-style usage Meter with a 60s cache. **Its own package (not `capacity.go` at the root) to avoid the handlers↔spcserver import cycle** — same reason as `envelope/`.
-- `handlers/` — equipment, login/challenge/boot, schedule (group/task/sort), summary stubs, and `files.go` (Phase 2 read path: sync-session, list_folder/_v3, query_v3/by-path_v3, capacity/query, get_space_usage, create_folder/deleteApi stubs).
+- `oss/` — leaf package: presigned-URL signing primitive (`EncryptPath`/`DecryptPath` = base64url-no-pad; `Signer` = plain SHA-256 with the secret concatenated, **not** HMAC, per `SignVerifier.java`; 24h download / 30min upload windows). Golden-master-tested against §6's real-SPC vectors. Reused by Phase 4 upload.
+- `handlers/` — equipment, login/challenge/boot, schedule (group/task/sort), summary stubs, `files.go` (Phase 2 read path: sync-session, list_folder/_v3, query_v3/by-path_v3, capacity/query, get_space_usage, create_folder/deleteApi stubs), and `download.go` (Phase 3: download_v3 + generate/download/url mint presigned URLs; DownloadStream serves bytes with Range support).
 
 This package does **not** own storage (tasks → `taskdb`; files/notes → notestore) or human UI (`internal/web`).
 
@@ -32,6 +33,7 @@ This package does **not** own storage (tasks → `taskdb`; files/notes → notes
 - **File listing reads a dedicated `UB_SPC_FILE_ROOT`, not the OCR `NotesPath`.** The device browses the Supernote storage root (its native `Note/Document/EXPORT/SCREENSHOT/INBOX/MyStyle` layout) directly off the filesystem — `notestore` is not used (it knows only the `Note` subtree and stores SHA-256, while the device wants MD5). Empty `FileRoot` ⇒ listing inert.
 - **The device sees only the Supernote source.** The Boox source and its WebDAV tree are invisible to the device — never listed, never merged. This is deliberate ("look exactly like real SPC to the device").
 - **`content_hash`/`md5` is MD5**, computed lazily and cached in `spc_file_ids` keyed on (size, mtime). **Folder & file ids are persisted Longs** (the device addresses folders by parent id in `list_folder` and by id in `query_v3`); a null/0 id means the root. Page/listing reads never mutate the filesystem in Phase 2 (`create_folder`/`deleteApi` are canned-success stubs).
+- **Download is a self-issued presigned URL.** `download_v3` returns a `/api/oss/download` URL pointing back at UB; the device fetches it opaquely. UB signs *and* verifies, so the secret (`UB_SPC_OSS_SECRET`, auto-generated first boot) need not match real SPC's hardcoded one — the device never computes a signature. **`GET /api/oss/download` is NOT behind the JWT middleware** (the signature is its only auth); `download_v3`/`generate/download/url` are. The URL encodes the **`path_display`** (root-relative), and the GET handler `SafeResolve`s the decoded path under `FileRoot` (defense-in-depth beyond the signature). A bad/expired signature returns **HTTP 500 + bare plain-text** (`FileDownloadException` → `GlobalExceptionHandler.java:127`), not a JSON envelope.
 
 ## Socket.IO gotchas (hard-won on hardware 2026-05-23 — see memory `project_spc_socketio_breakthrough`)
 

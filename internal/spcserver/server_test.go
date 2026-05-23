@@ -3,6 +3,7 @@ package spcserver
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -42,5 +43,38 @@ func TestSocketIOMountedSameListener(t *testing.T) {
 func TestSocketRegistryExposed(t *testing.T) {
 	if newTestServer().SocketRegistry() == nil {
 		t.Errorf("SocketRegistry() returned nil")
+	}
+}
+
+// TestDownloadAuthBoundary verifies the Phase 3 routing intent (spc-phase-3.AC3.5):
+// download_v3 is behind JWT, but GET /api/oss/download is NOT — the query-string
+// signature is its only auth, since the device fetches it opaquely with no token.
+// The JWT gate (auth.Middleware) signals failure with the SPC E0712 "not logged
+// in" envelope (HTTP 200 body), not an HTTP status, so we distinguish on the body.
+func TestDownloadAuthBoundary(t *testing.T) {
+	srv := newTestServer()
+
+	// download_v3 with no token → E0712 envelope (JWT-protected; handler never runs).
+	v3 := httptest.NewRequest(http.MethodPost, "/api/file/3/files/download_v3", nil)
+	v3rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(v3rec, v3)
+	if !strings.Contains(v3rec.Body.String(), "E0712") {
+		t.Errorf("download_v3 without token: body %q lacks E0712 (must be JWT-protected)", v3rec.Body.String())
+	}
+
+	// GET /api/oss/download with no token must reach the handler: not 404, and
+	// NOT the E0712 envelope. With an invalid signature it returns the SPC 500
+	// plain-text failure — proving it bypasses the JWT gate.
+	dl := httptest.NewRequest(http.MethodGet, "/api/oss/download?path=x&signature=y&timestamp=0&nonce=n", nil)
+	dlrec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(dlrec, dl)
+	if dlrec.Code == http.StatusNotFound {
+		t.Fatalf("GET /api/oss/download not mounted (404)")
+	}
+	if strings.Contains(dlrec.Body.String(), "E0712") {
+		t.Errorf("GET /api/oss/download is behind the JWT gate (got E0712); it must be signature-only")
+	}
+	if dlrec.Code != http.StatusInternalServerError {
+		t.Errorf("GET /api/oss/download with bad signature: got %d, want 500", dlrec.Code)
 	}
 }
