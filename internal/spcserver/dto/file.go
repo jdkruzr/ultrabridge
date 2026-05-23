@@ -45,3 +45,117 @@ type AllocationVO struct {
 	Tag       string `json:"tag"`
 	Allocated int64  `json:"allocated"`
 }
+
+// ListFolderLocalDTO is the list_folder request (ListFolderLocalDTO.java:
+// equipmentNo, id Long, recursive). id is a pointer so a null/absent id (the
+// device's way of asking for the root) is distinguishable from id 0.
+// list_folder_v3 (ListFolderV3DTO) has the identical shape and decodes into this.
+type ListFolderLocalDTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+	ID          *int64 `json:"id"`
+	Recursive   bool   `json:"recursive"`
+}
+
+// ListFolderLocalVO is the list_folder response (ListFolderLocalVO.java extends
+// BaseVO: equipmentNo, entries).
+type ListFolderLocalVO struct {
+	envelope.BaseVO
+	EquipmentNo string      `json:"equipmentNo"`
+	Entries     []EntriesVO `json:"entries"`
+}
+
+// FileQueryLocalDTO is the query_v3 request (FileQueryLocalDTO.java: equipmentNo,
+// id String).
+type FileQueryLocalDTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+	ID          string `json:"id"`
+}
+
+// FileQueryLocalVO is the query_v3 response (FileQueryLocalVO.java extends
+// BaseVO: equipmentNo, entriesVO). EntriesVO is a pointer so a missing file
+// serializes as null (the device probes existence via query_v3).
+type FileQueryLocalVO struct {
+	envelope.BaseVO
+	EquipmentNo string     `json:"equipmentNo"`
+	EntriesVO   *EntriesVO `json:"entriesVO"`
+}
+
+// FileQueryByPathLocalDTO is the query/by/path_v3 request
+// (FileQueryByPathLocalDTO.java: equipmentNo, path String — may be non-normalized).
+type FileQueryByPathLocalDTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+	Path        string `json:"path"`
+}
+
+// FileQueryByPathLocalVO is the query/by/path_v3 response
+// (FileQueryByPathLocalVO.java extends BaseVO: equipmentNo, entriesVO).
+type FileQueryByPathLocalVO struct {
+	envelope.BaseVO
+	EquipmentNo string     `json:"equipmentNo"`
+	EntriesVO   *EntriesVO `json:"entriesVO"`
+}
+
+// SynchronousStartLocalDTO / VO bracket a sync session (SynchronousStartLocalDTO
+// .java: equipmentNo; SynchronousStartLocalVO.java extends BaseVO: equipmentNo,
+// synType Boolean). synType's exact semantics (full vs incremental signal) are
+// confirmed against the device in 2d.
+type SynchronousStartLocalDTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+}
+
+type SynchronousStartLocalVO struct {
+	envelope.BaseVO
+	EquipmentNo string `json:"equipmentNo"`
+	SynType     bool   `json:"synType"`
+}
+
+// SynchronousEndLocalDTO / VO close a sync session (SynchronousEndLocalDTO.java:
+// equipmentNo, flag; SynchronousEndLocalVO.java extends BaseVO: equipmentNo).
+type SynchronousEndLocalDTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+	Flag        string `json:"flag"`
+}
+
+type SynchronousEndLocalVO struct {
+	envelope.BaseVO
+	EquipmentNo string `json:"equipmentNo"`
+}
+
+// CreateFolderLocalDTO / VO back create_folder_v2 (CreateFolderLocalDTO.java:
+// equipmentNo, path, autorename; CreateFolderLocalVO.java extends BaseVO:
+// equipmentNo, metadata). Phase 2 stubs this to success without writing, so
+// metadata is omitted.
+type CreateFolderLocalDTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+	Path        string `json:"path"`
+	Autorename  bool   `json:"autorename"`
+}
+
+type CreateFolderLocalVO struct {
+	envelope.BaseVO
+	EquipmentNo string      `json:"equipmentNo"`
+	Metadata    *MetadataVO `json:"metadata,omitempty"`
+}
+
+// MetadataVO is the entry descriptor returned inside CreateFolderLocalVO
+// (MetadataVO.java: tag, id, name, path_display) — a subset of EntriesVO.
+type MetadataVO struct {
+	Tag         string `json:"tag"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	PathDisplay string `json:"path_display"`
+}
+
+// FileQueryV2DTO / VO back query/deleteApi, a file-by-id query
+// (FileQueryV2DTO.java: equipmentNo, id String; FileQueryV2VO.java extends
+// BaseVO: equipmentNo, entriesVO). Not hit in 0b; Phase 2 returns success + null.
+type FileQueryV2DTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+	ID          string `json:"id"`
+}
+
+type FileQueryV2VO struct {
+	envelope.BaseVO
+	EquipmentNo string     `json:"equipmentNo"`
+	EntriesVO   *EntriesVO `json:"entriesVO"`
+}
