@@ -199,6 +199,75 @@ func TestListFolderV3SameLogic(t *testing.T) {
 	}
 }
 
+// TestQueryByIDFound: query_v3 with a known id returns the entry.
+func TestQueryByIDFound(t *testing.T) {
+	root := t.TempDir()
+	buildTree(t, root)
+	h := newFileHandler(t, root)
+
+	id, _ := h.Reg.IDFor(context.Background(), filepath.Join(root, "Note", "foo.note"))
+	out := decodeMap(t, h.QueryByID, `{"equipmentNo":"SN078","id":"`+itoa(id)+`"}`)
+	if out["success"] != true {
+		t.Fatalf("success = %v", out["success"])
+	}
+	e, ok := out["entriesVO"].(map[string]any)
+	if !ok {
+		t.Fatalf("entriesVO missing: %v", out["entriesVO"])
+	}
+	if e["name"] != "foo.note" || e["tag"] != "file" {
+		t.Errorf("entry = %v; want foo.note/file", e)
+	}
+}
+
+// TestQueryByIDMissing: unknown/unparseable id → success with null entriesVO.
+func TestQueryByIDMissing(t *testing.T) {
+	h := newFileHandler(t, t.TempDir())
+	for _, body := range []string{`{"id":"999999"}`, `{"id":"not-a-number"}`, `{"id":""}`} {
+		out := decodeMap(t, h.QueryByID, body)
+		if out["success"] != true {
+			t.Errorf("body %s: success = %v; want true", body, out["success"])
+		}
+		if out["entriesVO"] != nil {
+			t.Errorf("body %s: entriesVO = %v; want null", body, out["entriesVO"])
+		}
+	}
+}
+
+// TestQueryByPathFoundAndDoubleSlash: by/path_v3 resolves a path, tolerating
+// the device's double slashes.
+func TestQueryByPathFoundAndDoubleSlash(t *testing.T) {
+	root := t.TempDir()
+	buildTree(t, root)
+	h := newFileHandler(t, root)
+
+	out := decodeMap(t, h.QueryByPath, `{"equipmentNo":"SN078","path":"/Note//Personal/p.note"}`)
+	e, ok := out["entriesVO"].(map[string]any)
+	if !ok {
+		t.Fatalf("entriesVO missing for double-slash path: %v", out["entriesVO"])
+	}
+	if e["path_display"] != "/Note/Personal/p.note" {
+		t.Errorf("path_display = %v; want /Note/Personal/p.note", e["path_display"])
+	}
+}
+
+// TestQueryByPathMissingAndEscape: a non-existent path and a traversal attempt
+// both return success with null entriesVO (never a 500).
+func TestQueryByPathMissingAndEscape(t *testing.T) {
+	root := t.TempDir()
+	buildTree(t, root)
+	h := newFileHandler(t, root)
+
+	for _, p := range []string{"/Note/nope.note", "/../escape"} {
+		out := decodeMap(t, h.QueryByPath, `{"path":"`+p+`"}`)
+		if out["success"] != true {
+			t.Errorf("path %s: success = %v; want true", p, out["success"])
+		}
+		if out["entriesVO"] != nil {
+			t.Errorf("path %s: entriesVO = %v; want null", p, out["entriesVO"])
+		}
+	}
+}
+
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func names(es []map[string]any) []string {

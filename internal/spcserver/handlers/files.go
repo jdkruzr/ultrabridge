@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 
 	"github.com/sysop/ultrabridge/internal/spcserver/capacity"
 	"github.com/sysop/ultrabridge/internal/spcserver/dto"
@@ -153,6 +154,49 @@ func sortEntries(es []dto.EntriesVO) {
 		}
 		return es[i].PathDisplay < es[j].PathDisplay
 	})
+}
+
+// QueryByID serves query_v3: resolve an id to a single entry. A missing or
+// unparseable id returns success with a null entriesVO — the device probes
+// existence this way and must not get an error.
+func (h *FileHandler) QueryByID(w http.ResponseWriter, r *http.Request) {
+	var req dto.FileQueryLocalDTO
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	vo := dto.FileQueryLocalVO{BaseVO: envelope.OK(), EquipmentNo: req.EquipmentNo}
+
+	id, err := strconv.ParseInt(req.ID, 10, 64)
+	if err != nil {
+		envelope.WriteJSON(w, vo) // unparseable id → null entry
+		return
+	}
+	if h.Root != "" {
+		if p, found, err := h.Reg.PathFor(r.Context(), id); err == nil && found {
+			if e, err := mapping.EntryFor(r.Context(), h.Root, p, h.Reg); err == nil {
+				vo.EntriesVO = &e
+			}
+		}
+	}
+	envelope.WriteJSON(w, vo)
+}
+
+// QueryByPath serves query/by/path_v3: resolve an SPC path (root-relative,
+// possibly double-slashed) to a single entry. A missing path or a traversal
+// attempt returns success with a null entriesVO.
+func (h *FileHandler) QueryByPath(w http.ResponseWriter, r *http.Request) {
+	var req dto.FileQueryByPathLocalDTO
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	vo := dto.FileQueryByPathLocalVO{BaseVO: envelope.OK(), EquipmentNo: req.EquipmentNo}
+
+	if h.Root != "" {
+		if abs, err := mapping.SafeResolve(h.Reg.Root(), req.Path); err == nil {
+			if _, statErr := os.Lstat(abs); statErr == nil {
+				if e, err := mapping.EntryFor(r.Context(), h.Root, abs, h.Reg); err == nil {
+					vo.EntriesVO = &e
+				}
+			}
+		}
+	}
+	envelope.WriteJSON(w, vo)
 }
 
 // hasTopLevelFolders reports whether the file root contains at least one
