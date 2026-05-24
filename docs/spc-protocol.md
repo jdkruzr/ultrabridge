@@ -310,6 +310,26 @@ Full enums in `com/ratta/enums/`:
 
 When the device sends a stale `nextSyncToken` (older than 5 days per `ScheduleServiceImpl`), server returns `E0330` and the device must fall back to a full pull.
 
+### Codes UB-as-SPC actually emits
+
+These are copied **verbatim** (code + English message) from `FileErrorCodeEnum.java`
+so the device sees byte-identical errors. Keep this table in sync when a handler
+starts returning a new code.
+
+| Code | Message | Where UB returns it |
+|---|---|---|
+| `E0321` | This file does not exist | `download_v3`: unknown/stale file id (`handlers/download.go`) |
+| `E0324` | This file cannot be uploaded | `upload/finish`: staged file fails md5/size verify (`handlers/upload.go`) |
+| `E0318` | The folder or file you want to delete does not exist | `delete_folder_v3`: unknown/stale id (`handlers/mutation.go`) |
+| `E0320` | The folder or file you want to move or rename does not exist | `move_v3`: unknown/stale source id (`handlers/mutation.go`) |
+| `E0308` | File does not exist | `copy_v3`: unknown/stale source id (`handlers/mutation.go`) |
+| `E0322` | A file with the same name already exists | `move_v3`/`copy_v3`: collision at target with `autorename=false` |
+| `E0712` | *(auth envelope)* | any JWT-protected route hit without a valid `x-access-token` (`auth.Middleware`) |
+
+Note: the OSS byte endpoints (`GET /api/oss/download`, `POST /api/oss/upload`) do
+**not** use these JSON codes — a bad signature returns HTTP 500 + bare plain-text
+(`FileDownload/UploadException` → `GlobalExceptionHandler`), per §6 / U1.
+
 ## 8. DTO/VO field-name gotchas
 
 Match these verbatim — do not "fix" them:

@@ -274,6 +274,40 @@ type DeleteFolderLocalVO struct {
 	Metadata    *MetadataVO `json:"metadata,omitempty"`
 }
 
+// FileMoveLocalDTO is the move_v3 request (com/ratta/file/dto/FileMoveLocalDTO.java).
+// id is Long-declared but String-on-the-wire (§8); to_path (snake_case) is the
+// TARGET PARENT directory the file moves into (filename is preserved).
+type FileMoveLocalDTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+	Autorename  bool   `json:"autorename"`
+	ID          string `json:"id"`
+	ToPath      string `json:"to_path"`
+}
+
+// FileCopyLocalDTO is the copy_v3 request (com/ratta/file/dto/FileCopyLocalDTO.java).
+// Same shape/semantics as move; to_path is the target parent directory.
+type FileCopyLocalDTO struct {
+	EquipmentNo string `json:"equipmentNo"`
+	ID          string `json:"id"`
+	Autorename  bool   `json:"autorename"`
+	ToPath      string `json:"to_path"`
+}
+
+// FileMoveLocalVO / FileCopyLocalVO are the move_v3 / copy_v3 responses
+// (both extend BaseVO: equipmentNo, entriesVO). entriesVO describes the file at
+// its new location (move keeps its id; copy gets a fresh one).
+type FileMoveLocalVO struct {
+	envelope.BaseVO
+	EquipmentNo string     `json:"equipmentNo"`
+	EntriesVO   *EntriesVO `json:"entriesVO"`
+}
+
+type FileCopyLocalVO struct {
+	envelope.BaseVO
+	EquipmentNo string     `json:"equipmentNo"`
+	EntriesVO   *EntriesVO `json:"entriesVO"`
+}
+
 // FileUploadFinishLocalVO is the upload/finish response
 // (com/ratta/file/vo/FileUploadFinishLocalVO.java extends BaseVO). id is a String
 // on the wire here (the SPC id-type split, §8); size is a Long (file bytes).

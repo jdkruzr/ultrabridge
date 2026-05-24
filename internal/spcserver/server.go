@@ -210,6 +210,8 @@ func (s *Server) registerRoutes() {
 		Logger:   s.cfg.Logger,
 	}
 	s.mux.Handle("POST /api/file/3/files/delete_folder_v3", protect(mut.DeleteFolder))
+	s.mux.Handle("POST /api/file/3/files/move_v3", protect(mut.Move))
+	s.mux.Handle("POST /api/file/3/files/copy_v3", protect(mut.Copy))
 
 	// Engine.IO v3 websocket on the same listener (1c). The device connects to
 	// /socket.io/ directly over websocket; demux is by path.

@@ -70,6 +70,18 @@ func (r *Registry) IDFor(ctx context.Context, absPath string) (int64, error) {
 	return id, nil
 }
 
+// UpdatePath repoints an existing id at a new absolute path, preserving the id
+// (and the md5 cache on the same row, valid because a move doesn't change
+// content). Used by move_v3 so a moved file keeps its stable device-facing id.
+func (r *Registry) UpdatePath(ctx context.Context, id int64, newAbsPath string) error {
+	p := filepath.Clean(newAbsPath)
+	if _, err := r.db.ExecContext(ctx,
+		`UPDATE spc_file_ids SET path = ? WHERE id = ?`, p, id); err != nil {
+		return fmt.Errorf("fileids UpdatePath %d→%q: %w", id, p, err)
+	}
+	return nil
+}
+
 // PathFor resolves an id back to its absolute path. found is false (with a nil
 // error) when no row matches — the device probes unknown ids and must get a
 // clean "not found", not a hard error.
