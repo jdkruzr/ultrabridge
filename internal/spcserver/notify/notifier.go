@@ -68,3 +68,30 @@ func (n *SocketNotifier) Notify(ctx context.Context) error {
 	}
 	return nil
 }
+
+// NotifyFile pushes a FILE-SYN STARTSYNC over the "ServerMessage" file channel
+// (CLAUDE.md: ServerMessage is the FILE channel; to-do is tasks). UB fires it
+// after a server-side file change (e.g. an upload finishing, or — later — a web/
+// other-device mutation) so the device re-pulls. Like Notify it is best-effort:
+// no userId / no live connection returns nil, and the device's next periodic
+// file sync catches anything missed. NOT load-bearing for the device's own
+// upload round-trip (the device initiates that itself).
+func (n *SocketNotifier) NotifyFile(ctx context.Context) error {
+	userID, err := n.userID(ctx)
+	if err != nil {
+		n.logger.Warn("FILE-SYN: userId resolve failed", "error", err)
+		return nil
+	}
+	if userID == "" {
+		return nil // no device has logged in yet
+	}
+	now := time.Now().UnixMilli()
+	payload := fmt.Sprintf(
+		`{"code":"200","timestamp":%d,"msgType":"FILE-SYN","data":[{"messageType":"STARTSYNC","equipmentNo":"ultrabridge","timestamp":%d}]}`,
+		now, now,
+	)
+	if n.reg.Emit(userID, "ServerMessage", payload) == 0 {
+		n.logger.Debug("file STARTSYNC: no device connected", "userId", userID)
+	}
+	return nil
+}
