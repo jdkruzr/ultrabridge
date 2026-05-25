@@ -4,19 +4,51 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: ultrabridge
     container_name: ultrabridge
     ports:
       - "8443:8443"
+      - "8089:8089"
     environment:
       - UB_DB_PATH=/data/ultrabridge.db
       - UB_LISTEN_ADDR=:8443
       - UB_TASK_DB_PATH=/data/ultrabridge-tasks.db
+      - UB_MCP_PORT=8081
+      - UB_LOG_FILE=/data/ultrabridge.log
+      - UB_LOG_FILE_MAX_MB=100
+      - UB_LOG_FILE_MAX_AGE_DAYS=30
+      - UB_LOG_FILE_MAX_BACKUPS=10
+      # UB-as-SPC server config (mode/file-root/device account+password) now lives
+      # in the DB, set via Settings → "UB-as-SPC Device Sync Server". The UB_SPC_*
+      # env vars were removed to test DB-backed config; env still overrides DB if
+      # any are re-added. spc_listen_addr (:8089) and quota fall back to defaults.
     volumes:
       - ./ultrabridge-data:/data
       - /mnt/supernote:/mnt/supernote
     networks:
       - default
       - supernote_default
+    restart: unless-stopped
+  ub-mcp:
+    image: ub-mcp:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ub-mcp
+    container_name: ub-mcp
+    ports:
+      - "8081:8081"
+    environment:
+      - UB_MCP_API_URL=http://ultrabridge:8443
+      # Bearer auth: token from .env (gitignored). Create via Settings → MCP Tokens.
+      # Replaces UB_MCP_API_USER/PASS basic auth — no plaintext secret in this file.
+      - UB_MCP_API_TOKEN=${UB_MCP_API_TOKEN:?set UB_MCP_API_TOKEN in .env}
+      - UB_DB_PATH=/data/ultrabridge.db
+    volumes:
+      - ./ultrabridge-data:/data
+    depends_on:
+      - ultrabridge
+    command: ["--http", ":8081"]
     restart: unless-stopped
 networks:
   default:

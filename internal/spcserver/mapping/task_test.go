@@ -1,9 +1,11 @@
 package mapping
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/sysop/ultrabridge/internal/spcserver/dto"
+	"github.com/sysop/ultrabridge/internal/taskstore"
 )
 
 // fullSPC is a populated task for round-trip checks (id set so no id-generation
@@ -57,17 +59,28 @@ func TestRoundTripPreservesFields(t *testing.T) {
 	}
 }
 
-// TestStatusMapsBothWays verifies SPC<->CalDAV status casing both directions.
-func TestStatusMapsBothWays(t *testing.T) {
-	if tk := SPCToTask(dto.SPCTask{Status: "completed"}); tk.Status.String != "COMPLETED" {
-		t.Errorf("SPC completed → CalDAV: got %q", tk.Status.String)
+// TestStatusIsPassthroughLowercase verifies the SPC mapping stores and emits the
+// device's native lowercase status verbatim (needsAction/completed). That casing
+// matches BOTH the device wire (docs/PRIVATE_CLOUD_REFERENCE.md §status) and UB's
+// DB convention. The CalDAV uppercase forms (COMPLETED/NEEDS-ACTION) belong ONLY
+// to the iCal VTODO boundary (caldav/vtodo.go), NOT this device boundary — routing
+// status through CalDAVStatus/SupernoteStatus here un-completed tasks on the device
+// (the "zombie task" bug) and wrote DB statuses UB's own completion checks ignore.
+func TestStatusIsPassthroughLowercase(t *testing.T) {
+	// inbound: device → store. Must store the device's lowercase verbatim.
+	if tk := SPCToTask(dto.SPCTask{Status: "completed"}); tk.Status.String != "completed" {
+		t.Errorf("SPC completed → store: got %q, want completed", tk.Status.String)
 	}
-	if tk := SPCToTask(dto.SPCTask{Status: "needsAction"}); tk.Status.String != "NEEDS-ACTION" {
-		t.Errorf("SPC needsAction → CalDAV: got %q", tk.Status.String)
+	if tk := SPCToTask(dto.SPCTask{Status: "needsAction"}); tk.Status.String != "needsAction" {
+		t.Errorf("SPC needsAction → store: got %q, want needsAction", tk.Status.String)
 	}
-	back := TaskToSPC(SPCToTask(dto.SPCTask{Status: "needsAction"}))
-	if back.Status != "needsAction" {
-		t.Errorf("round-trip needsAction: got %q", back.Status)
+	// outbound: store → device. A completed task MUST stay completed; the bug
+	// downgraded it to needsAction, un-completing it on the device.
+	if s := TaskToSPC(taskstore.Task{Status: sql.NullString{String: "completed", Valid: true}}); s.Status != "completed" {
+		t.Errorf("store completed → SPC: got %q, want completed (zombie regression)", s.Status)
+	}
+	if s := TaskToSPC(taskstore.Task{Status: sql.NullString{String: "needsAction", Valid: true}}); s.Status != "needsAction" {
+		t.Errorf("store needsAction → SPC: got %q, want needsAction", s.Status)
 	}
 }
 

@@ -17,7 +17,12 @@ import (
 // not persisted by taskstore). completedTime/lastModified carry the Supernote
 // quirk (creation/completion times) straight through.
 func TaskToSPC(t taskstore.Task) dto.SPCTask {
-	status := taskstore.SupernoteStatus(t.Status.String)
+	// Status passes through verbatim: the device wire and UB's DB both use
+	// lowercase needsAction/completed (docs/PRIVATE_CLOUD_REFERENCE.md §status).
+	// The CalDAV uppercase forms belong to the iCal VTODO boundary only — running
+	// status through SupernoteStatus here downgraded completed→needsAction,
+	// un-completing tasks on the device (the "zombie task" bug).
+	status := t.Status.String
 	sortVal, sortCompleted := 1, 0
 	if status == "completed" {
 		sortVal, sortCompleted = 0, 1
@@ -77,7 +82,7 @@ func SPCToTask(s dto.SPCTask) taskstore.Task {
 		LastModified:  nullInt64(s.LastModified),
 		Recurrence:    nullString(s.Recurrence),
 		IsReminderOn:  s.IsReminderOn,
-		Status:        nullString(taskstore.CalDAVStatus(s.Status)),
+		Status:        nullString(s.Status), // verbatim lowercase; see TaskToSPC
 		Importance:    nullString(s.Importance),
 		DueTime:       s.DueTime,
 		CompletedTime: nullInt64(completedTime),

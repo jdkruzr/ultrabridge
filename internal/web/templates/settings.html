@@ -193,6 +193,15 @@
       UltraBridge's built-in Supernote Private Cloud server that devices sync against directly.
       <strong>Changes to any field here require an application restart to take effect.</strong>
     </p>
+    <p class="device-info" style="margin-bottom: 1rem; border-left: 3px solid #c97; padding-left: 0.75rem;">
+      <strong>Reverse proxy &amp; hostname:</strong> this server listens on its own port
+      (<code>:8089</code> by default), separate from the main UltraBridge app on <code>:8443</code>
+      (web UI, CalDAV, Boox WebDAV, MCP). Behind a reverse proxy it needs a <em>dedicated hostname</em>
+      (e.g. <code>sn.example.com</code>) whose entry routes to <code>:8089</code> and forwards the
+      WebSocket upgrade for <code>/socket.io/</code>. Use a <em>different</em> hostname for the main app —
+      one hostname can't serve both, since the proxy routes by Host header to a single backend port.
+      Point your Supernote at the <code>:8089</code> hostname.
+    </p>
     <form hx-post="/settings/save" hx-target="#main-content">
       <input type="hidden" name="section" value="ub-spc">
 

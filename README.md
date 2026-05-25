@@ -297,18 +297,39 @@ If vLLM is unreachable when you send a message, the chat UI shows an error inste
 
 ### Supernote Sync
 
-When sync is enabled (via Settings > Supernote Sync), tasks are bidirectionally synced between UltraBridge and the Supernote device via SPC. UltraBridge is authoritative on conflicts.
+UltraBridge *is* the cloud your Supernote syncs against. It implements the Supernote Private Cloud (SPC) protocol directly (`internal/spcserver`), so the device talks to UltraBridge as if it were Ratta's server — there's no `supernote-service` and no MariaDB. Tasks, files, and digests all sync over SPC, and UltraBridge's local SQLite task store wins on conflicts.
 
-The UltraBridge installer automatically configures the Docker network and volume mounts required to communicate with `supernote-service` and access the MariaDB task store.
+Enable it in **Settings > UB-as-SPC Device Sync Server** by setting **Mode** to `server`. The default mode, `client`, runs no listener. The server binds its own port — `:8089` by default — separate from the main app on `:8443`.
+
+#### Reverse Proxy & Device Hostnames
+
+The SPC server and the main app are **two listeners on different ports**: `:8089` for the Supernote, `:8443` for the web UI, CalDAV, Boox WebDAV, and MCP. A Supernote connects over plain HTTPS (port 443) addressed by hostname, so you put a reverse proxy in front — and you need **two hostnames**, one per backend port:
+
+| Hostname (example) | Routes to | Serves |
+|--------------------|-----------|--------|
+| `sn.example.com`   | `:8089`   | Supernote device sync (SPC) |
+| `ub.example.com`   | `:8443`   | Web UI, CalDAV, Boox/WebDAV, MCP |
+
+Pick any names you like, but they must be **distinct**. A proxy routes by `Host` header to a single backend, so one hostname can't reach both ports. Point the Supernote at the `:8089` hostname; point browsers, CalDAV clients, and Boox devices at the `:8443` one.
+
+Two requirements for the `:8089` proxy host:
+
+- **Forward the WebSocket upgrade** for `/socket.io/`. The device holds a persistent Engine.IO socket and reconnect-loops without it.
+- **Preserve the Host header** (`proxy_set_header Host $host`), so UltraBridge mints file download/upload URLs that resolve back through the proxy.
+
+TLS is normally terminated at the proxy. Leave the SPC card's TLS fields blank in that case.
+
+When running the SPC server in Docker, publish the extra port: add `-p 8089:8089` to the `docker run` in Option B (or the `ports:` list in your compose file).
 
 ## Architecture
 
 UltraBridge is organised as four services (Task, Note, Search, Config)
-sitting on top of a SQLite store, plus a pair of source-specific
-notes pipelines (Supernote via fsnotify+SPC, Boox via WebDAV). The
-CalDAV subsystem is SQLite-backed; MariaDB is only consulted to sync
-the Supernote catalog after an OCR injection, and only when SPC is
-actually present.
+sitting on top of a SQLite store, plus a pair of source-specific notes
+pipelines (Supernote and Boox). Everything is SQLite-backed — there's
+no MariaDB. Supernote devices sync against UltraBridge's built-in SPC
+server (`internal/spcserver`, on its own `:8089` listener); Boox
+devices push files over WebDAV on the main `:8443` listener. Both
+pipelines feed the same search and RAG index.
 
 For the full system diagram, the two pipeline flow diagrams
 (Supernote and Boox), the task-mutation flow, and the service-layer

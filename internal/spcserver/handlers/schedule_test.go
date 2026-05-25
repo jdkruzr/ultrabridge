@@ -97,7 +97,7 @@ func TestTaskCreateAndDedup(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("task not stored: %v", err)
 	}
-	if got.Title.String != "buy milk" || got.Status.String != "NEEDS-ACTION" {
+	if got.Title.String != "buy milk" || got.Status.String != "needsAction" {
 		t.Errorf("stored task wrong: %+v", got)
 	}
 
@@ -157,8 +157,8 @@ func TestTaskListUpdateWrapper(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("task missing after update: %v", err)
 	}
-	if got.Status.String != "COMPLETED" {
-		t.Errorf("expected COMPLETED after completion, got %q", got.Status.String)
+	if got.Status.String != "completed" {
+		t.Errorf("expected completed after completion, got %q", got.Status.String)
 	}
 
 	// A bare array (the old wrong shape) must fail — guards the regression.

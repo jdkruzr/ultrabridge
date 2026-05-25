@@ -7,56 +7,57 @@ see the `CLAUDE.md` file under each `internal/*` package.
 ## System diagram
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Supernote Private Cloud Stack (optional, only for Supernote sync)    │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────────────┐   │
-│  │  nginx       │  │  MariaDB         │  │  .note file store    │   │
-│  │  (proxy)     │  │  (SPC catalog)   │  │  (NFS / volume)      │   │
-│  └──────────────┘  └──────────────────┘  └──────────────────────┘   │
-│                            ▲                       ▲                 │
-│                            │ f_user_file           │                 │
-│                            │ (post-OCR catalog     │                 │
-│                            │  sync only)           │                 │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  UltraBridge                                                  │  │
-│  │                                                               │  │
-│  │  ┌──────────────────────┐  ┌───────────────────────────────┐  │  │
-│  │  │  CalDAV subsystem    │  │  Supernote notes pipeline     │  │  │
-│  │  │  CalDAV ← TaskStore  │  │   ↓ fsnotify watcher          │  │  │
-│  │  │        (SQLite)      │  │   ↓ reconciler                │  │  │
-│  │  │        ↑ tasksync    │  │  NoteStore → SQLite           │  │  │
-│  │  │          engine via  │  │  Processor (OCR jobs)         │  │  │
-│  │  │          SPC REST    │  └───────────────────────────────┘  │  │
-│  │  └──────────────────────┘                                     │  │
-│  │  ┌──────────────────────┐  ┌───────────────────────────────┐  │  │
-│  │  │  Boox notes pipeline │  │  Shared services              │  │  │
-│  │  │  WebDAV server ←─────│──│  SearchIndex (FTS5)           │  │  │
-│  │  │   ↓ .note parser    │  │  Embedding cache (Ollama)     │  │  │
-│  │  │   ↓ page renderer   │  │  Hybrid retriever (RRF)       │  │  │
-│  │  │   ↓ OCR + indexer ──│─▶│  JSON API + MCP server        │  │  │
-│  │  │  Version archive     │  │  Chat (vLLM SSE proxy)        │  │  │
-│  │  └──────────────────────┘  │  Web UI (Tasks/SN/Boox/...)   │  │  │
-│  │                            │  Auth middleware               │  │  │
-│  │                            └───────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────┘
+   ┌──────────────────┐                      ┌──────────────────┐
+   │ Supernote device │                      │ Boox device      │
+   └────────┬─────────┘                      └────────┬─────────┘
+            │ SPC protocol                            │ WebDAV
+            │ (Engine.IO socket + REST)               │ PUT .note
+            ▼ :8089                                   ▼ :8443
+┌─────────────────────────────────────────────────────────────────────┐
+│ UltraBridge — one process, two listeners                            │
+│                                                                     │
+│  :8089  SPC server (internal/spcserver)   :8443  main app           │
+│   ├─ task sync       → taskdb (SQLite)     ├─ Web UI                 │
+│   ├─ file up/download→ SPC file root       ├─ CalDAV ← taskdb        │
+│   ├─ digests         → digeststore         ├─ Boox WebDAV server     │
+│   └─ STARTSYNC push (to-do socket event)   ├─ JSON API + MCP server  │
+│                                            └─ Chat (vLLM SSE proxy)  │
+│                                                                     │
+│  Shared note pipelines + services                                   │
+│   Supernote .note ─┐                                                │
+│   Boox .note ──────┴─▶ render → OCR → FTS5 index + embedding cache   │
+│                                         (RRF hybrid retriever)       │
+│                                         → search, RAG chat, MCP      │
+└─────────────────────────────────────────────────────────────────────┘
+            │                                        │
+            ▼                                        ▼
+   CalDAV clients (DAVx5, …)              AI agents (MCP / Claude)
 ```
+
+There's no external SPC stack and no MariaDB — UltraBridge is the SPC
+server, and both listeners run in the same process. Behind a reverse
+proxy the two ports need separate hostnames; see the README's
+"Reverse Proxy & Device Hostnames".
 
 ### Key points
 
-- **SPC is optional.** UltraBridge only talks to MariaDB to sync the
-  Supernote catalog (`f_user_file` etc.) after an OCR injection, so
-  the device's listing reflects the modified file. If there's no SPC,
-  everything else — CalDAV, RAG, Boox — works identically.
+- **UltraBridge is the SPC server.** It implements the Supernote
+  Private Cloud protocol (`internal/spcserver`) on its own listener
+  (`:8089` by default). The Supernote connects to UltraBridge directly;
+  tasks, files, and digests all sync over SPC. There's no external
+  `supernote-service` and no MariaDB — the legacy SPC *client* was
+  removed in 2026-05. UltraBridge wins on task conflicts.
+- **Two listeners, two hostnames.** The SPC server (`:8089`) and the
+  main app (`:8443` — web UI, CalDAV, Boox WebDAV, MCP) are separate
+  ports. Behind a reverse proxy each needs its own hostname; see the
+  README's "Reverse Proxy & Device Hostnames".
 - **CalDAV is SQLite-backed.** The CalDAV subsystem reads and writes
-  `internal/taskdb` (SQLite). The `tasksync` engine is a separate
-  adapter-based layer that pushes local changes out to the device
-  over SPC REST and pulls device changes back in. There is no direct
-  CalDAV → MariaDB path.
+  `internal/taskdb` (SQLite). A Supernote completion arrives over SPC,
+  lands in that same taskdb, and surfaces to CalDAV clients — and a
+  CalDAV completion flows back to the device the same way.
 - **Boox uses WebDAV, not SPC.** Boox devices push `.note` files into
-  UltraBridge's embedded WebDAV server; no SPC involvement.
+  UltraBridge's embedded WebDAV server on the main listener; no SPC
+  involvement.
 - **Unified search.** Both pipelines write into the same `note_content`
   FTS5 table and the same embedding store, so search and RAG chat
   cross device boundaries transparently even though the two Files
@@ -65,12 +66,11 @@ see the `CLAUDE.md` file under each `internal/*` package.
 ## Supernote notes pipeline flow
 
 ```
-.note file written/changed on device
+Supernote uploads a .note over SPC → lands in the SPC file root
          │
          ▼
-   fsnotify watcher  ──(2s debounce)──▶  Processor queue
-         +
-   reconciler (15 min)
+   upload handler enqueues an OCR job
+   (an fsnotify watcher + 15-min reconciler also sweep the file root)
          │
          ▼
    Worker picks up job
@@ -124,15 +124,18 @@ Web UI form / MCP tool call / CalDAV client PUT
          │
          ├─ write to internal/taskdb (SQLite)
          ├─ emit audit log line (op, auth_method, auth_label, task_id)
-         └─ Notify() → tasksync engine
+         └─ Notify() → SPC STARTSYNC push (server mode only)
                   │
                   ▼
-         Next sync cycle (or immediate if triggered)
+         UltraBridge emits the `to-do` socket event to the device
                   │
                   ▼
-         SPC REST push → Supernote device CalDAV store
-         (UB-wins on conflict; adapter-agnostic so additional
-          device adapters can register against the same engine)
+         Device pulls /api/file/schedule/task/all over SPC and sees
+         the change (UltraBridge wins on conflict).
+
+A Supernote-side change flows the same way in reverse: the device
+PUTs /api/file/schedule/task/list → taskdb → CalDAV clients and the
+web UI see it on their next read.
 ```
 
 ## Service layer
