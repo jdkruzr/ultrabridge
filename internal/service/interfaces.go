@@ -84,16 +84,6 @@ type BooxNoteSummary struct {
 	JobStatus   string    `json:"job_status"`
 }
 
-// SyncStatus represents the CalDAV sync state.
-type SyncStatus struct {
-	AdapterID     string     `json:"adapter_id"`
-	AdapterActive bool       `json:"adapter_active"`
-	InProgress    bool       `json:"in_progress"`
-	LastSyncAt    *time.Time `json:"last_sync_at"`
-	NextSyncAt    *time.Time `json:"next_sync_at"`
-	LastError     *string    `json:"last_error"`
-}
-
 // EmbeddingJobStatus represents the background processing state.
 type EmbeddingJobStatus struct {
 	Running        bool                     `json:"running"`
@@ -108,12 +98,6 @@ type EmbeddingJobStatus struct {
 type ActiveTask struct {
 	Path      string    `json:"path"`
 	StartedAt time.Time `json:"started_at"`
-}
-
-// SyncStatusProvider is an interface for accessing sync status and triggering sync.
-type SyncStatusProvider interface {
-	Status() SyncStatus
-	TriggerSync()
 }
 
 // TaskPatch is a partial update to a Task. Nil pointer fields mean "leave
@@ -229,8 +213,4 @@ type ConfigService interface {
 	AddSource(ctx context.Context, source interface{}) error
 	UpdateSource(ctx context.Context, id string, source interface{}) error
 	DeleteSource(ctx context.Context, id string) error
-	
-	GetSyncStatus(ctx context.Context) (SyncStatus, error)
-	TriggerSync(ctx context.Context) error
-	HasSyncProvider() bool
 }

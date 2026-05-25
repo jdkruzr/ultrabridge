@@ -39,7 +39,7 @@ func TestGetConfigRedacts(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	configSvc := service.NewConfigService(db, nil, cfg)
+	configSvc := service.NewConfigService(db, cfg)
 	h := NewHandler(nil, nil, nil, configSvc, db, "", "", logger, broadcaster)
 
 	req := httptest.NewRequest("GET", "/api/config", nil)
@@ -75,7 +75,7 @@ func TestPutConfigHashesPassword(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	configSvc := service.NewConfigService(db, nil, cfg)
+	configSvc := service.NewConfigService(db, cfg)
 	h := NewHandler(nil, nil, nil, configSvc, db, "", "", logger, broadcaster)
 
 	incoming := IncomingConfig{
@@ -106,7 +106,7 @@ func TestPutConfigDetectsRestartRequired(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	configSvc := service.NewConfigService(db, nil, cfg)
+	configSvc := service.NewConfigService(db, cfg)
 	h := NewHandler(nil, nil, nil, configSvc, db, "", "", logger, broadcaster)
 
 	incoming := IncomingConfig{

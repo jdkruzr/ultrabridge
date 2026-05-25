@@ -26,11 +26,6 @@ type RedactedConfig struct {
 	ChatEnabled           bool   `json:"chat_enabled"`
 	ChatAPIURL            string `json:"chat_api_url"`
 	ChatModel             string `json:"chat_model"`
-	SNSyncEnabled         bool   `json:"sn_sync_enabled"`
-	SNSyncInterval        int    `json:"sn_sync_interval"`
-	SNAPIURL              string `json:"sn_api_url"`
-	SNAccount             string `json:"sn_account"`
-	SNPassword            string `json:"sn_password"` // "[set]" or "[not set]"
 	LogLevel              string `json:"log_level"`
 	LogFormat             string `json:"log_format"`
 	LogFile               string `json:"log_file"`
@@ -41,11 +36,6 @@ type RedactedConfig struct {
 	CalDAVCollectionName  string `json:"caldav_collection_name"`
 	DueTimeMode           string `json:"due_time_mode"`
 	WebEnabled            bool   `json:"web_enabled"`
-	SocketIOURL           string `json:"socketio_url"`
-	DBHost                string `json:"db_host"`
-	DBPort                string `json:"db_port"`
-	DBEnvPath             string `json:"db_env_path"`
-	UserID                int64  `json:"user_id"`
 	MCPPort               int    `json:"mcp_port"`
 }
 
@@ -70,11 +60,6 @@ func redactConfig(cfg *appconfig.Config) *RedactedConfig {
 		ChatEnabled:          cfg.ChatEnabled,
 		ChatAPIURL:           cfg.ChatAPIURL,
 		ChatModel:            cfg.ChatModel,
-		SNSyncEnabled:        cfg.SNSyncEnabled,
-		SNSyncInterval:       cfg.SNSyncInterval,
-		SNAPIURL:             cfg.SNAPIURL,
-		SNAccount:            cfg.SNAccount,
-		SNPassword:           redactSecret(cfg.SNPassword),
 		LogLevel:             cfg.LogLevel,
 		LogFormat:            cfg.LogFormat,
 		LogFile:              cfg.LogFile,
@@ -85,11 +70,6 @@ func redactConfig(cfg *appconfig.Config) *RedactedConfig {
 		CalDAVCollectionName: cfg.CalDAVCollectionName,
 		DueTimeMode:          cfg.DueTimeMode,
 		WebEnabled:  cfg.WebEnabled,
-		SocketIOURL: cfg.SocketIOURL,
-		DBHost:      cfg.DBHost,
-		DBPort:      cfg.DBPort,
-		DBEnvPath:   cfg.DBEnvPath,
-		UserID:      cfg.UserID,
 		MCPPort:     cfg.MCPPort,
 	}
 }
@@ -120,11 +100,6 @@ type IncomingConfig struct {
 	ChatEnabled           bool   `json:"chat_enabled"`
 	ChatAPIURL            string `json:"chat_api_url"`
 	ChatModel             string `json:"chat_model"`
-	SNSyncEnabled         bool   `json:"sn_sync_enabled"`
-	SNSyncInterval        int    `json:"sn_sync_interval"`
-	SNAPIURL              string `json:"sn_api_url"`
-	SNAccount             string `json:"sn_account"`
-	SNPassword            string `json:"sn_password"`
 	LogLevel              string `json:"log_level"`
 	LogFormat             string `json:"log_format"`
 	LogFile               string `json:"log_file"`
@@ -135,11 +110,6 @@ type IncomingConfig struct {
 	CalDAVCollectionName  string `json:"caldav_collection_name"`
 	DueTimeMode           string `json:"due_time_mode"`
 	WebEnabled            bool   `json:"web_enabled"`
-	SocketIOURL           string `json:"socketio_url"`
-	DBHost                string `json:"db_host"`
-	DBPort                string `json:"db_port"`
-	DBEnvPath             string `json:"db_env_path"`
-	UserID                int64  `json:"user_id"`
 	MCPPort               int    `json:"mcp_port"`
 }
 
@@ -197,11 +167,6 @@ func (h *Handler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	if _, ok := rawMap["chat_enabled"]; ok { cfg.ChatEnabled = incoming.ChatEnabled }
 	if _, ok := rawMap["chat_api_url"]; ok { cfg.ChatAPIURL = incoming.ChatAPIURL }
 	if _, ok := rawMap["chat_model"]; ok { cfg.ChatModel = incoming.ChatModel }
-	if _, ok := rawMap["sn_sync_enabled"]; ok { cfg.SNSyncEnabled = incoming.SNSyncEnabled }
-	if _, ok := rawMap["sn_sync_interval"]; ok { cfg.SNSyncInterval = incoming.SNSyncInterval }
-	if _, ok := rawMap["sn_api_url"]; ok { cfg.SNAPIURL = incoming.SNAPIURL }
-	if _, ok := rawMap["sn_account"]; ok { cfg.SNAccount = incoming.SNAccount }
-	if _, ok := rawMap["sn_password"]; ok { cfg.SNPassword = incoming.SNPassword }
 	if _, ok := rawMap["log_level"]; ok { cfg.LogLevel = incoming.LogLevel }
 	if _, ok := rawMap["log_format"]; ok { cfg.LogFormat = incoming.LogFormat }
 	if _, ok := rawMap["log_file"]; ok { cfg.LogFile = incoming.LogFile }
@@ -212,11 +177,6 @@ func (h *Handler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	if _, ok := rawMap["caldav_collection_name"]; ok { cfg.CalDAVCollectionName = incoming.CalDAVCollectionName }
 	if _, ok := rawMap["due_time_mode"]; ok { cfg.DueTimeMode = incoming.DueTimeMode }
 	if _, ok := rawMap["web_enabled"]; ok { cfg.WebEnabled = incoming.WebEnabled }
-	if _, ok := rawMap["socketio_url"]; ok { cfg.SocketIOURL = incoming.SocketIOURL }
-	if _, ok := rawMap["db_host"]; ok { cfg.DBHost = incoming.DBHost }
-	if _, ok := rawMap["db_port"]; ok { cfg.DBPort = incoming.DBPort }
-	if _, ok := rawMap["db_env_path"]; ok { cfg.DBEnvPath = incoming.DBEnvPath }
-	if _, ok := rawMap["user_id"]; ok { cfg.UserID = incoming.UserID }
 	if _, ok := rawMap["mcp_port"]; ok { cfg.MCPPort = incoming.MCPPort }
 
 	if pw, ok := rawMap["password"]; ok {

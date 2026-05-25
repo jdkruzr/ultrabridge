@@ -25,13 +25,6 @@ const (
 	KeyChatAPIURL  = "chat_api_url"
 	KeyChatModel   = "chat_model"
 
-	// Supernote device sync
-	KeySNSyncEnabled  = "sn_sync_enabled"
-	KeySNSyncInterval = "sn_sync_interval"
-	KeySNAPIURL       = "sn_api_url"
-	KeySNAccount      = "sn_account"
-	KeySNPassword     = "sn_password"
-
 	// Logging
 	KeyLogLevel         = "log_level"
 	KeyLogFormat        = "log_format"
@@ -48,20 +41,13 @@ const (
 	KeyDueTimeMode          = "due_time_mode"
 
 	// Server
-	KeyWebEnabled  = "web_enabled"
-	KeySocketIOURL = "socketio_url"
+	KeyWebEnabled = "web_enabled"
 
 	// MCP
 	// KeyMCPPort is the host-exposed port of the sibling ub-mcp container.
 	// Used by the Settings UI to render copy-pasteable client configs
 	// (HTTP SSE URL, stdio docker exec command). 0 hides the helper card.
 	KeyMCPPort = "mcp_port"
-
-	// MariaDB / SPC connection
-	KeyDBHost    = "db_host"
-	KeyDBPort    = "db_port"
-	KeyDBEnvPath = "dbenv_path"
-	KeyUserID    = "user_id"
 
 	// SPC server (UB-as-SPC refactor). Mode defaults to "client" = no listener,
 	// so UB behaves exactly as today unless explicitly switched to "server".
@@ -130,11 +116,7 @@ var envVarForKey = map[string]string{
 	KeyChatEnabled:          "UB_CHAT_ENABLED",
 	KeyChatAPIURL:           "UB_CHAT_API_URL",
 	KeyChatModel:            "UB_CHAT_MODEL",
-	KeySNSyncEnabled:        "UB_SN_SYNC_ENABLED",
-	KeySNSyncInterval:       "UB_SN_SYNC_INTERVAL",
-	KeySNAPIURL:             "UB_SN_API_URL",
-	KeySNAccount:            "UB_SN_ACCOUNT",
-	KeySNPassword:           "UB_SN_PASSWORD",
+	KeyWebEnabled:           "UB_WEB_ENABLED",
 	KeyLogLevel:             "UB_LOG_LEVEL",
 	KeyLogFormat:            "UB_LOG_FORMAT",
 	KeyLogFile:              "UB_LOG_FILE",
@@ -145,12 +127,6 @@ var envVarForKey = map[string]string{
 	KeyLogVerboseAPI:        "UB_LOG_VERBOSE_API",
 	KeyCalDAVCollectionName: "UB_CALDAV_COLLECTION_NAME",
 	KeyDueTimeMode:          "UB_DUE_TIME_MODE",
-	KeyWebEnabled:           "UB_WEB_ENABLED",
-	KeySocketIOURL:          "UB_SOCKETIO_URL",
-	KeyDBHost:               "UB_DB_HOST",
-	KeyDBPort:               "UB_DB_PORT",
-	KeyDBEnvPath:            "UB_SUPERNOTE_DBENV_PATH",
-	KeyUserID:               "UB_USER_ID",
 	KeyMCPPort:              "UB_MCP_PORT",
 	KeySPCMode:              "UB_SPC_MODE",
 	KeySPCListenAddr:        "UB_SPC_LISTEN_ADDR",
@@ -174,8 +150,6 @@ var defaultValues = map[string]string{
 	KeyOllamaEmbedModel:     "nomic-embed-text:v1.5",
 	KeyChatAPIURL:           "http://localhost:8000",
 	KeyChatModel:            "Qwen/Qwen3-8B",
-	KeySNSyncInterval:       "300",
-	KeySNAPIURL:             "http://supernote-service:8080",
 	KeyLogLevel:             "info",
 	KeyLogFormat:            "json",
 	KeyLogFileMaxMB:         "50",
@@ -184,10 +158,6 @@ var defaultValues = map[string]string{
 	KeyCalDAVCollectionName: "Tasks",
 	KeyDueTimeMode:          "preserve",
 	KeyWebEnabled:           "true",
-	KeySocketIOURL:          "ws://supernote-service:8080/socket.io/",
-	KeyDBHost:               "mariadb",
-	KeyDBPort:               "3306",
-	KeyDBEnvPath:            "/run/secrets/dbenv",
 	KeyMCPPort:              "8081",
 	KeySPCMode:              "client",
 	KeySPCListenAddr:        ":8089",
@@ -217,21 +187,11 @@ var restartRequired = map[string]bool{
 	KeyChatEnabled:          true,
 	KeyChatAPIURL:           true,
 	KeyChatModel:            true,
-	KeySNSyncEnabled:        true,
-	KeySNSyncInterval:       true,
-	KeySNAPIURL:             true,
-	KeySNAccount:            true,
-	KeySNPassword:           true,
 	KeyLogLevel:             true,
 	KeyLogFormat:            true,
 	KeyLogFile:              true,
 	KeyLogSyslogAddr:        true,
 	KeyWebEnabled:           true,
-	KeySocketIOURL:          true,
-	KeyDBHost:               true,
-	KeyDBPort:               true,
-	KeyDBEnvPath:            true,
-	KeyUserID:               true,
 	KeyCalDAVCollectionName: true,
 	KeySPCMode:              true,
 	KeySPCListenAddr:        true,

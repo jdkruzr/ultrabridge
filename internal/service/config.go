@@ -12,19 +12,16 @@ import (
 
 type configService struct {
 	noteDB        *sql.DB
-	syncProvider  SyncStatusProvider
 	runningConfig *appconfig.Config
 	configDirty   atomic.Bool
 }
 
 func NewConfigService(
 	db *sql.DB,
-	syncProvider SyncStatusProvider,
 	runningConfig *appconfig.Config,
 ) ConfigService {
 	return &configService{
 		noteDB:        db,
-		syncProvider:  syncProvider,
 		runningConfig: runningConfig,
 	}
 }
@@ -100,23 +97,4 @@ func (s *configService) DeleteSource(ctx context.Context, id string) error {
 	}
 	s.configDirty.Store(true)
 	return nil
-}
-
-func (s *configService) GetSyncStatus(ctx context.Context) (SyncStatus, error) {
-	if s.syncProvider == nil {
-		return SyncStatus{}, nil
-	}
-	return s.syncProvider.Status(), nil
-}
-
-func (s *configService) TriggerSync(ctx context.Context) error {
-	if s.syncProvider == nil {
-		return fmt.Errorf("sync not configured")
-	}
-	s.syncProvider.TriggerSync()
-	return nil
-}
-
-func (s *configService) HasSyncProvider() bool {
-	return s.syncProvider != nil
 }

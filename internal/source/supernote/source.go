@@ -15,35 +15,27 @@ import (
 
 // Source implements source.Source for the Supernote notes pipeline.
 type Source struct {
-	name   string
-	cfg    Config
-	db     *sql.DB
-	deps   source.SharedDeps
+	name string
+	cfg  Config
+	db   *sql.DB
+	deps source.SharedDeps
 
-	// Supernote-specific dependencies (not in SharedDeps)
-	mariaDB *sql.DB       // nil = SPC catalog sync disabled
-	events  <-chan []byte // nil = Engine.IO listener disabled
-
-	ns   *notestore.Store  // created in Start()
+	ns   *notestore.Store // created in Start()
 	proc *processor.Store
 	pl   *pipeline.Pipeline
 }
 
 // NewSource constructs a Supernote source from a source row and dependencies.
-// mariaDB and events are Supernote-specific: mariaDB enables SPC catalog sync
-// after OCR injection, events enables Engine.IO file-change notifications.
-func NewSource(db *sql.DB, row source.SourceRow, deps source.SharedDeps, mariaDB *sql.DB, events <-chan []byte) (*Source, error) {
+func NewSource(db *sql.DB, row source.SourceRow, deps source.SharedDeps) (*Source, error) {
 	var cfg Config
 	if err := json.Unmarshal([]byte(row.ConfigJSON), &cfg); err != nil {
 		return nil, fmt.Errorf("parse supernote config: %w", err)
 	}
 	return &Source{
-		name:    row.Name,
-		cfg:     cfg,
-		db:      db,
-		deps:    deps,
-		mariaDB: mariaDB,
-		events:  events,
+		name: row.Name,
+		cfg:  cfg,
+		db:   db,
+		deps: deps,
 	}, nil
 }
 
@@ -70,9 +62,6 @@ func (s *Source) Start(ctx context.Context) error {
 			return v != "false"
 		},
 	}
-	if s.mariaDB != nil {
-		workerCfg.CatalogUpdater = processor.NewSPCCatalog(s.mariaDB)
-	}
 	if s.deps.OCRClient != nil {
 		workerCfg.OCRClient = s.deps.OCRClient
 	}
@@ -86,7 +75,6 @@ func (s *Source) Start(ctx context.Context) error {
 		NotesPath: s.cfg.NotesPath,
 		Store:     s.ns,
 		Proc:      s.proc,
-		Events:    s.events,
 		Logger:    s.deps.Logger,
 	})
 	s.pl.Start(ctx)

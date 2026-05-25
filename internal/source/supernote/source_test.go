@@ -78,7 +78,7 @@ func TestNewSourceValidConfig(t *testing.T) {
 		Logger:     nil,
 	}
 
-	src, err := NewSource(db, row, deps, nil, nil)
+	src, err := NewSource(db, row, deps)
 	if err != nil {
 		t.Fatalf("NewSource() error = %v", err)
 	}
@@ -117,7 +117,7 @@ func TestNewSourceInvalidJSON(t *testing.T) {
 		Logger:     nil,
 	}
 
-	_, err := NewSource(db, row, deps, nil, nil)
+	_, err := NewSource(db, row, deps)
 	if err == nil {
 		t.Fatal("NewSource() with invalid JSON should return error")
 	}
@@ -155,7 +155,7 @@ func TestSourceStartStop(t *testing.T) {
 		Logger:     nil,
 	}
 
-	src, err := NewSource(db, row, deps, nil, nil)
+	src, err := NewSource(db, row, deps)
 	if err != nil {
 		t.Fatalf("NewSource() error = %v", err)
 	}
@@ -211,7 +211,7 @@ func TestSourceStartWithOCREnabled(t *testing.T) {
 		Logger:     nil,
 	}
 
-	src, err := NewSource(db, row, deps, nil, nil)
+	src, err := NewSource(db, row, deps)
 	if err != nil {
 		t.Fatalf("NewSource() error = %v", err)
 	}
@@ -274,7 +274,7 @@ func TestSourceWithSettingsClosures(t *testing.T) {
 		Logger:     nil,
 	}
 
-	src, err := NewSource(db, row, deps, nil, nil)
+	src, err := NewSource(db, row, deps)
 	if err != nil {
 		t.Fatalf("NewSource() error = %v", err)
 	}
@@ -357,7 +357,7 @@ func TestNewSourceConfigParsing(t *testing.T) {
 				Logger:     nil,
 			}
 
-			src, err := NewSource(db, row, deps, nil, nil)
+			src, err := NewSource(db, row, deps)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewSource() error = %v, wantErr %v", err, tt.wantErr)
 				return

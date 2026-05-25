@@ -46,7 +46,7 @@ func LegacyNewHandler(
 	searchIndex search.SearchIndex,
 	proc processor.Processor,
 	scanner service.FileScanner,
-	syncProvider service.SyncStatusProvider,
+	_ interface{}, // formerly syncProvider; sync-status surface removed
 	booxStore service.BooxStore,
 	booxImporter service.BooxImporter,
 	booxNotesPath, notesPathPrefix string,
@@ -71,7 +71,7 @@ func LegacyNewHandler(
 	// Create actual service with mocks
 	noteSvc := service.NewNoteService(noteStore, proc, booxStore, booxImporter, nil, searchIndex, scanner, noteDB, booxCachePath, booxNotesPath, logger)
 	searchSvc := service.NewSearchService(searchIndex, retriever, embedder, embedStore, embedModel, chatStore, ragDisplay.ChatAPIURL, ragDisplay.ChatModel, logger)
-	config := service.NewConfigService(noteDB, syncProvider, runningConfig)
+	config := service.NewConfigService(noteDB, runningConfig)
 
 	return NewHandler(tasks, noteSvc, searchSvc, config, noteDB, notesPathPrefix, booxNotesPath, logger, broadcaster)
 }
@@ -1329,141 +1329,6 @@ func TestHandleFilesScan_NilScanner(t *testing.T) {
 	}
 }
 
-// mockSyncProvider implements service.SyncStatusProvider for testing
-type mockSyncProvider struct {
-	status    service.SyncStatus
-	triggered int
-}
-
-func (m *mockSyncProvider) Status() service.SyncStatus { return m.status }
-func (m *mockSyncProvider) TriggerSync()       { m.triggered++ }
-
-// TestHandleSyncStatus_AC31 verifies AC3.1: GET /sync/status returns sync status with timestamps and state
-func TestHandleSyncStatus_AC31(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broadcaster := logging.NewLogBroadcaster()
-	last := time.UnixMilli(1704067200000).UTC()
-	next := time.UnixMilli(1704153600000).UTC()
-	syncProvider := &mockSyncProvider{
-		status: service.SyncStatus{
-			LastSyncAt:    &last,
-			NextSyncAt:    &next,
-			InProgress:    false,
-			AdapterID:     "caldav-adapter",
-			AdapterActive: true,
-		},
-	}
-	handler := LegacyNewHandler(newMockTaskStore(), nil, nil, nil, nil, nil, syncProvider, nil, nil, "", "", nil, logger, broadcaster, nil, nil, "", nil, nil, nil, RAGDisplayConfig{}, &appconfig.Config{})
-
-	req := httptest.NewRequest("GET", "/sync/status", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-	if !strings.Contains(w.Header().Get("Content-Type"), "application/json") {
-		t.Error("expected JSON content type")
-	}
-
-	body := w.Body.String()
-	if !strings.Contains(body, "2024-01-01T00:00:00Z") {
-		t.Errorf("expected LastSyncAt in ISO format, got: %s", body)
-	}
-	if !strings.Contains(body, "caldav-adapter") {
-		t.Errorf("expected adapterId in JSON: %s", body)
-	}
-}
-
-// TestHandleSyncTrigger_AC32 verifies AC3.2: POST /sync/trigger triggers sync and returns status
-func TestHandleSyncTrigger_AC32(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broadcaster := logging.NewLogBroadcaster()
-	last := time.UnixMilli(1704067200000).UTC()
-	syncProvider := &mockSyncProvider{
-		status: service.SyncStatus{
-			LastSyncAt:    &last,
-			InProgress:    false,
-			AdapterActive: true,
-		},
-		triggered: 0,
-	}
-	handler := LegacyNewHandler(newMockTaskStore(), nil, nil, nil, nil, nil, syncProvider, nil, nil, "", "", nil, logger, broadcaster, nil, nil, "", nil, nil, nil, RAGDisplayConfig{}, &appconfig.Config{})
-
-	req := httptest.NewRequest("POST", "/sync/trigger", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-	if syncProvider.triggered != 1 {
-		t.Errorf("TriggerSync called %d times, want 1", syncProvider.triggered)
-	}
-
-	body := w.Body.String()
-	if !strings.Contains(body, "2024-01-01T00:00:00Z") {
-		t.Errorf("expected status in JSON: %s", body)
-	}
-}
-
-// TestHandleSyncStatus_AC33 verifies AC3.3: GET /sync/status shows InProgress when sync is running
-func TestHandleSyncStatus_AC33(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broadcaster := logging.NewLogBroadcaster()
-	last := time.UnixMilli(1704067200000).UTC()
-	syncProvider := &mockSyncProvider{
-		status: service.SyncStatus{
-			LastSyncAt:    &last,
-			InProgress:    true, // Sync in progress
-			AdapterActive: true,
-		},
-	}
-	handler := LegacyNewHandler(newMockTaskStore(), nil, nil, nil, nil, nil, syncProvider, nil, nil, "", "", nil, logger, broadcaster, nil, nil, "", nil, nil, nil, RAGDisplayConfig{}, &appconfig.Config{})
-
-	req := httptest.NewRequest("GET", "/sync/status", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-
-	body := w.Body.String()
-	if !strings.Contains(body, "\"in_progress\":true") {
-		t.Errorf("expected in_progress:true in JSON: %s", body)
-	}
-}
-
-// TestHandleSyncStatus_NilSafe verifies sync endpoints don't crash when syncProvider is nil
-func TestHandleSyncStatus_NilSafe(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broadcaster := logging.NewLogBroadcaster()
-	handler := LegacyNewHandler(newMockTaskStore(), nil, nil, nil, nil, nil, nil, nil, nil, "", "", nil, logger, broadcaster, nil, nil, "", nil, nil, nil, RAGDisplayConfig{}, &appconfig.Config{})
-
-	// GET /sync/status with nil syncProvider should return zero-value service.SyncStatus
-	req := httptest.NewRequest("GET", "/sync/status", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("GET /sync/status status = %d, want 200", w.Code)
-	}
-	body := w.Body.String()
-	if !strings.Contains(body, "\"adapter_active\":false") {
-		t.Errorf("expected zero-value service.SyncStatus in JSON: %s", body)
-	}
-
-	// POST /sync/trigger with nil syncProvider should return 404
-	req = httptest.NewRequest("POST", "/sync/trigger", nil)
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("POST /sync/trigger status = %d, want 404", w.Code)
-	}
-}
-
 // mockEmbedder is a simple embedder for testing
 type mockEmbedder struct {
 	embedFn func(ctx context.Context, text string) ([]float32, error)
@@ -1539,7 +1404,7 @@ func TestHandleMCPTokenCreate_Success(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	config := service.NewConfigService(testDB, nil, &appconfig.Config{})
+	config := service.NewConfigService(testDB, &appconfig.Config{})
 	notes := &mockNoteService{}
 	handler := NewHandler(nil, notes, nil, config, testDB, "", "", logger, broadcaster)
 
@@ -1627,7 +1492,7 @@ func TestHandleSettings_TokenList(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	config := service.NewConfigService(testDB, nil, &appconfig.Config{})
+	config := service.NewConfigService(testDB, &appconfig.Config{})
 	notes := &mockNoteService{}
 	handler := NewHandler(nil, notes, nil, config, testDB, "", "", logger, broadcaster)
 
@@ -1693,7 +1558,7 @@ func TestHandleMCPTokenRevoke_Success(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	config := service.NewConfigService(testDB, nil, &appconfig.Config{})
+	config := service.NewConfigService(testDB, &appconfig.Config{})
 	notes := &mockNoteService{}
 	handler := NewHandler(nil, notes, nil, config, testDB, "", "", logger, broadcaster)
 
@@ -1738,7 +1603,7 @@ func TestHandleMCPTokenCreate_EmptyLabel(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	config := service.NewConfigService(testDB, nil, &appconfig.Config{})
+	config := service.NewConfigService(testDB, &appconfig.Config{})
 	notes := &mockNoteService{}
 	handler := NewHandler(nil, notes, nil, config, testDB, "", "", logger, broadcaster)
 
@@ -2616,7 +2481,7 @@ func TestHandleSettingsSave_SPC(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	config := service.NewConfigService(db, nil, &appconfig.Config{})
+	config := service.NewConfigService(db, &appconfig.Config{})
 	h := NewHandler(nil, &mockNoteService{}, nil, config, db, "", "", logger, broadcaster)
 
 	// First save: set all fields including secrets.

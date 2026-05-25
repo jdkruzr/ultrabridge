@@ -2,11 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Last verified: 2026-04-28
+Last verified: 2026-05-25
 
 Platform-neutral note management and task synchronization service supporting Supernote (via Supernote Private Cloud) and Onyx Boox devices. Six subsystems:
 1. **CalDAV task sync** -- CalDAV VTODO over local SQLite task store
-2. **Device sync** -- bidirectional task sync with Supernote via SPC REST API (adapter-based)
+2. **Device sync** -- UB *is* the device-facing Supernote Private Cloud server (`internal/spcserver`); Supernote devices connect to UB directly. (The legacy SPC *client* — `internal/tasksync`, `internal/sync`, `internal/db`, MariaDB catalog write-through — was removed 2026-05-25.)
 3. **Supernote notes pipeline** -- scans Supernote .note files, extracts/OCRs text, indexes for full-text search
 4. **Boox notes pipeline** -- receives Boox .note files via WebDAV, parses ZIP+protobuf, renders strokes, OCRs, indexes for unified search
 5. **RAG retrieval pipeline** -- Ollama embeddings, hybrid FTS5+vector search, vLLM-powered chat with retrieval-augmented context
@@ -35,11 +35,9 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 - `internal/caldav/` -- CalDAV backend (go-webdav), VTODO conversion with iCal blob overlay (see domain CLAUDE.md)
 - `internal/taskstore/` -- Task model, field mapping helpers, MariaDB CRUD (legacy), ErrNotFound sentinel (see domain CLAUDE.md)
 - `internal/taskdb/` -- SQLite task store: Open/migrate DB, implements caldav.TaskStore (see domain CLAUDE.md)
-- `internal/tasksync/` -- adapter-agnostic sync engine: reconciliation, sync map, conflict resolution (see domain CLAUDE.md)
-- `internal/tasksync/supernote/` -- Supernote SPC REST adapter: JWT auth, field mapping, migration (see domain CLAUDE.md)
 
 ### Note Processing & Pipelines
-- `internal/processor/` -- background OCR job queue: backup, extract, render, OCR, inject, SPC catalog sync (see domain CLAUDE.md)
+- `internal/processor/` -- background OCR job queue: backup, extract, render, OCR, inject, index (see domain CLAUDE.md)
 - `internal/search/` -- FTS5 full-text search over note content (see domain CLAUDE.md)
 - `internal/notestore/` -- file inventory (scan, list, get), content hashing, job transfer against SQLite notes table (see domain CLAUDE.md)
 - `internal/pipeline/` -- file detection: fsnotify watcher, reconciler, Engine.IO listener (see domain CLAUDE.md)
@@ -64,15 +62,12 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 - `internal/web/` -- HTML UI: setup wizard, settings, task list, Files tab, Search tab, Chat tab, processor C&C, sync status, Boox render/versions, JSON API, config/sources API, MCP token management, SSE log stream (see domain CLAUDE.md)
 - `internal/mcpauth/` -- MCP bearer token store: SHA-256 hashed tokens in SQLite, CRUD + validation (see domain CLAUDE.md)
 
-### SPC Server (UB-as-SPC refactor, Phase 0+)
-- `internal/spcserver/` -- Device-facing Supernote Private Cloud protocol reimplementation; currently stub-only (see domain CLAUDE.md). Spec source: `docs/spc-protocol.md` and `/home/sysop/spc-rev/cfr-decrypted/`. Design plan: `docs/design-plans/2026-05-15-ub-as-spc-refactor.md` (Phase 0 complete; Phase 1 = skeleton + auth + tasks).
+### SPC Server (UB-as-SPC) — the device-facing integration
+- `internal/spcserver/` -- Device-facing Supernote Private Cloud protocol reimplementation: auth, tasks, file listing/download/upload/mutations, digests, and its own Socket.IO registry for STARTSYNC push. Phases 0–4 + digests-D1 complete and hardware-validated; this is now the ONLY way UB talks to Supernote devices (see domain CLAUDE.md). Spec source: `docs/spc-protocol.md` and `/home/sysop/spc-rev/cfr-decrypted/`. Config via Settings → "UB-as-SPC Device Sync Server" (`UB_SPC_*` env overrides). Remaining follow-ups: `docs/spc-followups.md`.
 
 ### Infrastructure
-- `internal/sync/` -- Engine.IO v3 notifier: STARTSYNC push + inbound events (see domain CLAUDE.md)
-- `internal/auth/` -- Basic Auth middleware (bcrypt)
-- `internal/db/` -- MariaDB pool + single-user discovery
+- `internal/auth/` -- Basic Auth middleware (bcrypt) + bearer-token validation (mcpauth)
 - `internal/logging/` -- structured slog, file rotation, syslog, WebSocket broadcast
-- `tests/` -- integration tests (require real DB)
 
 ## Build & Test
 
@@ -90,10 +85,6 @@ Run a single package's tests:
 go test -C /home/jtd/ultrabridge ./internal/taskstore/
 ```
 
-Integration tests (require running MariaDB with Supernote schema):
-```bash
-TEST_DBENV_PATH=/mnt/supernote/.dbenv go test -C /home/jtd/ultrabridge -tags integration ./tests/ -v
-```
 
 Docker build:
 ```bash
@@ -150,7 +141,7 @@ All other configuration (auth, OCR, sources, logging, RAG, chat) is configured v
 ## Conventions
 
 - Module: `github.com/sysop/ultrabridge`
-- Config: all env vars prefixed `UB_`, DB creds from shared `.dbenv` file (legacy MariaDB support)
+- Config: all env vars prefixed `UB_`; all non-bootstrap config is DB-backed (SQLite settings table) and editable via the web Settings UI
 - Auth: single-user Basic Auth, password stored as bcrypt hash
 - Sources: device-agnostic pipelines, platform-specific adapters for Supernote and Boox
 
@@ -162,17 +153,14 @@ All other configuration (auth, OCR, sources, logging, RAG, chat) is configured v
 - Soft deletes only: `is_deleted = 'Y'`, never hard delete
 - iCal blob: VTODO round-trip fidelity via `ical_blob` column; DB fields overlaid on read
 
-### Device Sync (tasksync)
-- Adapter-based: sync engine is device-agnostic, adapters implement DeviceAdapter interface
-- UB-wins conflict resolution: local task store is authoritative
-- Sync map: per-task local-to-remote ID mapping in SQLite tables (sync_state, task_sync_map)
-- Supernote adapter: SPC REST API with JWT challenge-response auth
-- Config: UB_SN_SYNC_ENABLED, UB_SN_SYNC_INTERVAL, UB_SN_API_URL, UB_SN_PASSWORD
-- Task DB path: UB_TASK_DB_PATH (SQLite file for local task store)
+### Device Sync (UB-as-SPC server)
+- UB runs the Supernote Private Cloud protocol (`internal/spcserver`); the device connects to UB as its cloud. Tasks, files, and digests sync over that protocol. UB-wins conflict resolution; local SQLite task store (taskdb) is authoritative.
+- STARTSYNC push: `internal/spcserver/notify` over the server's own Socket.IO registry (server mode only); a no-op notifier otherwise.
+- Config: Settings → "UB-as-SPC Device Sync Server" (DB-backed; `UB_SPC_*` env overrides). Task DB path: UB_TASK_DB_PATH (SQLite).
+- The legacy SPC *client* (REST pull via `internal/tasksync`, Engine.IO `internal/sync`, MariaDB `internal/db`) was removed 2026-05-25 — UB no longer connects out to a real SPC.
 
-### Notes Pipeline (SQLite + MariaDB catalog sync)
-- Three databases: SQLite for tasks (taskdb), SQLite for notes pipeline (notedb), MariaDB for SPC catalog sync
-- After OCR injection, processor updates SPC MariaDB catalog (f_user_file, f_file_action, f_capacity) so the device sees correct file size/md5 -- best-effort, failures logged not propagated
+### Notes Pipeline (SQLite)
+- Two databases: SQLite for tasks (taskdb), SQLite for notes pipeline (notedb). (The MariaDB SPC catalog write-through was removed with the legacy client 2026-05-25; the UB-as-SPC server derives file size from os.Stat and md5 lazily via `spc_file_ids`, so no catalog sync is needed.)
 - SQLite in WAL mode, MaxOpenConns=1 (single-writer)
 - Job statuses: pending -> in_progress -> done|failed|skipped
 - Backup before modification: original .note copied to backup tree, never overwritten

@@ -562,7 +562,6 @@
         }
 
         // Shared background pollers
-        setInterval(updateSyncStatus, 5000);
         setInterval(updateProcessorStatus, 5000);
 
         // ... remaining JS will be in layout.html but some might move to fragments
@@ -723,67 +722,6 @@
             .catch(function() {});
         }
 
-        function updateSyncStatus() {
-          fetch('/sync/status')
-            .then(r => r.json())
-            .then(data => {
-              const statusEl = document.getElementById('sync-status');
-              if (!statusEl) return;
-              const lastEl = document.getElementById('sync-last');
-              const nextEl = document.getElementById('sync-next');
-              const errorEl = document.getElementById('sync-error');
-              const btn = document.getElementById('sync-now-btn');
-
-              if (!data.adapter_active) {
-                statusEl.textContent = 'Disabled';
-                statusEl.className = 'badge';
-                if (btn) btn.disabled = true;
-                if (lastEl) lastEl.textContent = '';
-                if (nextEl) nextEl.textContent = '';
-                if (errorEl) errorEl.textContent = '';
-                return;
-              }
-
-              if (data.in_progress) {
-                statusEl.textContent = 'Syncing...';
-                statusEl.className = 'badge badge-progress';
-                if (btn) btn.disabled = true;
-              } else {
-                statusEl.textContent = 'Active';
-                statusEl.className = 'badge badge-done';
-                if (btn) btn.disabled = false;
-              }
-
-              function formatTime(isoStr) {
-                if (!isoStr) return 'never';
-                const d = new Date(isoStr);
-                if (d.getFullYear() < 2000) return 'never';
-                return d.toLocaleTimeString();
-              }
-
-              if (lastEl) lastEl.textContent = data.last_sync_at ? 'Last: ' + formatTime(data.last_sync_at) : 'Last: never';
-              if (nextEl) nextEl.textContent = data.next_sync_at && formatTime(data.next_sync_at) !== 'never' ? 'Next: ' + formatTime(data.next_sync_at) : '';
-              if (errorEl) errorEl.textContent = data.last_error ? 'Error: ' + data.last_error : '';
-            })
-            .catch(() => {
-              const statusEl = document.getElementById('sync-status');
-              if (statusEl) {
-                statusEl.textContent = 'Offline';
-                statusEl.className = 'badge';
-              }
-            });
-        }
-
-        function triggerSync() {
-          const btn = document.getElementById('sync-now-btn');
-          btn.disabled = true;
-          document.getElementById('sync-status').textContent = 'Syncing...';
-          document.getElementById('sync-status').className = 'badge badge-progress';
-          fetch('/sync/trigger', {method: 'POST'})
-            .then(() => setTimeout(updateSyncStatus, 1000))
-            .catch(() => { btn.disabled = false; });
-        }
-
         let logWebSocket = null;
 
         // On page load, activate the tab the server designated (for /files and /search routes).
@@ -810,9 +748,6 @@
                 }
             }
         })();
-
-        // Poll sync status every 5 seconds (matches Files tab pattern)
-        updateSyncStatus();
 
         // Register Service Worker for PWA
         if ('serviceWorker' in navigator) {
@@ -1180,11 +1115,6 @@
             ocr_max_file_mb: parseInt(document.getElementById('config-ocr-max-file-mb').value) || 0,
             // Embedding (ollama_*) and chat (chat_*) live in the "General" card below
             // (RAG Search / AI Chat, with enable toggles) — not duplicated here.
-            sn_sync_enabled: document.getElementById('config-sn-sync-enabled').value === 'true',
-            sn_sync_interval: parseInt(document.getElementById('config-sn-sync-interval').value) || 300,
-            sn_api_url: document.getElementById('config-sn-api-url').value,
-            sn_account: document.getElementById('config-sn-account').value,
-            sn_password: document.getElementById('config-sn-password').value,
             mcp_port: parseInt(document.getElementById('config-mcp-port').value) || 0
           };
 

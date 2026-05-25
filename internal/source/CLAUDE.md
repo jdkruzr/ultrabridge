@@ -56,14 +56,14 @@ Bundles infrastructure shared across all source adapters: `Indexer`, `Embedder`,
 ## Sub-packages
 
 ### supernote/
-Supernote source adapter. Parses `Config` from `config_json` (NotesPath, BackupPath, JIIXEnabled). Creates notestore, processor, and pipeline internally on `Start()`. Accepts Supernote-specific deps (mariaDB, Engine.IO events) beyond SharedDeps.
+Supernote source adapter. Parses `Config` from `config_json` (NotesPath, BackupPath, JIIXEnabled). Creates notestore, processor, and pipeline internally on `Start()` from SharedDeps alone (the legacy mariaDB/Engine.IO deps were removed with the SPC client 2026-05-25).
 
 ### boox/
 Boox source adapter. Parses `Config` from `config_json` (NotesPath, ImportPath). Creates booxpipeline.Processor internally on `Start()`. Accepts Boox-specific deps (ContentDeleter, OnTodosFound) beyond SharedDeps.
 
 ## Key Decisions
 
-- Factory closures in main.go capture extra type-specific deps (mariaDB, events, BooxDeps) and present a uniform Factory signature to the registry
+- Factory closures in main.go capture extra type-specific deps (e.g. BooxDeps) and present a uniform Factory signature to the registry
 - Sources table uses millisecond UTC timestamps for created_at/updated_at
 - Enabled stored as integer (0/1) in SQLite, mapped to bool in Go
 

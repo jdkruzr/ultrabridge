@@ -60,35 +60,6 @@
     <hr>
 
     <div style="margin-bottom: 2rem;">
-      <h3 style="margin-bottom: 1rem;">Supernote Device Sync</h3>
-      <div class="form-group">
-        <label for="config-sn-sync-enabled">Enabled</label>
-        <select id="config-sn-sync-enabled">
-          <option value="false" {{if not .Config.SNSyncEnabled}}selected{{end}}>Disabled</option>
-          <option value="true" {{if .Config.SNSyncEnabled}}selected{{end}}>Enabled</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="config-sn-sync-interval">Sync Interval (seconds)</label>
-        <input id="config-sn-sync-interval" type="number" value="{{.Config.SNSyncInterval}}">
-      </div>
-      <div class="form-group">
-        <label for="config-sn-api-url">API URL</label>
-        <input id="config-sn-api-url" type="text" value="{{.Config.SNAPIURL}}">
-      </div>
-      <div class="form-group">
-        <label for="config-sn-account">Account</label>
-        <input id="config-sn-account" type="text" value="{{.Config.SNAccount}}">
-      </div>
-      <div class="form-group">
-        <label for="config-sn-password">Password</label>
-        <input id="config-sn-password" type="password" placeholder="Leave empty to keep current">
-      </div>
-    </div>
-
-    <hr>
-
-    <div style="margin-bottom: 2rem;">
       <h3 style="margin-bottom: 1rem;">MCP Server</h3>
       <div class="form-group">
         <label for="config-mcp-port">ub-mcp container port</label>

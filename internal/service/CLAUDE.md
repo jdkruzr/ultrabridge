@@ -7,8 +7,8 @@ Last verified: 2026-04-28
 Decouples HTTP handlers in `internal/web` from the concrete stores
 and pipelines that back them. The web layer depends only on
 service interfaces; concrete adapters live in their own packages
-(`taskdb`, `notedb`, `booxpipeline`, `processor`, `search`,
-`tasksync`). New device kinds, alternate storage backends, or
+(`taskdb`, `notedb`, `booxpipeline`, `processor`, `search`).
+New device kinds, alternate storage backends, or
 test doubles plug in by satisfying these interfaces.
 
 ## Contracts
@@ -28,15 +28,15 @@ all implemented by unexported structs and constructed via
 - **`SearchService`** — FTS5+vector hybrid search, vLLM-streamed
   chat (returns `<-chan ChatResponse` for SSE), embedding
   backfill. `HasEmbeddingPipeline()` gates the chat tab.
-- **`ConfigService`** — config get/save, sources CRUD, and a thin
-  delegate over `tasksync.SyncEngine` via `SyncStatusProvider`.
+- **`ConfigService`** — config get/save and sources CRUD. (The
+  sync-status delegate was removed with the legacy SPC client
+  2026-05-25; device sync now lives entirely in `internal/spcserver`.)
 
 ## Dependencies
 
 - **Uses**: `taskdb` (TaskStore), `booxpipeline` (BooxStore,
   BooxImporter, BooxProcessor), `processor` (Supernote pipeline),
-  `notestore`, `search`, `chat`, `rag`, `tasksync` (via
-  `SyncStatusProvider`), `appconfig`.
+  `notestore`, `search`, `chat`, `rag`, `appconfig`.
 - **Used by**: `cmd/ultrabridge` (wires services at startup,
   passes them to `web.NewHandler`), `internal/web` (handlers).
 - **Boundary**: services must NOT import `internal/web`, MUST NOT

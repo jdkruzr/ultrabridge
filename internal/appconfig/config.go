@@ -52,13 +52,6 @@ type Config struct {
 	ChatAPIURL  string
 	ChatModel   string
 
-	// Supernote device sync
-	SNSyncEnabled  bool
-	SNSyncInterval int // seconds
-	SNAPIURL       string
-	SNAccount      string
-	SNPassword     string
-
 	// Logging
 	LogLevel         string
 	LogFormat        string
@@ -74,17 +67,10 @@ type Config struct {
 	DueTimeMode          string // "preserve" or "date_only"
 
 	// Server
-	WebEnabled  bool
-	SocketIOURL string
+	WebEnabled bool
 
 	// MCP
 	MCPPort int // 0 hides the Settings "MCP Connection" helper card
-
-	// MariaDB / SPC connection
-	DBHost    string
-	DBPort    string
-	DBEnvPath string
-	UserID    int64
 
 	// SPC server (UB-as-SPC refactor)
 	SPCMode       string // "client" (default, no listener) | "server"
@@ -163,11 +149,6 @@ func loadConfigFromDB(ctx context.Context, db *sql.DB, applyEnv bool) (*Config, 
 		ChatEnabled:          parseBool(dbVals[KeyChatEnabled]),
 		ChatAPIURL:           dbVals[KeyChatAPIURL],
 		ChatModel:            dbVals[KeyChatModel],
-		SNSyncEnabled:        parseBool(dbVals[KeySNSyncEnabled]),
-		SNSyncInterval:       parseIntWithDefault(dbVals[KeySNSyncInterval], 300),
-		SNAPIURL:             dbVals[KeySNAPIURL],
-		SNAccount:            dbVals[KeySNAccount],
-		SNPassword:           dbVals[KeySNPassword],
 		LogLevel:             dbVals[KeyLogLevel],
 		LogFormat:            dbVals[KeyLogFormat],
 		LogFile:              dbVals[KeyLogFile],
@@ -179,11 +160,6 @@ func loadConfigFromDB(ctx context.Context, db *sql.DB, applyEnv bool) (*Config, 
 		CalDAVCollectionName: dbVals[KeyCalDAVCollectionName],
 		DueTimeMode:          dbVals[KeyDueTimeMode],
 		WebEnabled:           parseBool(dbVals[KeyWebEnabled]),
-		SocketIOURL:          dbVals[KeySocketIOURL],
-		DBHost:               dbVals[KeyDBHost],
-		DBPort:               dbVals[KeyDBPort],
-		DBEnvPath:            dbVals[KeyDBEnvPath],
-		UserID:               parseInt64(dbVals[KeyUserID]),
 		MCPPort:              parseIntWithDefault(dbVals[KeyMCPPort], 8081),
 		SPCMode:              dbVals[KeySPCMode],
 		SPCListenAddr:        dbVals[KeySPCListenAddr],
@@ -300,11 +276,6 @@ func configToMap(cfg *Config) map[string]string {
 		KeyChatEnabled:          boolToString(cfg.ChatEnabled),
 		KeyChatAPIURL:           cfg.ChatAPIURL,
 		KeyChatModel:            cfg.ChatModel,
-		KeySNSyncEnabled:        boolToString(cfg.SNSyncEnabled),
-		KeySNSyncInterval:       strconv.Itoa(cfg.SNSyncInterval),
-		KeySNAPIURL:             cfg.SNAPIURL,
-		KeySNAccount:            cfg.SNAccount,
-		KeySNPassword:           cfg.SNPassword,
 		KeyLogLevel:             cfg.LogLevel,
 		KeyLogFormat:            cfg.LogFormat,
 		KeyLogFile:              cfg.LogFile,
@@ -316,11 +287,6 @@ func configToMap(cfg *Config) map[string]string {
 		KeyCalDAVCollectionName: cfg.CalDAVCollectionName,
 		KeyDueTimeMode:          cfg.DueTimeMode,
 		KeyWebEnabled:           boolToString(cfg.WebEnabled),
-		KeySocketIOURL:          cfg.SocketIOURL,
-		KeyDBHost:               cfg.DBHost,
-		KeyDBPort:               cfg.DBPort,
-		KeyDBEnvPath:            cfg.DBEnvPath,
-		KeyUserID:               strconv.FormatInt(cfg.UserID, 10),
 		KeyMCPPort:              strconv.Itoa(cfg.MCPPort),
 		KeySPCMode:              cfg.SPCMode,
 		KeySPCListenAddr:        cfg.SPCListenAddr,

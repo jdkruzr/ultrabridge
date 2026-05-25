@@ -402,11 +402,6 @@ func TestRoundtrip(t *testing.T) {
 		ChatEnabled:          true,
 		ChatAPIURL:           "http://custom-chat:8000",
 		ChatModel:            "custom-chat-model",
-		SNSyncEnabled:        true,
-		SNSyncInterval:       600,
-		SNAPIURL:             "http://custom-sn:8080",
-		SNAccount:            "account123",
-		SNPassword:           "password123",
 		LogLevel:             "debug",
 		LogFormat:            "text",
 		LogFile:              "/var/log/app.log",
@@ -417,11 +412,6 @@ func TestRoundtrip(t *testing.T) {
 		CalDAVCollectionName: "My Tasks",
 		DueTimeMode:          "date_only",
 		WebEnabled:           false,
-		SocketIOURL:          "ws://custom:8080/socket.io/",
-		DBHost:               "custom-db",
-		DBPort:               "5432",
-		DBEnvPath:            "/custom/.dbenv",
-		UserID:               999,
 	}
 
 	// Save it.
@@ -453,12 +443,6 @@ func TestRoundtrip(t *testing.T) {
 	}
 	if loaded.ChatEnabled != original.ChatEnabled {
 		t.Errorf("ChatEnabled mismatch: expected %v, got %v", original.ChatEnabled, loaded.ChatEnabled)
-	}
-	if loaded.DBPort != original.DBPort {
-		t.Errorf("DBPort mismatch: expected %q, got %q", original.DBPort, loaded.DBPort)
-	}
-	if loaded.UserID != original.UserID {
-		t.Errorf("UserID mismatch: expected %d, got %d", original.UserID, loaded.UserID)
 	}
 	if loaded.WebEnabled != original.WebEnabled {
 		t.Errorf("WebEnabled mismatch: expected %v, got %v", original.WebEnabled, loaded.WebEnabled)

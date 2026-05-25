@@ -27,16 +27,6 @@
             </label>
         </div>
 
-        <!-- Sync Status Panel -->
-        <div class="status-panel">
-          <span class="text-bold">Sync Status:</span>
-          <span id="sync-status" class="badge">Loading...</span>
-          <span id="sync-last" class="text-small"></span>
-          <span id="sync-next" class="text-small"></span>
-          <span id="sync-error" class="text-danger text-small"></span>
-          <div class="flex-spacer"></div>
-          <button id="sync-now-btn" class="btn-small" onclick="triggerSync()">Sync Now</button>
-        </div>
         <div id="bulk-actions" style="display: none; margin-bottom: 1rem; padding: 1rem; background: var(--bg-color); border-radius: var(--radius); border: 1px solid var(--brand-color);">
             <span id="selected-count" class="text-small text-bold" style="margin-right: 1rem;">0 selected</span>
             <button type="button" hx-post="/tasks/bulk" hx-include=".task-checkbox:checked" hx-vals='{"action": "complete"}' hx-swap="none" hx-on:htmx:after-request="if(!event.detail.successful) return; const doc = new DOMParser().parseFromString('&lt;table&gt;&lt;tbody&gt;' + event.detail.xhr.responseText + '&lt;/tbody&gt;&lt;/table&gt;', 'text/html'); doc.querySelectorAll('tr[id^=&quot;task-&quot;]').forEach(newRow => { const existing = document.getElementById(newRow.id); if (existing) existing.replaceWith(newRow); }); updateBulkActions();" class="btn-small">Complete Selected</button>

@@ -35,18 +35,6 @@ func (m *mockIndexer) IndexPage(_ context.Context, path string, page int, source
 	return nil
 }
 
-// mockCatalogUpdater records AfterInject calls for assertion.
-type mockCatalogUpdater struct {
-	called bool
-	path   string
-}
-
-func (m *mockCatalogUpdater) AfterInject(_ context.Context, path string) error {
-	m.called = true
-	m.path = path
-	return nil
-}
-
 // mockOCRServer returns a fixed JSON response matching the Anthropic Messages API format.
 func mockOCRServer(t *testing.T, responseText string) *httptest.Server {
 	t.Helper()
@@ -991,68 +979,6 @@ func TestWorker_JIIX_ForbiddenFields_InElements(t *testing.T) {
 				}
 			}
 		}
-	}
-}
-
-// AC5.1: AfterInject is called on the success path after executeJob returns nil.
-func TestWorker_CatalogUpdaterCalledOnSuccess(t *testing.T) {
-	notePath := copyTestNote(t, "20260318_154108 std one line.note")
-	cat := &mockCatalogUpdater{}
-	s := openWorkerStore(t, WorkerConfig{CatalogUpdater: cat})
-	seedNote(t, s, notePath)
-
-	s.processJob(context.Background(), &Job{ID: 1, NotePath: notePath})
-
-	var status string
-	s.db.QueryRow("SELECT status FROM jobs WHERE id=1").Scan(&status)
-	if status != StatusDone {
-		t.Errorf("status = %q, want done", status)
-	}
-	if !cat.called {
-		t.Error("AfterInject was not called on success path")
-	}
-	if cat.path != notePath {
-		t.Errorf("AfterInject called with path %q, want %q", cat.path, notePath)
-	}
-}
-
-// AC5.2: AfterInject is not called when executeJob returns an error.
-func TestWorker_CatalogUpdaterNotCalledOnFailure(t *testing.T) {
-	cat := &mockCatalogUpdater{}
-	s := openWorkerStore(t, WorkerConfig{CatalogUpdater: cat})
-	path := "/nonexistent/missing.note"
-	seedNote(t, s, path)
-
-	job, err := s.claimNext(context.Background())
-	if err != nil || job == nil {
-		t.Fatalf("claimNext: %v (job=%v)", err, job)
-	}
-
-	s.processJob(context.Background(), job)
-
-	var status string
-	s.db.QueryRow("SELECT status FROM jobs WHERE id=?", job.ID).Scan(&status)
-	if status == StatusDone {
-		t.Fatalf("expected non-done status for failing job, got done")
-	}
-	if cat.called {
-		t.Error("AfterInject must not be called when executeJob returns an error")
-	}
-}
-
-// AC6.1: A nil CatalogUpdater in WorkerConfig causes no panic.
-func TestWorker_NilCatalogUpdater(t *testing.T) {
-	notePath := copyTestNote(t, "20260318_154108 std one line.note")
-	s := openWorkerStore(t, WorkerConfig{}) // CatalogUpdater is nil
-	seedNote(t, s, notePath)
-
-	// Must not panic.
-	s.processJob(context.Background(), &Job{ID: 1, NotePath: notePath})
-
-	var status string
-	s.db.QueryRow("SELECT status FROM jobs WHERE id=1").Scan(&status)
-	if status != StatusDone {
-		t.Errorf("status = %q, want done", status)
 	}
 }
 

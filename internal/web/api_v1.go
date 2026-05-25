@@ -350,11 +350,9 @@ func (h *Handler) handleV1ChatAsk(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleV1Status(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	syncStatus, _ := h.config.GetSyncStatus(ctx)
 	jobStatus, _ := h.notes.GetProcessorStatus(ctx)
 
 	resp := map[string]interface{}{
-		"sync": syncStatus,
 		"jobs": jobStatus,
 	}
 	w.Header().Set("Content-Type", "application/json")

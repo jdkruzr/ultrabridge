@@ -16,7 +16,6 @@ type Pipeline struct {
 	notesPath string
 	store     notestore.NoteStore
 	proc      processor.Processor
-	events    <-chan []byte // inbound Engine.IO messages; nil = disabled
 	logger    *slog.Logger
 	cancel    context.CancelFunc
 	done      chan struct{}
@@ -27,7 +26,6 @@ type Config struct {
 	NotesPath string
 	Store     notestore.NoteStore
 	Proc      processor.Processor
-	Events    <-chan []byte // from notifier.Events(); nil = no Engine.IO listener
 	Logger    *slog.Logger
 }
 
@@ -41,7 +39,6 @@ func New(cfg Config) *Pipeline {
 		notesPath: cfg.NotesPath,
 		store:     cfg.Store,
 		proc:      cfg.Proc,
-		events:    cfg.Events,
 		logger:    logger,
 	}
 }
@@ -75,9 +72,6 @@ func (p *Pipeline) runAll(ctx context.Context) {
 
 	go p.runWatcher(ctx)
 	go p.runReconciler(ctx)
-	if p.events != nil {
-		go p.runEngineIOListener(ctx)
-	}
 
 	<-ctx.Done()
 }

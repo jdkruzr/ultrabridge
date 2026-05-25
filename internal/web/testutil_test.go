@@ -27,10 +27,8 @@ func newTestHandler() *Handler {
 		embeddingPipelineConfigured: true,
 		chatEnabled: true,
 	}
-	config := &mockConfigService{
-		syncConfigured: true,
-	}
-	
+	config := &mockConfigService{}
+
 	return NewHandler(tasks, notes, search, config, nil, "", "", logger, broadcaster)
 }
 
@@ -297,9 +295,7 @@ func (m *mockSearchService) HasEmbeddingPipeline() bool { return m.embeddingPipe
 type mockConfigService struct {
 	config interface{}
 	sources interface{}
-	syncStatus service.SyncStatus
 	restartRequired bool
-	syncConfigured bool
 }
 
 func (m *mockConfigService) GetConfig(ctx context.Context) (interface{}, error) { return m.config, nil }
@@ -309,8 +305,3 @@ func (m *mockConfigService) ListSources(ctx context.Context) (interface{}, error
 func (m *mockConfigService) AddSource(ctx context.Context, source interface{}) error { return nil }
 func (m *mockConfigService) UpdateSource(ctx context.Context, id string, source interface{}) error { return nil }
 func (m *mockConfigService) DeleteSource(ctx context.Context, id string) error { return nil }
-func (m *mockConfigService) GetSyncStatus(ctx context.Context) (service.SyncStatus, error) {
-	return m.syncStatus, nil
-}
-func (m *mockConfigService) TriggerSync(ctx context.Context) error { return nil }
-func (m *mockConfigService) HasSyncProvider() bool { return m.syncConfigured }

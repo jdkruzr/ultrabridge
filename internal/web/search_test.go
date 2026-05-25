@@ -64,7 +64,7 @@ func TestSearchPage_SourceBadges(t *testing.T) {
 		searchIdx,
 		newMockProcessor(),
 		&mockScanner{},
-		&mockSyncProvider{},
+		nil, // syncProvider removed
 		nil, // booxStore not needed for this test
 		nil, // booxImporter not needed for this test
 		booxNotesPath,

@@ -20,29 +20,18 @@ type Indexer interface {
 	IndexPage(ctx context.Context, path string, pageIdx int, source, bodyText, titleText, keywords string) error
 }
 
-// CatalogUpdater is the interface the worker uses to update the SPC MariaDB
-// catalog after a successful OCR injection. A nil CatalogUpdater disables
-// catalog sync. Defined here (not in a separate package) to avoid circular imports.
-type CatalogUpdater interface {
-	// AfterInject updates the SPC MariaDB catalog to reflect a file that
-	// was modified server-side by OCR injection. All DB operations are
-	// best-effort: errors are logged but do not propagate.
-	AfterInject(ctx context.Context, path string) error
-}
-
 // WorkerConfig holds runtime configuration for the OCR worker.
 type WorkerConfig struct {
-	OCREnabled     bool
-	BackupPath     string
-	MaxFileMB      int
-	OCRClient      *OCRClient     // nil = OCR disabled
-	OCRPrompt      func() string  // returns current OCR prompt; nil = use default
-	InjectEnabled  func() bool    // returns whether JIIX injection is enabled; nil = enabled
-	Indexer        Indexer         // nil = indexing disabled
-	CatalogUpdater CatalogUpdater // nil = SPC catalog sync disabled
-	Embedder       rag.Embedder   // nil = embedding disabled
-	EmbedModel     string         // model name for note_embeddings.model column
-	EmbedStore     rag.EmbedStore // nil = embedding disabled
+	OCREnabled    bool
+	BackupPath    string
+	MaxFileMB     int
+	OCRClient     *OCRClient    // nil = OCR disabled
+	OCRPrompt     func() string // returns current OCR prompt; nil = use default
+	InjectEnabled func() bool   // returns whether JIIX injection is enabled; nil = enabled
+	Indexer       Indexer       // nil = indexing disabled
+	Embedder      rag.Embedder  // nil = embedding disabled
+	EmbedModel    string        // model name for note_embeddings.model column
+	EmbedStore    rag.EmbedStore // nil = embedding disabled
 }
 
 // EnqueueOption configures optional behavior for Enqueue.

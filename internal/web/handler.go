@@ -281,21 +281,6 @@ func NewHandler(
 	h.mux.HandleFunc("POST /maintenance/boox/delete-untitled", h.handleMaintenanceBooxDeleteUntitled)
 	h.mux.HandleFunc("POST /maintenance/boox/scan-untracked", h.handleMaintenanceBooxScanUntracked)
 
-	h.mux.HandleFunc("GET /sync/status", func(w http.ResponseWriter, r *http.Request) {
-		if h.config == nil {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(service.SyncStatus{})
-			return
-		}
-		h.handleSyncStatus(w, r)
-	})
-	h.mux.HandleFunc("POST /sync/trigger", func(w http.ResponseWriter, r *http.Request) {
-		if h.config == nil || !h.config.HasSyncProvider() {
-			http.NotFound(w, r)
-			return
-		}
-		h.handleSyncTrigger(w, r)
-	})
 	h.registerLogStreamHandler(broadcaster)
 
 	h.mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
@@ -708,7 +693,19 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	cObj, _ := h.config.GetConfig(r.Context())
 	cfg := cObj.(*appconfig.Config)
 	switch r.FormValue("section") {
-	case "supernote": cfg.SNSyncEnabled = r.FormValue("inject_enabled") != "false"
+	case "supernote":
+		// JIIX injection + OCR prompt are runtime-configurable keys read at job
+		// time by the Supernote source (notedb.GetSetting), not Config fields —
+		// write them directly so they take effect without a restart.
+		if h.noteDB != nil {
+			ctx := r.Context()
+			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeySNInjectEnabled, r.FormValue("inject_enabled"))
+			if v := r.FormValue("ocr_prompt"); v != "" {
+				_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeySNOCRPrompt, v)
+			}
+		}
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
 	case "ub-spc":
 		// UB-as-SPC device-sync server config. Every field is restart-required
 		// (the server is constructed once at startup), so UpdateConfig below
@@ -957,19 +954,6 @@ func (h *Handler) handleMaintenanceBooxScanUntracked(w http.ResponseWriter, r *h
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<p class="text-small">Scanned %d file(s), enqueued %d previously untracked.</p>`,
 		scanned, enqueued)
-}
-
-func (h *Handler) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
-	status, _ := h.config.GetSyncStatus(r.Context())
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
-}
-
-func (h *Handler) handleSyncTrigger(w http.ResponseWriter, r *http.Request) {
-	h.config.TriggerSync(r.Context())
-	status, _ := h.config.GetSyncStatus(r.Context())
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
 }
 
 // respondFileRowOrRedirect fetches the updated file and emits a source-

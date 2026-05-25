@@ -47,7 +47,7 @@ func initSourceTestDB(t *testing.T) *sql.DB {
 func setupTestHandler(t *testing.T, db *sql.DB) *Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	cfgService := service.NewConfigService(db, nil, &appconfig.Config{})
+	cfgService := service.NewConfigService(db, &appconfig.Config{})
 
 	return NewHandler(
 		&mockTaskService{},
