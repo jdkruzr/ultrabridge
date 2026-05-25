@@ -246,9 +246,13 @@ func main() {
 	}
 
 	socketIOURL := envOrDefault("UB_SOCKETIO_URL", "ws://supernote-service:8080/socket.io/")
+	// The legacy Engine.IO client to the real SPC is created here (its Events()
+	// channel feeds the legacy Supernote source pipeline), but is only DIALED when
+	// legacy sync is enabled — see the cfg.SNSyncEnabled block below. Dialing
+	// unconditionally made it reconnect-loop against a down/absent SPC forever
+	// (noise during UB-as-SPC-only operation). When not dialed, Events() stays
+	// quiet and Notify() degrades gracefully (no-op).
 	notifier := sync.NewNotifier(socketIOURL, logger)
-	notifier.Connect(context.Background())
-	defer notifier.Close()
 
 	// Open the notes SQLite DB (separate from Supernote's MariaDB)
 	noteDB, err := notedb.Open(context.Background(), bootstrapCfg.dbPath)
@@ -412,6 +416,10 @@ func main() {
 	// Start sync engine if enabled
 	var syncEngine *tasksync.SyncEngine
 	if cfg.SNSyncEnabled {
+		// Dial the legacy SPC Engine.IO socket only when legacy sync is on
+		// (otherwise the notifier stays created-but-quiet — see above).
+		notifier.Connect(context.Background())
+		defer notifier.Close()
 		syncEngine = tasksync.NewSyncEngine(
 			store, taskDB, logger,
 			time.Duration(cfg.SNSyncInterval)*time.Second,
