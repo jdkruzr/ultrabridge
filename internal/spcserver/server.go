@@ -59,8 +59,17 @@ type Config struct {
 	// Supernote source's NotesPath). Both nil/empty ⇒ no OCR kick.
 	UploadEnqueuer handlers.Enqueuer
 	OCRWatchDir    string
-	Logger         *slog.Logger
+	// DigestStore (optional, Phase D) is the canonical digest ("summary") store
+	// the device syncs digests to/from. Nil ⇒ the summary query endpoints fall
+	// back to empty-success stubs and the write endpoints stay 404 (pre-Phase-D).
+	DigestStore DigestStore
+	Logger      *slog.Logger
 }
+
+// DigestStore is the digest store the SPC server needs (Phase D). Aliased from
+// the handlers package so main can hold an interface-typed value (and a true nil
+// when digest migration fails) without importing handlers directly.
+type DigestStore = handlers.DigestStore
 
 // UploadEnqueuerFunc adapts a plain func to handlers.Enqueuer (the processor's
 // own Enqueue is variadic, so it can't satisfy the interface directly). The
@@ -157,9 +166,6 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("PUT /api/file/schedule/sort", protect(sched.SortNoOp))
 	s.mux.Handle("DELETE /api/file/schedule/sort/{taskListId}", protect(sched.SortNoOp))
 	s.mux.Handle("POST /api/file/query/schedule/sort", protect(sched.QuerySort))
-	s.mux.Handle("POST /api/file/query/summary/hash", protect(sched.SummaryStub))
-	s.mux.Handle("POST /api/file/query/summary/group", protect(sched.SummaryStub))
-	s.mux.Handle("POST /api/file/query/summary/id", protect(sched.SummaryStub))
 
 	// File listing + capacity (Phase 2) — read path, all JWT-protected. Reads the
 	// filesystem under FileRoot directly; the registry/meter are constructed once
@@ -234,6 +240,42 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("POST /api/file/3/files/delete_folder_v3", protect(mut.DeleteFolder))
 	s.mux.Handle("POST /api/file/3/files/move_v3", protect(mut.Move))
 	s.mux.Handle("POST /api/file/3/files/copy_v3", protect(mut.Copy))
+
+	// Digests / "summary" sync (Phase D) — the device-facing F_SummaryController.
+	// All JWT-protected (digests ride the data-sync channel alongside tasks). The
+	// .mark handwriting blobs reuse the shared OSS signer + staging area. When no
+	// DigestStore is wired we fall back to the empty-success query stubs so task
+	// sync stays unblocked (the device hits query/summary/* every sync) and the
+	// write endpoints stay 404 — exactly the pre-Phase-D behavior.
+	if s.cfg.DigestStore != nil {
+		sum := &handlers.SummaryHandler{
+			Store:   s.cfg.DigestStore,
+			Root:    s.cfg.FileRoot,
+			Signer:  &oss.Signer{Secret: s.cfg.OssSecret},
+			Staging: s.staging,
+			Logger:  s.cfg.Logger,
+		}
+		s.mux.Handle("POST /api/file/add/summary", protect(sum.AddSummary))
+		s.mux.Handle("PUT /api/file/update/summary", protect(sum.UpdateSummary))
+		s.mux.Handle("DELETE /api/file/delete/summary", protect(sum.DeleteSummary))
+		s.mux.Handle("POST /api/file/query/summary", protect(sum.QuerySummary))
+		s.mux.Handle("POST /api/file/query/summary/hash", protect(sum.QuerySummaryHash))
+		s.mux.Handle("POST /api/file/query/summary/id", protect(sum.QuerySummaryByID))
+		s.mux.Handle("POST /api/file/add/summary/group", protect(sum.AddSummaryGroup))
+		s.mux.Handle("PUT /api/file/update/summary/group", protect(sum.UpdateSummaryGroup))
+		s.mux.Handle("DELETE /api/file/delete/summary/group", protect(sum.DeleteSummaryGroup))
+		s.mux.Handle("POST /api/file/query/summary/group", protect(sum.QuerySummaryGroup))
+		s.mux.Handle("POST /api/file/add/summary/tag", protect(sum.AddSummaryTag))
+		s.mux.Handle("PUT /api/file/update/summary/tag", protect(sum.UpdateSummaryTag))
+		s.mux.Handle("DELETE /api/file/delete/summary/tag", protect(sum.DeleteSummaryTag))
+		s.mux.Handle("GET /api/file/query/summary/tag", protect(sum.QuerySummaryTag))
+		s.mux.Handle("POST /api/file/upload/apply/summary", protect(sum.UploadApplySummary))
+		s.mux.Handle("POST /api/file/download/summary", protect(sum.DownloadSummary))
+	} else {
+		s.mux.Handle("POST /api/file/query/summary/hash", protect(sched.SummaryStub))
+		s.mux.Handle("POST /api/file/query/summary/group", protect(sched.SummaryStub))
+		s.mux.Handle("POST /api/file/query/summary/id", protect(sched.SummaryStub))
+	}
 
 	// Engine.IO v3 websocket on the same listener (1c). The device connects to
 	// /socket.io/ directly over websocket; demux is by path.

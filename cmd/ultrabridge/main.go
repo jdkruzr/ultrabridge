@@ -28,6 +28,7 @@ import (
 	ubcaldav "github.com/sysop/ultrabridge/internal/caldav"
 	"github.com/sysop/ultrabridge/internal/chat"
 	"github.com/sysop/ultrabridge/internal/db"
+	"github.com/sysop/ultrabridge/internal/digeststore"
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/mcpauth"
 	"github.com/sysop/ultrabridge/internal/notedb"
@@ -445,6 +446,15 @@ func main() {
 		if err := staging.Migrate(context.Background(), noteDB); err != nil {
 			logger.Error("spc staging migration failed; upload disabled", "err", err)
 		}
+		// Phase D digests: migrate the digests/digest_tags tables (same server-mode
+		// gating). Best-effort — a failure leaves DigestStore nil, so the summary
+		// endpoints fall back to the pre-Phase-D stubs and task sync still works.
+		var digestStore spcserver.DigestStore
+		if err := digeststore.Migrate(context.Background(), noteDB); err != nil {
+			logger.Error("spc digest migration failed; digest sync disabled", "err", err)
+		} else {
+			digestStore = digeststore.New(noteDB)
+		}
 		// Phase 3 download: ensure a persistent OSS signing secret exists
 		// (auto-generated on first boot). Best-effort — on failure we fall back
 		// to the (empty) configured value, which still works since UB both signs
@@ -486,6 +496,7 @@ func main() {
 			OssSecret:      ossSecret,
 			UploadEnqueuer: spcEnqueuer,
 			OCRWatchDir:    snNotesPath,
+			DigestStore:    digestStore,
 			Logger:         logger,
 		})
 		taskNotifier = notify.NewSocketNotifier(

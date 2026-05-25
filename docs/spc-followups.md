@@ -34,14 +34,23 @@ stack is built and soaked.** Real-SPC flip-back stays a working escape hatch.
 ## 2. Deferred first-class features (real builds — now unblocked)
 
 - **Digests** ("summary" in the SPC API). First-class Supernote feature (user-curated
-  excerpts + handwritten `.mark` annotations); **NOT** superseded by RAG. Today: read
-  endpoints (`query/summary/{hash,group,id}`) are empty-success stubs; write endpoints
-  unimplemented, so device-created digests don't sync. Real build = `digests`/
-  `digest_groups`/`digest_tags` schema + `.mark` blob store over the OSS signed-URL
-  path + real `F_SummaryController` endpoints + `DIGEST-SYN` events + web/RAG surfacing.
-  **Unblocked** — the OSS path it needs shipped in Phase 3/4. Phase-sized.
+  excerpts + handwritten `.mark` annotations); **NOT** superseded by RAG. Split into
+  D1 (protocol round-trip), D2 (UB-native surfacing), D3 (proactive push). Plan:
+  `~/.claude/plans/okay-so-we-have-sunny-flame.md`.
+  - **D1 — protocol round-trip: BUILT 2026-05-25, pending hardware validation.** Full
+    `F_SummaryController` over `internal/digeststore` via `handlers/summary.go` (item/
+    group/tag CRUD + queries + `.mark` over the OSS path). Additive (nil-DigestStore →
+    old stubs). **Owed:** drive the device (NPM flip + tcpdump) to confirm round-trip +
+    `.mark` + the capture-pending field casings (`createTime`/`updateTime` form,
+    `partUploadUrl`/chunking) — `spc-protocol.md §8`. Then commit as "validated".
+  - **D2 — UB-native surfacing (not built).** Index digest `content` into FTS
+    (`digest_content`/`digest_fts`) + RAG-embed + a `DigestService` + `internal/web`
+    Digests tab + `/api/v1/digests`. Where digests become first-class *inside* UB.
+  - **D3 — proactive `DIGEST-SYN` push (capture-gated, not built).** `notify.NotifyDigest`
+    over the `digest` socket event; only if a capture shows the device needs it (it polls
+    `query/summary/hash` every sync, so round-trip works without it).
   → `docs/future-work/spc-no-analogue-features.md`, `PRIVATE_CLOUD_REFERENCE.md §6`,
-  memory `project_spc_no_analogue_features`.
+  memory `project_spc_phaseD_digests`, `project_spc_no_analogue_features`.
 - **Multi-collection / multiple task lists.** Today all task lists collapse to one
   synthesized group; group CRUD is accepted-but-no-op. `GroupProvider` seam is ready.
   → `docs/future-work/multi-collection-task-lists.md`, memory `project_ub_multicollection_future`.
