@@ -220,9 +220,24 @@ Mutations:
   - `POST /api/file/note/to/png` (F_FileLocalController:210)
   - `POST /api/file/pdfwithmark/to/pdf` (F_FileLocalController:223)
 
+### Phase D — digests ("summary"), data-sync channel
+
+Implemented (built 2026-05-25, pending hardware validation). `F_SummaryController`,
+`@RequestMapping("/api/file")`, all JWT-protected. Storage: `internal/digeststore`
+(canonical, faithful to `t_summary`/`t_summary_tag`); protocol adapter:
+`internal/spcserver/handlers/summary.go`. `.mark` handwriting blobs reuse the OSS
+signed-URL + staging path (§6, Phase 3/4).
+
+- Items: `POST /add/summary` (→ id; idempotent on `uniqueIdentifier`), `PUT /update/summary`, `DELETE /delete/summary` (soft)
+- Groups: `POST /add/summary/group`, `PUT /update/summary/group`, `DELETE /delete/summary/group` (cascades soft-delete to members), `POST /query/summary/group` (paginated)
+- Queries: `POST /query/summary` (items, paginated), `POST /query/summary/hash` (lightweight id+md5 list the device diffs), `POST /query/summary/id` (by id list)
+- Tags: `POST /add/summary/tag` (idempotent on name), `PUT /update/summary/tag`, `DELETE /delete/summary/tag`, `GET /query/summary/tag`
+- `.mark` blobs: `POST /upload/apply/summary` (→ `innerName` + presigned `/api/oss/upload` URL; bytes land in `.staging/`, promoted to `<FileRoot>/.digests/<innerName>` at add/update time, verifying `handwriteMD5`), `POST /download/summary` (→ presigned `/api/oss/download` URL for the blob; `E0321` if the digest has no handwriting)
+- Proactive `DIGEST-SYN` push over the `digest` socket event is **not** implemented (D3, capture-gated) — the device polls `query/summary/hash` every sync, so round-trip works without it.
+
 ### Stubs (canned success or 404)
 
-- **Summary: `F_SummaryController` — MUST be stubbed, not 404'd.** 0b observed the device hitting `POST /api/file/query/summary/hash`, `/summary/group`, and `/summary/id` during normal sync. These need canned well-formed responses (empty payload + `success:true`) or the device may error. Originally "scope dropped"; reclassified to "scope stubbed." The `add/delete/download/summary*` variants were not seen and can 404.
+- **Summary: `F_SummaryController` — IMPLEMENTED in Phase D** (see above). Before Phase D (or when no `DigestStore` is wired) the three observed query endpoints (`query/summary/{hash,group,id}`) fall back to empty-success stubs and the write endpoints 404 — the original sync-unblocking behavior. 0b observed the device hitting the three query endpoints during normal sync; they must never 404.
 - Login challenge endpoints (device hits on fresh login, see §2): `POST /api/official/user/check/exists/server`, `POST /api/official/user/query/random/code` — must return well-formed responses, not 404.
 - Equipment: `POST /api/equipment/bind/status` (polled ~4×/session by the device — must succeed), `POST /api/terminal/user/bindEquipment` (login flow — must succeed), `POST /api/terminal/equipment/unlink` (logout).
 - Sharing: `F_ShareController` (1 endpoint) — not seen; 404 OK.
@@ -369,6 +384,48 @@ a parent dir. A device rename sent `{"id":"862","to_path":"/NOTE/Note/<newname>.
 So the move/copy target is `SafeResolve(to_path)` directly — do **not** join the
 source basename onto it (same double-nesting bug as upload: it produced
 `…/<newname>.note/<oldname>.note`). The new filename is `filepath.Base(to_path)`.
+
+### Summary (digest) DTO casing + sync semantics (Phase D — hardware-confirmed 2026-05-25)
+
+Unlike the file DTOs (snake_case: `to_path`, `content_hash`), the `F_SummaryController`
+DTOs/VOs carry **no `@JsonProperty`** and so serialize their **camelCase** Java field
+names verbatim (`uniqueIdentifier`, `parentUniqueIdentifier`, `md5Hash`,
+`sourceType`, …). Confirmed against the decompiled source AND a live device trace:
+
+- **`handwriteMD5` (uppercase) in the request/domain, but `handwriteMd5` (lowercase
+  d5) in the response `SummaryInfoVO`** (`SummaryInfoVO.java:15`). UB models both exactly.
+- **`SummaryDO.isSummaryGroup` and `isDeleted` are Strings `"Y"`/`"N"`, not booleans**
+  (`SummaryDO.java:25,36`).
+- **`createTime`/`updateTime` are epoch-millis NUMBERS** (device-confirmed: it pulled a
+  populated `query/summary/id` carrying `"createTime":1779683680101` and accepted it).
+  UB emits omitempty millis — correct.
+- **`upload/apply/summary` returns `partUploadUrl:""`** — device-confirmed to use the
+  single-shot `fullUploadUrl` for a 29 KB `.mark` (no chunking). The real *file*-upload
+  apply VO also carries `bucketName`/`xAmzDate`/`authorization` S3 fields; the device does
+  NOT need them on the digest apply (UB's lean 3-field VO was accepted).
+
+**Item identity lives in `metadata`, not the top-level fields** (device-confirmed): on
+`add/summary` the device sends an empty top-level `uniqueIdentifier` (and no top-level
+`author`/`fileId`/`tags`); the item's stable id is `metadata.unique_identifier` and the
+author is `metadata.author`. UB stores `metadata` verbatim (lossless round-trip) and lifts
+`metadata.unique_identifier` into the `unique_identifier` column for dedup. PDF digests are
+`sourceType:1` with a `metadata.document_location_data` chapter/page span; note digests are
+`sourceType:2` with `note_fileId`/`note_pageId`/`note_page`.
+
+**`metadataMap` (in `query/summary/hash`) must preserve numeric literals** — decode with
+`json.UseNumber`, else a number like `source_size:18992668` stringifies as
+`"1.8992668e+07"` (device-confirmed corruption, fixed).
+
+**Digest sync is DEVICE-AUTHORITATIVE on delete** (device-confirmed): a digest deleted on
+the device sends `DELETE /delete/summary {"id":N}` (UB soft-deletes — works). But a
+digest soft-deleted **server-side only** does NOT propagate down — the device, seeing its
+local digest missing from `query/summary/hash`, **re-asserts it via `PUT /update/summary`**.
+UB currently no-ops that update (its `GetByID` excludes soft-deleted), so the row stays
+deleted while the device keeps re-pushing → benign perpetual re-push + divergence. Fine for
+D1 (device round-trip); a future UB/web-initiated digest delete needs a **tombstone** the
+device honors (D2). `update/summary` can also *add* handwriting to a previously text-only
+digest (new `.mark` uploaded + promoted) and move an item between groups via
+`parentUniqueIdentifier` — both device-confirmed.
 
 ## 9. Storage paths and timing constants (SPC-side, FYI)
 

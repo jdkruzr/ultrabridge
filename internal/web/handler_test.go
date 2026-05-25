@@ -2583,3 +2583,88 @@ func TestRowMutationBooxNonHXRedirectsToBooxTab(t *testing.T) {
 		t.Errorf("Location=%q, want /files/boox", loc)
 	}
 }
+
+// postSPCSettings POSTs section=ub-spc with the given form values and asserts a
+// 303 redirect, returning the config reloaded from the DB.
+func postSPCSettings(t *testing.T, h http.Handler, db *sql.DB, form url.Values) *appconfig.Config {
+	t.Helper()
+	form.Set("section", "ub-spc")
+	req := httptest.NewRequest("POST", "/settings/save", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303; got %d body=%s", w.Code, w.Body.String())
+	}
+	cfg, err := appconfig.Load(context.Background(), db)
+	if err != nil {
+		t.Fatalf("appconfig.Load: %v", err)
+	}
+	return cfg
+}
+
+// TestHandleSettingsSave_SPC verifies the ub-spc section persists non-secret
+// fields, keeps secrets when their field is left blank, overwrites them when
+// non-blank, and ignores an unparseable quota.
+func TestHandleSettingsSave_SPC(t *testing.T) {
+	ctx := context.Background()
+	db, err := notedb.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("notedb open: %v", err)
+	}
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	broadcaster := logging.NewLogBroadcaster()
+	config := service.NewConfigService(db, nil, &appconfig.Config{})
+	h := NewHandler(nil, &mockNoteService{}, nil, config, db, "", "", logger, broadcaster)
+
+	// First save: set all fields including secrets.
+	cfg := postSPCSettings(t, h, db, url.Values{
+		"spc_mode":            {"server"},
+		"spc_listen_addr":     {":9999"},
+		"spc_file_root":       {"/tmp/root1"},
+		"spc_device_account":  {"dev@example.com"},
+		"spc_device_password": {"secret1"},
+		"spc_jwt_secret":      {"jwt1"},
+		"spc_quota_bytes":     {"123456"},
+	})
+	if cfg.SPCMode != "server" || cfg.SPCListenAddr != ":9999" || cfg.SPCFileRoot != "/tmp/root1" ||
+		cfg.SPCDeviceAccount != "dev@example.com" || cfg.SPCDevicePassword != "secret1" ||
+		cfg.SPCJWTSecret != "jwt1" || cfg.SPCQuotaBytes != 123456 {
+		t.Fatalf("first save not persisted: %+v", cfg)
+	}
+
+	// Second save: blank secrets keep current; non-secret field updates;
+	// unparseable quota keeps the prior value.
+	cfg = postSPCSettings(t, h, db, url.Values{
+		"spc_mode":            {"server"},
+		"spc_listen_addr":     {":9999"},
+		"spc_file_root":       {"/tmp/root2"},
+		"spc_device_account":  {"dev@example.com"},
+		"spc_device_password": {""},
+		"spc_jwt_secret":      {""},
+		"spc_quota_bytes":     {"not-a-number"},
+	})
+	if cfg.SPCFileRoot != "/tmp/root2" {
+		t.Errorf("file root not updated: %q", cfg.SPCFileRoot)
+	}
+	if cfg.SPCDevicePassword != "secret1" {
+		t.Errorf("blank password should keep current; got %q", cfg.SPCDevicePassword)
+	}
+	if cfg.SPCJWTSecret != "jwt1" {
+		t.Errorf("blank JWT secret should keep current; got %q", cfg.SPCJWTSecret)
+	}
+	if cfg.SPCQuotaBytes != 123456 {
+		t.Errorf("unparseable quota should keep prior value; got %d", cfg.SPCQuotaBytes)
+	}
+
+	// Third save: a non-blank secret overwrites.
+	cfg = postSPCSettings(t, h, db, url.Values{
+		"spc_mode":            {"server"},
+		"spc_device_password": {"secret2"},
+	})
+	if cfg.SPCDevicePassword != "secret2" {
+		t.Errorf("password not overwritten; got %q", cfg.SPCDevicePassword)
+	}
+}

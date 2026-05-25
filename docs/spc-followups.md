@@ -34,14 +34,26 @@ stack is built and soaked.** Real-SPC flip-back stays a working escape hatch.
 ## 2. Deferred first-class features (real builds — now unblocked)
 
 - **Digests** ("summary" in the SPC API). First-class Supernote feature (user-curated
-  excerpts + handwritten `.mark` annotations); **NOT** superseded by RAG. Today: read
-  endpoints (`query/summary/{hash,group,id}`) are empty-success stubs; write endpoints
-  unimplemented, so device-created digests don't sync. Real build = `digests`/
-  `digest_groups`/`digest_tags` schema + `.mark` blob store over the OSS signed-URL
-  path + real `F_SummaryController` endpoints + `DIGEST-SYN` events + web/RAG surfacing.
-  **Unblocked** — the OSS path it needs shipped in Phase 3/4. Phase-sized.
+  excerpts + handwritten `.mark` annotations); **NOT** superseded by RAG. Split into
+  D1 (protocol round-trip), D2 (UB-native surfacing), D3 (proactive push). Plan:
+  `~/.claude/plans/okay-so-we-have-sunny-flame.md`.
+  - **D1 — protocol round-trip: DONE + hardware-validated 2026-05-25.** Full
+    `F_SummaryController` over `internal/digeststore` via `handlers/summary.go` (item/
+    group/tag CRUD + queries + `.mark` over the OSS path). Additive (nil-DigestStore →
+    old stubs). Validated on the Nomad both directions (push/pull/.mark byte-exact/
+    delete/update); wire findings + fixes in `spc-protocol.md §8` and memory
+    `project_spc_phaseD_digests`. **New follow-up surfaced:** digest delete is
+    device-authoritative — a server-only soft-delete does NOT propagate (device
+    re-asserts via `update/summary`, which UB no-ops → benign re-push divergence). A
+    future UB/web-initiated digest delete (D2) needs a **tombstone** the device honors.
+  - **D2 — UB-native surfacing (not built).** Index digest `content` into FTS
+    (`digest_content`/`digest_fts`) + RAG-embed + a `DigestService` + `internal/web`
+    Digests tab + `/api/v1/digests`. Where digests become first-class *inside* UB.
+  - **D3 — proactive `DIGEST-SYN` push (capture-gated, not built).** `notify.NotifyDigest`
+    over the `digest` socket event; only if a capture shows the device needs it (it polls
+    `query/summary/hash` every sync, so round-trip works without it).
   → `docs/future-work/spc-no-analogue-features.md`, `PRIVATE_CLOUD_REFERENCE.md §6`,
-  memory `project_spc_no_analogue_features`.
+  memory `project_spc_phaseD_digests`, `project_spc_no_analogue_features`.
 - **Multi-collection / multiple task lists.** Today all task lists collapse to one
   synthesized group; group CRUD is accepted-but-no-op. `GroupProvider` seam is ready.
   → `docs/future-work/multi-collection-task-lists.md`, memory `project_ub_multicollection_future`.
@@ -65,15 +77,35 @@ stack is built and soaked.** Real-SPC flip-back stays a working escape hatch.
   `F_FileLocalWebController` incl. recycle-browse/restore + file search, `F_ShareController`)
   + its own login flow (`loginMethod=1` phone) + sharing semantics. A separate project.
   Point Partner at UB today → 404s.
-- **Other no-analogue user-triggered features** (dictionary, note export, sharing).
+- **Other no-analogue user-triggered features** (note export, sharing).
   Currently 404'd on weak "not seen in 0b" evidence — the 0b soak is a *passive* trace
   and under-weights user-initiated endpoints. **Re-verify each with a deliberate
   on-device action before assuming the user won't hit it.** → `spc-no-analogue-features.md`.
+  (Dictionary/Reference and file "label" search were reclassified to accept-loss on
+  2026-05-25 — they're backend plumbing, not user features; see that doc.)
 
 ## 5. Housekeeping
 
-- `docker-compose.yml` stays uncommitted (carries the device password); the
+- `docker-compose.yml` stays uncommitted (carries secrets); the
   `UB_SPC_FILE_ROOT=/mnt/supernote/ub_sn_files` change rides along uncommitted.
+  Both plaintext secrets can now be removed from the compose env so it can be committed
+  (migration is a separate manual step, intentionally not done in the Settings-UI build):
+  - `UB_SPC_DEVICE_PASSWORD` (and the other `UB_SPC_*` fields) are now editable in the web
+    **Settings → UB-as-SPC Device Sync Server** card and persisted in the `settings` table.
+  - `UB_MCP_API_PASS` can be replaced by `UB_MCP_API_TOKEN`, a DB-backed MCP bearer token
+    created in **Settings → MCP Tokens**. `ub-mcp` sends it as `Authorization: Bearer` and
+    UB's auth middleware already validates it (`mcpauth.ValidateToken`); Basic Auth via
+    `UB_MCP_API_USER`/`UB_MCP_API_PASS` remains as a fallback when no token is set.
+- **Stop running UB as root (future builds).** The `ultrabridge` image has no `USER`
+  directive so the container runs as `uid=0` — a holdover from the real SPC running as
+  root. Consequence: everything UB materializes under `UB_SPC_FILE_ROOT`
+  (`NOTE/DOCUMENT/EXPORT/…` buckets, `.staging/`, `.recycle/`, uploaded `.note`s) is
+  `root:root` on the host, so the operator can't manage/back-up those files without
+  `sudo`, and the container holds more privilege than it needs. Fix (deferred so it
+  doesn't perturb live device validation): either add `user: "1000:1000"` to the compose
+  service or bake a non-root `USER` into the Dockerfile, then one-time
+  `chown -R 1000:1000 /mnt/supernote/ub_sn_files` (and confirm `/data` + the OCR
+  pipeline still read/write under the new uid). Owner preference: get UB off root.
 
 ## Process reminders earned this session (carry into Phase 5 + Digests)
 

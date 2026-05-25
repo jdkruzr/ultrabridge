@@ -30,6 +30,13 @@ func UserID(ctx context.Context) string {
 	return uid
 }
 
+// WithUserID returns a context carrying uid as the verified userId, the same key
+// UserID reads. Used by Middleware and by tests that exercise protected handlers
+// without minting a token.
+func WithUserID(ctx context.Context, uid string) context.Context {
+	return context.WithValue(ctx, userIDCtxKey, uid)
+}
+
 // Middleware gates a handler on a valid x-access-token. On success it puts the
 // verified userId in the request context and, the first time it sees a valid
 // token, harvests that userId into store under UserIDSettingKey — this adopts
@@ -52,7 +59,6 @@ func Middleware(secret string, store SettingStore, next http.Handler) http.Handl
 			}
 		}
 
-		ctx := context.WithValue(r.Context(), userIDCtxKey, uid)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), uid)))
 	})
 }

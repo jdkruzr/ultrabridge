@@ -474,29 +474,35 @@ Phase 4 merged + hardware-validated 2026-05-25; NPM flipped back to real SPC (no
 
 ---
 
-## Future: Digest support (first-class; deferred, NOT dropped)
+## Phase D: Digest support (first-class) — D1 DONE + hardware-validated 2026-05-25
 
 The Supernote **Digest** feature (the SPC API calls it "summary") is a first-class
 capability for this platform — a digest is a user-curated saved excerpt from a
 notebook plus a handwritten `.mark` annotation, organized into groups with tags.
-**UB must support it for real eventually**; Phase 1's empty-success stub on
-`query/summary/{hash,group,id}` is a sync-unblocking placeholder only, and the
-write endpoints (`add/summary`, `update/summary`, `add/summary/group`,
-`add/summary/tag`, …) are currently unimplemented (so digests created on the
-device do NOT sync to UB today).
+Split into three sub-phases (plan: `~/.claude/plans/okay-so-we-have-sunny-flame.md`):
 
-A real build (sketch; **now unblocked — it reuses the Phase 3/4 OSS signed-URL
-path, which exists**):
-- a `digests` table in notedb (id, parent unique-id, content, source path/type,
-  tags, md5, group/tag refs) + `digest_groups` / `digest_tags`
-- a `.mark` blob store served over the OSS signed-URL path (reuse `oss` + the
-  download/upload handlers)
-- the real `F_SummaryController` surface: `query/summary/{hash,group,id}` returning
-  actual state + the add/update/delete summary/group/tag endpoints
-- Engine.IO `DIGEST-SYN` events so device↔UB digest changes push (the `digest`
-  socket event is already known — see CLAUDE.md socket gotchas)
-- surface digests in `internal/web` (a Digests tab) and likely RAG (digests are
-  high-signal curated content)
+**D1 — protocol round-trip: DONE + hardware-validated 2026-05-25.** The real
+`F_SummaryController` surface (`add/update/delete summary` + `…/group` + `…/tag` +
+`query/summary{,/hash,/id,/group}` + `.mark` `upload/apply/summary` +
+`download/summary`) is implemented over `internal/digeststore` (the canonical store,
+faithful to `t_summary`/`t_summary_tag`) via `internal/spcserver/handlers/summary.go`.
+`.mark` blobs reuse the Phase 3/4 OSS signed-URL + staging path (`.digests/`). Purely
+additive: when no `DigestStore` is wired the three query endpoints fall back to the
+old empty-success stubs and the writes 404. Validated on the Nomad both directions
+(push/pull/`.mark` byte-exact/delete/update); wire findings + the two fixes
+(item-identity-in-metadata, `metadataMap` numeric preservation) and the
+device-authoritative-delete semantic are in `spc-protocol.md §8` + memory
+`project_spc_phaseD_digests`.
+
+**D2 — UB-native surfacing (not built):**
+- index digest `content` into FTS (`digest_content`/`digest_fts` mirroring `note_fts`)
+- RAG-embed digest text (`rag.Embedder`/`EmbedStore`)
+- a `DigestService` + `internal/web` Digests tab + `/api/v1/digests`
+
+**D3 — proactive `DIGEST-SYN` push (capture-gated, not built):** Engine.IO `DIGEST-SYN`
+over the `digest` socket event (already known — see CLAUDE.md socket gotchas), fired on
+UB-side digest writes. Only if a capture shows the device needs it (it polls
+`query/summary/hash` every sync, so round-trip works without it).
 
 This is its own phase-sized effort. See memory `project_spc_no_analogue_features`
 and `docs/future-work/spc-no-analogue-features.md`.

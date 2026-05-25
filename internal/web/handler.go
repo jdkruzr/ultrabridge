@@ -709,6 +709,34 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	cfg := cObj.(*appconfig.Config)
 	switch r.FormValue("section") {
 	case "supernote": cfg.SNSyncEnabled = r.FormValue("inject_enabled") != "false"
+	case "ub-spc":
+		// UB-as-SPC device-sync server config. Every field is restart-required
+		// (the server is constructed once at startup), so UpdateConfig below
+		// flags the restart banner automatically.
+		if mode := r.FormValue("spc_mode"); mode == "client" || mode == "server" {
+			cfg.SPCMode = mode
+		}
+		cfg.SPCListenAddr = r.FormValue("spc_listen_addr")
+		cfg.SPCFileRoot = r.FormValue("spc_file_root")
+		cfg.SPCDeviceAccount = r.FormValue("spc_device_account")
+		cfg.SPCTLSCert = r.FormValue("spc_tls_cert")
+		cfg.SPCTLSKey = r.FormValue("spc_tls_key")
+		if v := strings.TrimSpace(r.FormValue("spc_quota_bytes")); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				cfg.SPCQuotaBytes = n
+			}
+		}
+		// Secrets: an empty field means "keep the current stored value"
+		// (mirrors the password / OCR-API-key write-only pattern).
+		if v := r.FormValue("spc_device_password"); v != "" {
+			cfg.SPCDevicePassword = v
+		}
+		if v := r.FormValue("spc_jwt_secret"); v != "" {
+			cfg.SPCJWTSecret = v
+		}
+		if v := r.FormValue("spc_oss_secret"); v != "" {
+			cfg.SPCOssSecret = v
+		}
 	case "general":
 		cfg.EmbedEnabled = r.FormValue("embed_enabled") == "true"
 		cfg.OllamaURL, cfg.OllamaEmbedModel = r.FormValue("ollama_url"), r.FormValue("ollama_embed_model")

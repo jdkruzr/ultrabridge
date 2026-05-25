@@ -28,6 +28,7 @@ import (
 	ubcaldav "github.com/sysop/ultrabridge/internal/caldav"
 	"github.com/sysop/ultrabridge/internal/chat"
 	"github.com/sysop/ultrabridge/internal/db"
+	"github.com/sysop/ultrabridge/internal/digeststore"
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/mcpauth"
 	"github.com/sysop/ultrabridge/internal/notedb"
@@ -245,9 +246,13 @@ func main() {
 	}
 
 	socketIOURL := envOrDefault("UB_SOCKETIO_URL", "ws://supernote-service:8080/socket.io/")
+	// The legacy Engine.IO client to the real SPC is created here (its Events()
+	// channel feeds the legacy Supernote source pipeline), but is only DIALED when
+	// legacy sync is enabled — see the cfg.SNSyncEnabled block below. Dialing
+	// unconditionally made it reconnect-loop against a down/absent SPC forever
+	// (noise during UB-as-SPC-only operation). When not dialed, Events() stays
+	// quiet and Notify() degrades gracefully (no-op).
 	notifier := sync.NewNotifier(socketIOURL, logger)
-	notifier.Connect(context.Background())
-	defer notifier.Close()
 
 	// Open the notes SQLite DB (separate from Supernote's MariaDB)
 	noteDB, err := notedb.Open(context.Background(), bootstrapCfg.dbPath)
@@ -411,6 +416,10 @@ func main() {
 	// Start sync engine if enabled
 	var syncEngine *tasksync.SyncEngine
 	if cfg.SNSyncEnabled {
+		// Dial the legacy SPC Engine.IO socket only when legacy sync is on
+		// (otherwise the notifier stays created-but-quiet — see above).
+		notifier.Connect(context.Background())
+		defer notifier.Close()
 		syncEngine = tasksync.NewSyncEngine(
 			store, taskDB, logger,
 			time.Duration(cfg.SNSyncInterval)*time.Second,
@@ -444,6 +453,15 @@ func main() {
 		// server.
 		if err := staging.Migrate(context.Background(), noteDB); err != nil {
 			logger.Error("spc staging migration failed; upload disabled", "err", err)
+		}
+		// Phase D digests: migrate the digests/digest_tags tables (same server-mode
+		// gating). Best-effort — a failure leaves DigestStore nil, so the summary
+		// endpoints fall back to the pre-Phase-D stubs and task sync still works.
+		var digestStore spcserver.DigestStore
+		if err := digeststore.Migrate(context.Background(), noteDB); err != nil {
+			logger.Error("spc digest migration failed; digest sync disabled", "err", err)
+		} else {
+			digestStore = digeststore.New(noteDB)
 		}
 		// Phase 3 download: ensure a persistent OSS signing secret exists
 		// (auto-generated on first boot). Best-effort — on failure we fall back
@@ -486,6 +504,7 @@ func main() {
 			OssSecret:      ossSecret,
 			UploadEnqueuer: spcEnqueuer,
 			OCRWatchDir:    snNotesPath,
+			DigestStore:    digestStore,
 			Logger:         logger,
 		})
 		taskNotifier = notify.NewSocketNotifier(

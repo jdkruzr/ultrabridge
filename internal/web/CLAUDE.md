@@ -1,6 +1,6 @@
 # internal/web
 
-Last verified: 2026-04-14 (routes, fragment rendering, source-split Files tabs, Boox processor controls)
+Last verified: 2026-05-25 (UB-as-SPC server settings card added; routes, fragment rendering, source-split Files tabs, Boox processor controls)
 
 HTTP handler and HTML templates for the UltraBridge web UI.
 
@@ -34,8 +34,8 @@ For tests, `LegacyNewHandler` in `handler_test.go` bridges the old 22-argument s
 | POST | `/tasks/bulk` | `handleBulkAction` | |
 | POST | `/tasks/purge-completed` | `handlePurgeCompleted` | |
 | GET | `/logs` | `handleLogs` (SSE) | Log stream |
-| GET | `/settings` | `handleSettings` | Settings page (config + MCP tokens) |
-| POST | `/settings/save` | `handleSettingsSave` | Save config changes |
+| GET | `/settings` | `handleSettings` | Settings page (config + MCP tokens + UB-as-SPC server card) |
+| POST | `/settings/save` | `handleSettingsSave` | Save config changes. Routes by hidden `section` field: `supernote`, `general`, `boox`, `ub-spc` (UB-as-SPC server config — all restart-required; secret fields keep current value when left blank). |
 | GET | `/files` | `handleFiles` | Legacy entry point; 303-redirects to `/files/supernote` or `/files/boox` based on configured sources. Renders an empty-state placeholder when neither is configured. |
 | GET | `/files/supernote` | `handleFilesSupernote` | Supernote file browser (directory tree, breadcrumbs, sort, pagination). Path traversal guarded. |
 | GET | `/files/boox` | `handleFilesBoox` | Boox catalog listing (flat, Title/Folder/Device/NoteType/Pages columns, sort, pagination). |

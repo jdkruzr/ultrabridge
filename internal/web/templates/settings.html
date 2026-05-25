@@ -60,34 +60,6 @@
     <hr>
 
     <div style="margin-bottom: 2rem;">
-      <h3 style="margin-bottom: 1rem;">Embedding Configuration</h3>
-      <div class="form-group">
-        <label for="config-ollama-url">Ollama URL</label>
-        <input id="config-ollama-url" type="text" value="{{.Config.OllamaURL}}">
-      </div>
-      <div class="form-group">
-        <label for="config-ollama-embed-model">Embedding Model</label>
-        <input id="config-ollama-embed-model" type="text" value="{{.Config.OllamaEmbedModel}}">
-      </div>
-    </div>
-
-    <hr>
-
-    <div style="margin-bottom: 2rem;">
-      <h3 style="margin-bottom: 1rem;">Chat Configuration</h3>
-      <div class="form-group">
-        <label for="config-chat-api-url">Chat API URL</label>
-        <input id="config-chat-api-url" type="text" value="{{.Config.ChatAPIURL}}">
-      </div>
-      <div class="form-group">
-        <label for="config-chat-model">Chat Model</label>
-        <input id="config-chat-model" type="text" value="{{.Config.ChatModel}}">
-      </div>
-    </div>
-
-    <hr>
-
-    <div style="margin-bottom: 2rem;">
       <h3 style="margin-bottom: 1rem;">Supernote Device Sync</h3>
       <div class="form-group">
         <label for="config-sn-sync-enabled">Enabled</label>
@@ -242,6 +214,88 @@
       </form>
     {{end}}
   </div>
+
+  {{if .Config}}
+  <div class="card">
+    <h2>UB-as-SPC Device Sync Server</h2>
+    <p class="device-info" style="margin-bottom: 1rem;">
+      UltraBridge's built-in Supernote Private Cloud server that devices sync against directly.
+      <strong>Changes to any field here require an application restart to take effect.</strong>
+    </p>
+    <form hx-post="/settings/save" hx-target="#main-content">
+      <input type="hidden" name="section" value="ub-spc">
+
+      <div class="form-group">
+        <label for="spc-mode">Mode</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">
+          <strong>client</strong> — no listener; UltraBridge syncs to a real SPC (default, regression-safe).
+          <strong>server</strong> — UltraBridge runs the SPC server devices connect to.
+          Switching modes only takes effect after a restart.
+        </p>
+        <select id="spc-mode" name="spc_mode">
+          <option value="client"{{if eq .Config.SPCMode "client"}} selected{{end}}>client</option>
+          <option value="server"{{if eq .Config.SPCMode "server"}} selected{{end}}>server</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="spc-listen-addr">Listen Address</label>
+        <input id="spc-listen-addr" type="text" name="spc_listen_addr" value="{{.Config.SPCListenAddr}}" placeholder=":8089">
+      </div>
+
+      <div class="form-group">
+        <label for="spc-file-root">File Root</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">Dedicated storage tree the device browses (e.g. <code>/mnt/supernote/ub_sn_files</code>). Must not be the real SPC's data dir.</p>
+        <input id="spc-file-root" type="text" name="spc_file_root" value="{{.Config.SPCFileRoot}}">
+      </div>
+
+      <div class="form-group">
+        <label for="spc-device-account">Device Account</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">Email the device logs in with. Leave empty to accept any account.</p>
+        <input id="spc-device-account" type="text" name="spc_device_account" value="{{.Config.SPCDeviceAccount}}">
+      </div>
+
+      <div class="form-group">
+        <label for="spc-device-password">Device Password</label>
+        <input id="spc-device-password" type="password" name="spc_device_password" placeholder="Leave empty to keep current">
+      </div>
+
+      <div class="form-group">
+        <label for="spc-quota-bytes">Reported Capacity (bytes)</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">Total capacity reported to the device. Default 1099511627776 (1 TiB).</p>
+        <input id="spc-quota-bytes" type="number" name="spc_quota_bytes" value="{{.Config.SPCQuotaBytes}}">
+      </div>
+
+      <hr>
+      <h3 style="margin-bottom: 1rem;">Advanced</h3>
+
+      <div class="form-group">
+        <label for="spc-tls-cert">TLS Certificate Path</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">Leave empty when TLS is terminated upstream (e.g. by a reverse proxy).</p>
+        <input id="spc-tls-cert" type="text" name="spc_tls_cert" value="{{.Config.SPCTLSCert}}">
+      </div>
+
+      <div class="form-group">
+        <label for="spc-tls-key">TLS Key Path</label>
+        <input id="spc-tls-key" type="text" name="spc_tls_key" value="{{.Config.SPCTLSKey}}">
+      </div>
+
+      <div class="form-group">
+        <label for="spc-jwt-secret">JWT Secret</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">Signs device session tokens. Leave empty to keep current.</p>
+        <input id="spc-jwt-secret" type="password" name="spc_jwt_secret" placeholder="Leave empty to keep current">
+      </div>
+
+      <div class="form-group">
+        <label for="spc-oss-secret">OSS Signing Secret</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">Signs presigned file URLs. Auto-generated on first boot; leave empty to keep current.</p>
+        <input id="spc-oss-secret" type="password" name="spc_oss_secret" placeholder="Leave empty to keep current">
+      </div>
+
+      <button type="submit" class="btn-small">Save SPC Settings</button>
+    </form>
+  </div>
+  {{end}}
 
   <div class="card{{if not .BooxActive}} settings-inactive{{end}}">
     <h2>Boox Settings</h2>

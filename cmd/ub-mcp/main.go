@@ -41,10 +41,11 @@ func main() {
 	if apiURL == "" {
 		apiURL = "http://localhost:8443"
 	}
+	apiToken := os.Getenv("UB_MCP_API_TOKEN")
 	apiUser := os.Getenv("UB_MCP_API_USER")
 	apiPass := os.Getenv("UB_MCP_API_PASS")
 
-	client := newAPIClient(apiURL, apiUser, apiPass)
+	client := newAPIClient(apiURL, apiToken, apiUser, apiPass)
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "ultrabridge-notes",
@@ -82,15 +83,19 @@ func main() {
 // apiClient is an HTTP client for calling UltraBridge API endpoints.
 type apiClient struct {
 	baseURL  string
+	token    string
 	user     string
 	pass     string
 	http     *http.Client
 }
 
-// newAPIClient creates a new API client.
-func newAPIClient(baseURL, user, pass string) *apiClient {
+// newAPIClient creates a new API client. When token is non-empty it is sent as
+// a Bearer token (a DB-backed MCP token validated by UltraBridge's auth
+// middleware); otherwise the client falls back to Basic Auth with user/pass.
+func newAPIClient(baseURL, token, user, pass string) *apiClient {
 	return &apiClient{
 		baseURL: baseURL,
+		token:   token,
 		user:    user,
 		pass:    pass,
 		http:    &http.Client{},
@@ -174,7 +179,9 @@ func (c *apiClient) request(ctx context.Context, method, path string, body inter
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.user != "" {
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	} else if c.user != "" {
 		req.SetBasicAuth(c.user, c.pass)
 	}
 	return c.http.Do(req)
