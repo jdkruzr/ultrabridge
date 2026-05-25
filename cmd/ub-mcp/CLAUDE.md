@@ -1,6 +1,6 @@
 # MCP Server (ub-mcp)
 
-Last verified: 2026-04-14 (task-manipulation tools added)
+Last verified: 2026-05-25 (UB_MCP_API_TOKEN bearer auth added)
 
 ## Purpose
 Model Context Protocol server that exposes UltraBridge note search and retrieval
@@ -11,7 +11,7 @@ as MCP tools for AI agents (Claude Desktop, Cursor, etc.).
   - Notes: `search_notes` (hybrid search), `get_note_pages` (page content), `get_note_image` (JPEG rendering).
   - Tasks: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `purge_completed_tasks`. All task mutations propagate to configured CalDAV devices on the next sync cycle (UB-wins). Dates are RFC3339; `update_task.clear_due_at=true` removes an existing due date (wins over `due_at` when both are set).
   - Two transport modes: stdio (default) and HTTP SSE (`--http` flag).
-- **Guarantees**: All tools delegate to UltraBridge JSON API via HTTP with Basic Auth. Image data returned as base64-encoded embedded images. Error responses use MCP error format.
+- **Guarantees**: All tools delegate to UltraBridge JSON API via HTTP, authenticating with a Bearer token (`UB_MCP_API_TOKEN`) when set, else Basic Auth. Image data returned as base64-encoded embedded images. Error responses use MCP error format.
 - **Expects**: Running UltraBridge instance with JSON API endpoints enabled (requires retriever). Environment variables for API connection.
 
 ## Dependencies
@@ -26,8 +26,9 @@ as MCP tools for AI agents (Claude Desktop, Cursor, etc.).
 
 ## Config
 - `UB_MCP_API_URL` -- UltraBridge API base URL (default http://localhost:8443)
-- `UB_MCP_API_USER` -- Basic Auth username
-- `UB_MCP_API_PASS` -- Basic Auth password
+- `UB_MCP_API_TOKEN` -- DB-backed MCP bearer token (created in UB Settings → MCP Tokens). When set, the API client sends `Authorization: Bearer <token>` and takes precedence over Basic Auth; lets the sidecar run without a plaintext password.
+- `UB_MCP_API_USER` -- Basic Auth username (fallback when no token set)
+- `UB_MCP_API_PASS` -- Basic Auth password (fallback when no token set)
 - `UB_DB_PATH` -- Path to shared notedb SQLite file (enables DB-backed bearer tokens)
 
 ## Key Files

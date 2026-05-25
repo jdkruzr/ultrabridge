@@ -84,8 +84,16 @@ stack is built and soaked.** Real-SPC flip-back stays a working escape hatch.
 
 ## 5. Housekeeping
 
-- `docker-compose.yml` stays uncommitted (carries the device password); the
+- `docker-compose.yml` stays uncommitted (carries secrets); the
   `UB_SPC_FILE_ROOT=/mnt/supernote/ub_sn_files` change rides along uncommitted.
+  Both plaintext secrets can now be removed from the compose env so it can be committed
+  (migration is a separate manual step, intentionally not done in the Settings-UI build):
+  - `UB_SPC_DEVICE_PASSWORD` (and the other `UB_SPC_*` fields) are now editable in the web
+    **Settings → UB-as-SPC Device Sync Server** card and persisted in the `settings` table.
+  - `UB_MCP_API_PASS` can be replaced by `UB_MCP_API_TOKEN`, a DB-backed MCP bearer token
+    created in **Settings → MCP Tokens**. `ub-mcp` sends it as `Authorization: Bearer` and
+    UB's auth middleware already validates it (`mcpauth.ValidateToken`); Basic Auth via
+    `UB_MCP_API_USER`/`UB_MCP_API_PASS` remains as a fallback when no token is set.
 - **Stop running UB as root (future builds).** The `ultrabridge` image has no `USER`
   directive so the container runs as `uid=0` — a holdover from the real SPC running as
   root. Consequence: everything UB materializes under `UB_SPC_FILE_ROOT`

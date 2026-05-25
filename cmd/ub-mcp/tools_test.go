@@ -36,7 +36,7 @@ func TestSearchNotesBasic(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -89,7 +89,7 @@ func TestSearchNotesEmptyQuery(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -123,7 +123,7 @@ func TestSearchNotesWithFilters(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -180,7 +180,7 @@ func TestSearchNotesDefaultLimit(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -225,7 +225,7 @@ func TestGetNotePagesValid(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -279,7 +279,7 @@ func TestGetNotePagesNotFound(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -305,7 +305,7 @@ func TestGetNotePagesEmptyPath(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -345,7 +345,7 @@ func TestGetNoteImageValid(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -387,7 +387,7 @@ func TestGetNoteImageNotFound(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -413,7 +413,7 @@ func TestGetNoteImageEmptyPath(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
@@ -442,7 +442,7 @@ func TestAPIClientBasicAuth(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "testuser", "testpass")
+	client := newAPIClient(mockServer.URL, "", "testuser", "testpass")
 	ctx := context.Background()
 	resp, err := client.get(ctx, "/api/search?q=test")
 
@@ -460,6 +460,31 @@ func TestAPIClientBasicAuth(t *testing.T) {
 	}
 }
 
+// TestAPIClientBearerToken verifies a Bearer token is sent (and takes
+// precedence over Basic Auth) when a token is provided.
+func TestAPIClientBearerToken(t *testing.T) {
+	var capturedAuth string
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]interface{}{})
+	}))
+	defer mockServer.Close()
+
+	// Token set alongside user/pass: token must win.
+	client := newAPIClient(mockServer.URL, "tok123", "testuser", "testpass")
+	ctx := context.Background()
+	resp, err := client.get(ctx, "/api/search?q=test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if capturedAuth != "Bearer tok123" {
+		t.Errorf("expected \"Bearer tok123\", got: %s", capturedAuth)
+	}
+}
+
 // TestAPIClientNoAuth verifies no auth header when credentials not provided.
 func TestAPIClientNoAuth(t *testing.T) {
 	var capturedAuth string
@@ -470,7 +495,7 @@ func TestAPIClientNoAuth(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	ctx := context.Background()
 	resp, err := client.get(ctx, "/api/search?q=test")
 
@@ -496,7 +521,7 @@ func TestSearchNotesNoResults(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "")
+	client := newAPIClient(mockServer.URL, "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
 		Version: "1.0.0",
