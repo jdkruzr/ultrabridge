@@ -474,12 +474,39 @@ Phase 4 merged + hardware-validated 2026-05-25; NPM flipped back to real SPC (no
 
 ---
 
+## Future: Digest support (first-class; deferred, NOT dropped)
+
+The Supernote **Digest** feature (the SPC API calls it "summary") is a first-class
+capability for this platform — a digest is a user-curated saved excerpt from a
+notebook plus a handwritten `.mark` annotation, organized into groups with tags.
+**UB must support it for real eventually**; Phase 1's empty-success stub on
+`query/summary/{hash,group,id}` is a sync-unblocking placeholder only, and the
+write endpoints (`add/summary`, `update/summary`, `add/summary/group`,
+`add/summary/tag`, …) are currently unimplemented (so digests created on the
+device do NOT sync to UB today).
+
+A real build (sketch; **now unblocked — it reuses the Phase 3/4 OSS signed-URL
+path, which exists**):
+- a `digests` table in notedb (id, parent unique-id, content, source path/type,
+  tags, md5, group/tag refs) + `digest_groups` / `digest_tags`
+- a `.mark` blob store served over the OSS signed-URL path (reuse `oss` + the
+  download/upload handlers)
+- the real `F_SummaryController` surface: `query/summary/{hash,group,id}` returning
+  actual state + the add/update/delete summary/group/tag endpoints
+- Engine.IO `DIGEST-SYN` events so device↔UB digest changes push (the `digest`
+  socket event is already known — see CLAUDE.md socket gotchas)
+- surface digests in `internal/web` (a Digests tab) and likely RAG (digests are
+  high-signal curated content)
+
+This is its own phase-sized effort. See memory `project_spc_no_analogue_features`
+and `docs/future-work/spc-no-analogue-features.md`.
+
 ## Scope dropped (not implemented in any phase)
 
 - **SPC Vue web UI (`/` → `:9888` in the SPC container).** Pure browser-facing, human-only. UB's existing `internal/web/` (Files / Tasks / Search / Chat / Settings / processor C&C / sync status tabs) is the human-facing replacement. The SPC-server listener UB exposes serves only `/api/*` and `/socket.io/*`; a bare browser visit to `supernote.broken.works/` post-cutover returns 404 (or NPM-level redirect to `ultrabridge.broken.works`).
 - User registration, SMS login, valid codes, password reset, sensitive operations, email server config — single-user; user just edits config.
 - Sharing (`F_ShareController`) — single-user, no peers.
-- Summary/tag (`F_SummaryController`) — UB's RAG/search supersedes.
+- ~~Summary/tag (`F_SummaryController`) — UB's RAG/search supersedes.~~ **WRONG — corrected 2026-05-25.** "Summary" is the **Digest** feature, a FIRST-CLASS Supernote capability (user-curated saved excerpts + handwritten `.mark` annotations) — NOT superseded by RAG (that's on-demand retrieval; digests are intentional curated artifacts). It is **deferred, not dropped** — see "Future: Digest support" below. The Phase 1 `query/summary/{hash,group,id}` empty-success stub exists ONLY to keep task sync unblocked.
 - Equipment activation/binding/warranty/manual — stub `bind/status` to "bound" in Phase 1a, 404 the rest.
 - Reference/dictionary — empty 200 stubs if device hits them.
 - File V2 query-by-path — only if device boots into it.
