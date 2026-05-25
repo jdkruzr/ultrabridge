@@ -347,11 +347,13 @@ Merge Phase 3. `/clear` before Phase 4.
 
 ---
 
-## Phase 4 — Files: upload (device → cloud) and catalog cutover
+## Phase 4 — Files: upload (device → cloud) + mutations [COMPLETE 2026-05-25]
 
-**Goal:** Device can upload modified files to UB. The MariaDB catalog write-through is removed.
+**Goal:** Device can upload modified files to UB, and delete / move / copy them.
 
-This is the highest-risk and largest-scope phase, subdivided into four independently-mergeable sub-phases.
+> **As-built note (2026-05-25).** Phase 4 shipped **purely additive** — the MariaDB catalog cutover this section originally bundled was **removed from Phase 4 and deferred to Phase 5b** (coexistence principle: don't tear down the legacy SPC integration until the whole stack is built + soaked). The authoritative as-built record is `docs/implementation-plans/spc-phase-4.md`. Hardware-validated: upload (byte-exact + OCR'd + searchable), rename/move (id-stable), copy (fresh id), delete (soft-delete to `.recycle/`). Three wire bugs the decompiled annotations got wrong were found+fixed (see `docs/spc-protocol.md` §8). UB runs on its OWN `UB_SPC_FILE_ROOT`, not the real SPC's data dir.
+
+This was the highest-risk and largest-scope phase, subdivided into independently-mergeable sub-phases.
 
 ### Entry state
 - Phase 3 exit state holds: download path works; OSS HMAC primitive proven.
@@ -388,67 +390,66 @@ This is the highest-risk and largest-scope phase, subdivided into four independe
 - Schema: add `recycled_at` column to `notedb.notes` if not present.
 - **Acceptance:** Real device delete → file moves to `.recycle/`, disappears from list_folder, web UI no longer lists it. Move/rename → file at new path, notedb row updated. Copy → both copies present and OCR'd.
 
-**4d — Catalog cutover (deletes only; no new endpoints)**
+**4d — [MOVED TO PHASE 5b] Catalog cutover** — NOT done in Phase 4. Deferred per the coexistence principle (keep the legacy integration intact until the full stack is soaked). Phase 4d as-built is instead the additive OCR-kick on uploads (`pipeline.Enqueue`). The cutover spec below is retained for Phase 5b:
 - Delete: `internal/processor/catalog.go`, `internal/processor/catalog_test.go`
 - Delete: `processor.WorkerConfig.CatalogUpdater` field
 - Modify `internal/processor/worker.go`: remove `catalogUpdater.AfterInject()` call. After OCR injection, the worker updates `notedb.notes.md5` and `size` to reflect the post-injection file directly.
 - Modify `cmd/ultrabridge/main.go`: stop passing MariaDB into the processor. The MariaDB pool itself remains because `internal/tasksync/supernote/` still uses it; Phase 5 deletes it.
 - **Acceptance:** `grep -r "catalog.go\|CatalogUpdater\|AfterInject" internal/processor/` returns nothing. `go vet` and `go test` clean. Existing OCR pipeline behavior identical to before (no MariaDB calls observed in logs while OCR runs).
 
-### Exit state (top-level Phase 4)
-- Build/test green.
-- Device fully creates, downloads, deletes, moves, copies files against UB.
-- OCR pipeline runs against UB-owned files without any MariaDB write-through.
-- `internal/processor` no longer touches MariaDB.
-- `internal/tasksync/supernote/` still exists and still uses MariaDB (fine; Phase 5 deletes it).
+### Exit state (top-level Phase 4) — as built
+- Build/test green; hardware-validated.
+- Device fully creates, downloads, deletes, moves, copies files against UB; uploads OCR'd + searchable.
+- **Purely additive**: the MariaDB catalog write-through and all legacy SPC-client code remain intact (cutover deferred to Phase 5b). Real-SPC flip-back is a working escape hatch.
+- UB runs on its own dedicated `UB_SPC_FILE_ROOT` (not the real SPC's data dir).
 
-### Files this phase touches
-**Created**: `internal/spcserver/staging/staging.go`, `internal/spcserver/oss/upload.go`, `internal/spcserver/handlers/upload.go`, `internal/spcserver/handlers/mutation.go`, schema migrations, `docs/implementation-plans/spc-phase-4.md`
-**Modified**: `internal/spcserver/server.go`, `internal/notedb/schema.go`, `internal/processor/worker.go`, `internal/processor/processor.go`, `cmd/ultrabridge/main.go`
-**Deleted**: `internal/processor/catalog.go`, `internal/processor/catalog_test.go`
-**Not touched**: `internal/sync/`, `internal/tasksync/`, `internal/db/` (Phase 5)
+### Files this phase touches — as built
+**Created**: `internal/spcserver/staging/{staging.go,store.go}`, `internal/spcserver/handlers/{upload.go,mutation.go}` (+ tests), `docs/implementation-plans/spc-phase-4.md` (the `oss` upload signing reused Phase 3's `oss/sign.go`, no separate `upload.go`)
+**Modified**: `internal/spcserver/server.go`, `internal/spcserver/notify/notifier.go`, `internal/spcserver/fileids/fileids.go`, `internal/spcserver/dto/file.go`, `internal/pipeline/pipeline.go`, `cmd/ultrabridge/main.go`, `docs/spc-protocol.md`
+**Deleted**: nothing (coexistence — cutover is Phase 5b)
 
 ### Compact/clear checkpoint
-Merge Phase 4. **DNS-flip moment.** Point `cloud.host` at UB. Real SPC stays alive for one verification week as escape hatch. Move to Phase 5 only after the device has been running against UB for ≥1 week with no regressions. `/clear` before Phase 5.
+Phase 4 merged + hardware-validated 2026-05-25; NPM flipped back to real SPC (no permanent DNS cutover yet). `/clear` before Phase 5 (verification + gated teardown).
 
 ---
 
-## Phase 5 — Polish, recycle, and full cleanup
+## Phase 5 — Verification + gated deprecation (re-scoped 2026-05-25)
 
-**Goal:** Recycle bin endpoints, file search, and removal of all SPC-client code. Real SPC container can be shut down.
+**Goal:** Confirm UB-as-SPC is feature-complete for the device, then — only after a real soak — remove the legacy SPC-client code so the Supernote container can be shut down. **The recycle-browse/restore and file-search features originally planned here are OUT OF SCOPE** (see below).
+
+> **Re-scope note (2026-05-25, after the Phase 4 hardware session).** Inspecting the live SPC stack (`mariadb`/`supernotedb` + decompiled source) established that **UB-as-SPC is functionally feature-complete for the device as of Phase 4**:
+> - The cloud recycle bin is the `f_recycle_file` table. The **device's** only interaction with it is **delete-into-recycle** (`delete_folder_v3` → `FileLocalUtil.processSingleFileDeletion`), which UB already implements (Phase 4 soft-delete to `.recycle/`, hardware-validated).
+> - Recycle **list/clear/delete/revert** and **file search** live ONLY on `F_FileLocalWebController` / `F_FileSearchController` — the **Partner-app/web** surface, which the device never hits (0b capture §11).
+> - **Partner-app support is a real future goal but explicitly out of scope for this project** (user decision 2026-05-25). So the former 5a (recycle endpoints) and 5b (file search) are **dropped** — they serve a client we are not building for. They would belong to a separate "Partner/web surface" project (its own login flow, `F_FileController`/`F_FileV2Controller`/`F_ShareController` families, sharing semantics).
 
 ### Entry state
-- Phase 4 exit state holds: device is fully syncing notes and tasks against UB; OCR pipeline runs locally; catalog write-through is gone.
-- Device has been running against UB for ≥1 verification week with no regressions.
-- `internal/sync/notifier.go`, `internal/tasksync/supernote/`, `internal/db/` still exist but are unused when `UB_SPC_MODE=server`.
+- Phase 4 exit state holds: device fully creates / downloads / renames / moves / copies / deletes files against UB; uploads are OCR'd and searchable; UB runs on its own dedicated `UB_SPC_FILE_ROOT` (NOT the real SPC's data dir).
+- **Phase 4 was purely additive** — the legacy SPC integration is fully intact: `internal/processor/catalog.go` + its MariaDB catalog write-through, `internal/tasksync/supernote/`, `internal/sync/`, `internal/db/` all still present and working. Real-SPC flip-back remains a working escape hatch.
+- Device has been running against UB for ≥1 verification week with no regressions **before any teardown begins**.
 
 ### Context to load on a cold session
-- This design plan, Phase 5 section
-- `internal/sync/CLAUDE.md`, `internal/tasksync/supernote/CLAUDE.md`, `internal/db/` for full deletion scope
-- `internal/spcserver/socketio/` for adding new event types
-- `internal/search/CLAUDE.md` for FTS5 reuse
-- `docs/spc-protocol.md` — to determine whether 5c (rendering) and 5d (DIGEST-SYN) are needed
+- This design plan, Phase 5 section; `docs/spc-protocol.md`
+- `memory/project_spc_phase5_watchlist`, `project_spc_coexistence_no_premature_cutover`, `project_spc_dedicated_file_tree`, `project_spc_phase4_upload`
+- `internal/processor/CLAUDE.md`, `internal/processor/catalog.go`, `worker.go` (catalog cutover scope)
+- `internal/sync/CLAUDE.md`, `internal/tasksync/supernote/CLAUDE.md`, `internal/db/` (deletion scope)
 
 ### Sub-phases
 
-**5a — Recycle bin endpoints**
-- New code: `internal/spcserver/handlers/recycle.go` (`POST /api/file/recycle/list/query`, `/clear`, `/delete`, `/revert`), `internal/spcserver/recycle/cleanup.go` (background goroutine TTL-cleans entries older than 30 days)
-- Backed by `recycled_at` column (added in 4c) + `<NotesPath>/.recycle/` directory (populated by 4c).
-- **Acceptance:** Real device's recycle UI lists soft-deleted files; restore works (file returns to original path, `recycled_at` cleared); clear empties.
+**5a — Verification sweep (no new features)**
+- Capture a fresh full device session (sync, upload, download, rename, move, copy, delete) against UB and confirm **no endpoint the device hits is unimplemented** (no unexpected 404/5xx in the NPM/tcpdump logs). The 0b set says we are complete; this is the soak-period confirmation.
+- **Acceptance:** a clean device session shows zero unhandled device-hit endpoints over ≥1 week.
 
-**5b — File search endpoint**
-- New code: `internal/spcserver/handlers/search.go` (`POST /api/file/list/search` → calls existing `internal/search/` FTS5)
-- **Acceptance:** Real device search returns hits matching OCR'd content.
+**5b — Catalog cutover (deferred from Phase 4; gated on 5a + soak)**
+- This is the teardown the coexistence principle deferred. Delete `internal/processor/catalog.go` + `catalog_test.go`; remove `WorkerConfig.CatalogUpdater` + the `AfterInject()` call; the worker updates `notedb.notes.md5`/`size` directly post-injection; `cmd/ultrabridge/main.go` stops passing MariaDB into the processor.
+- **Acceptance:** `grep -r "catalog.go\|CatalogUpdater\|AfterInject" internal/processor/` empty; OCR behavior identical; no MariaDB calls during OCR.
 
-**5c — Note rendering endpoints (CONDITIONAL; only if Phase 0b boot-trace showed the device hits these)**
-- New code: `internal/spcserver/handlers/render.go` (`POST /api/file/note/to/pdf`, `POST /api/file/note/to/png`) reusing `go-sn` and `internal/booxrender`
-- **Acceptance:** Device's render-to-PDF UI produces matching PDF. Skip this sub-phase entirely if Phase 0b showed the device never hits these endpoints.
+**5c — Note rendering endpoints (CONDITIONAL; device does NOT hit these per 0b — likely skip)**
+- Only if a capture ever shows the device hitting `POST /api/file/note/to/pdf|png`. Reuse `go-sn`/`internal/booxrender`. Default: skip.
 
 **5d — Engine.IO DIGEST-SYN events (CONDITIONAL; only if device misbehaves without them)**
-- New code: extend `internal/spcserver/socketio/server.go` to emit `DIGEST-SYN` events on the appropriate channel.
-- **Acceptance:** Device behaves identically with the events present.
+- Extend `internal/spcserver/socketio/server.go` to emit `DIGEST-SYN`. Default: skip (Phase 1–4 worked without it).
 
-**5e — Big cleanup PR (deletes + config-key removals)**
+**5e — Big cleanup PR (deletes + config-key removals) — the final teardown, gated on the full soak**
 - Delete: `internal/sync/notifier.go`, `notifier_test.go`, `internal/sync/CLAUDE.md`
 - Delete: `internal/tasksync/supernote/` (entire subdirectory)
 - Delete or simplify: `internal/tasksync/engine.go` (the two-store reconciliation logic; if no callers remain, delete; else simplify to drive only the new spcserver Notifier)
@@ -462,12 +463,14 @@ Merge Phase 4. **DNS-flip moment.** Point `cloud.host` at UB. Real SPC stays ali
 - **Acceptance:** `grep -ri "mariadb\|UB_SN_\|tasksync/supernote\|sync/notifier" internal/ cmd/` returns nothing. `docker compose up` brings up only UB (no SPC container, no MariaDB). Web UI / CalDAV / MCP / Boox / RAG / chat all still work.
 
 ### Exit state (top-level Phase 5)
-- UB is the cloud. The Supernote container is shut down. CalDAV, web UI, MCP, RAG, Boox pipeline, Supernote OCR pipeline all carry over unchanged except for catalog deletion in Phase 4.
+- UB is the cloud. The Supernote container can be shut down. CalDAV, web UI, MCP, RAG, Boox pipeline, Supernote OCR pipeline all carry over unchanged except the now-deleted MariaDB catalog write-through (5b).
+- Recycle-browse/restore and file search are **not** present (Partner/web surface, out of scope) — the device never needs them.
 
 ### Files this phase touches
-**Created**: `internal/spcserver/handlers/recycle.go`, `internal/spcserver/recycle/cleanup.go`, `internal/spcserver/handlers/search.go`, conditionally `handlers/render.go`, `docs/implementation-plans/spc-phase-5.md`
-**Modified**: `internal/spcserver/server.go`, `internal/appconfig/keys.go`, `cmd/ultrabridge/main.go`, `docker-compose.yml`
-**Deleted**: `internal/sync/`, `internal/tasksync/supernote/`, `internal/db/`, MariaDB integration tests, possibly `internal/tasksync/engine.go`
+**Created**: `docs/implementation-plans/spc-phase-5.md`, conditionally `handlers/render.go` (5c, likely skipped)
+**Modified**: `internal/processor/worker.go`/`processor.go` (catalog cutover), `internal/appconfig/keys.go`, `cmd/ultrabridge/main.go`, `docker-compose.yml`
+**Deleted**: `internal/processor/catalog.go` + `catalog_test.go` (5b), `internal/sync/`, `internal/tasksync/supernote/`, `internal/db/`, MariaDB integration tests, possibly `internal/tasksync/engine.go` (5e)
+**NOT created (dropped, Partner/web surface = out of scope)**: recycle endpoints, file-search endpoint
 
 ---
 
