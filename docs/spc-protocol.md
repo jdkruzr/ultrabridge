@@ -422,8 +422,16 @@ digest soft-deleted **server-side only** does NOT propagate down — the device,
 local digest missing from `query/summary/hash`, **re-asserts it via `PUT /update/summary`**.
 UB currently no-ops that update (its `GetByID` excludes soft-deleted), so the row stays
 deleted while the device keeps re-pushing → benign perpetual re-push + divergence. Fine for
-D1 (device round-trip); a future UB/web-initiated digest delete needs a **tombstone** the
-device honors (D2). `update/summary` can also *add* handwriting to a previously text-only
+D1 (device round-trip). **D2 tombstone (built 2026-05-26):** a UB/web-initiated delete now
+pushes a `DELETE_DIGEST` over the **`digest`** Socket.IO event so the device removes its
+local copy instead of re-asserting. The wire shape replicates the real server's
+`SocketDigestMessageData<DigestMessageTemplate>` (`SocketIoConstant.EVENT_DIGEST` /
+`MSG_TYPE_DIGEST = "DIGEST-SYN"`): on a delete only `messageType`/`dataType`/`equipmentNo`/
+`timestamp`/`id` are populated (`dataType` = sourceType: "1"=PDF, "2"=note). `id` is UB's
+own digest id — the same id it returns in `query/summary/hash`, so the device's local key
+matches. `equipmentNo` is sent as `"ultrabridge"` (the device is expected to key on `id`);
+**both the `equipmentNo` value and the device's honoring of the frame are pending hardware
+capture** (NPM flip → `:8089` tcpdump). `update/summary` can also *add* handwriting to a previously text-only
 digest (new `.mark` uploaded + promoted) and move an item between groups via
 `parentUniqueIdentifier` — both device-confirmed.
 

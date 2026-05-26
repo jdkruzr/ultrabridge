@@ -335,7 +335,6 @@ func main() {
 		} else {
 			ds := digeststore.New(noteDB)
 			digestStore = ds
-			digestSvc = service.NewDigestService(ds)
 
 			// Phase D2: surface synced digests in the shared FTS5/RAG index so they
 			// are searchable and feed chat retrieval. Embedding is wired only when
@@ -350,6 +349,10 @@ func main() {
 			bridge.Start(context.Background())
 			defer bridge.Stop()
 			digestIndexer = bridge
+
+			// The same bridge de-indexes a web-deleted digest (D2 tombstone): the
+			// device push is wired below once the socket notifier exists.
+			digestSvc = service.NewDigestService(ds, bridge)
 
 			// Backfill: index digests that synced before D2 (best-effort, async).
 			if items, err := ds.ListAllItemsForIndex(context.Background()); err != nil {
@@ -422,13 +425,20 @@ func main() {
 			FileRecords:    snFileRecords,
 			Logger:         logger,
 		})
-		taskNotifier = notify.NewSocketNotifier(
+		sn := notify.NewSocketNotifier(
 			spcSrv.SocketRegistry(),
 			func(ctx context.Context) (string, error) {
 				return notedb.GetSetting(ctx, noteDB, spcauth.UserIDSettingKey)
 			},
 			logger,
 		)
+		taskNotifier = sn
+		// D2 tombstone: a web-initiated digest delete pushes DELETE_DIGEST over the
+		// same socket so the device removes its local copy. digestSvc is nil if the
+		// digest store didn't migrate.
+		if digestSvc != nil {
+			digestSvc.SetTombstoneNotifier(sn)
+		}
 	}
 
 	backend := ubcaldav.NewBackend(store, "/caldav", cfg.CalDAVCollectionName, cfg.DueTimeMode, taskNotifier)

@@ -2,30 +2,83 @@ package service
 
 import (
 	"context"
+	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/sysop/ultrabridge/internal/digeststore"
 )
 
-// DigestStore is the slice of the canonical digest store the web read path
-// needs. *digeststore.Store satisfies it. (Kept narrow so the service depends
-// only on what it uses, mirroring the other store interfaces here.)
+// DigestStore is the slice of the canonical digest store the web layer needs:
+// the read path (ListItems/ListGroups) plus the delete path (GetItem to resolve
+// the owning user + sourceType + uniqueIdentifier, then SoftDelete).
+// *digeststore.Store satisfies it. (Kept narrow so the service depends only on
+// what it uses, mirroring the other store interfaces here.)
 type DigestStore interface {
 	ListItems(ctx context.Context, parentUID, tag string, page, size int) ([]digeststore.Digest, int64, error)
 	ListGroups(ctx context.Context) ([]digeststore.Digest, error)
+	GetItem(ctx context.Context, id int64) (*digeststore.Digest, error)
+	SoftDelete(ctx context.Context, userID, id int64) error
+}
+
+// DigestDeindexer drops a digest from the shared FTS5/RAG index on delete so a
+// web-deleted digest stops surfacing in search and chat. *digestindex.Bridge
+// satisfies it (fire-and-forget; the bridge processes off the request path).
+type DigestDeindexer interface {
+	Deindex(uid string)
+}
+
+// DigestTombstoneNotifier pushes a DELETE_DIGEST tombstone to the connected
+// device so a UB/web-initiated delete propagates down (without it the device
+// re-asserts the digest). *spcserver/notify.SocketNotifier satisfies it
+// structurally, so this package never imports spcserver.
+type DigestTombstoneNotifier interface {
+	NotifyDigestDelete(ctx context.Context, id int64, dataType string) error
 }
 
 type digestService struct {
-	store DigestStore
+	store     DigestStore
+	deindexer DigestDeindexer         // optional; nil skips search/RAG de-index
+	tombstone DigestTombstoneNotifier // optional; nil skips the device push
+	logger    *slog.Logger
 }
 
-// NewDigestService wraps a digest store for the web layer. Returns nil if store
-// is nil so callers can gate the Digests tab/nav on a nil service.
-func NewDigestService(store DigestStore) DigestService {
+// NewDigestService wraps a digest store for the web layer. deindexer may be nil
+// (search/RAG de-index on delete is then skipped). Returns nil if store is nil
+// so callers can gate the Digests tab/nav on a nil service.
+func NewDigestService(store DigestStore, deindexer DigestDeindexer) DigestService {
 	if store == nil {
 		return nil
 	}
-	return &digestService{store: store}
+	return &digestService{store: store, deindexer: deindexer, logger: slog.Default()}
+}
+
+// SetTombstoneNotifier wires the device-push seam after construction (the
+// notifier is built later in main, over the SPC server's socket registry).
+func (s *digestService) SetTombstoneNotifier(n DigestTombstoneNotifier) { s.tombstone = n }
+
+// DeleteDigest soft-deletes a digest, drops it from search/RAG, and pushes a
+// DELETE_DIGEST tombstone so the device removes its local copy (D2). The
+// soft-delete is authoritative (its error propagates); de-index and the device
+// push are best-effort — the row is already gone, and the device's next sync
+// catches any missed push.
+func (s *digestService) DeleteDigest(ctx context.Context, id int64) error {
+	d, err := s.store.GetItem(ctx, id)
+	if err != nil {
+		return err // ErrNotFound or a real read error; web maps to 404/500
+	}
+	if err := s.store.SoftDelete(ctx, d.UserID, id); err != nil {
+		return err
+	}
+	if s.deindexer != nil {
+		s.deindexer.Deindex(d.UniqueIdentifier)
+	}
+	if s.tombstone != nil {
+		if err := s.tombstone.NotifyDigestDelete(ctx, id, strconv.Itoa(d.SourceType)); err != nil {
+			s.logger.Warn("digest delete tombstone push", "id", id, "error", err)
+		}
+	}
+	return nil
 }
 
 func (s *digestService) ListDigests(ctx context.Context, group, tag string, page, perPage int) ([]DigestView, int, error) {

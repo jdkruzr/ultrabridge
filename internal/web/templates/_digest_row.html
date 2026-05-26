@@ -14,5 +14,11 @@
   </td>
   <td class="text-small">{{formatTimestamp .CreatedAt}}</td>
   <td class="text-small">{{formatTimestamp .ModifiedAt}}</td>
+  <td>
+    <button class="btn btn-small btn-danger"
+            hx-delete="/digests/{{.ID}}"
+            hx-target="closest tr" hx-swap="outerHTML"
+            hx-confirm="Delete this digest? It will be removed from this device too.">Delete</button>
+  </td>
 </tr>
 {{end}}

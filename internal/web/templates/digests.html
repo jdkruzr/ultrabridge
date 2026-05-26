@@ -43,6 +43,7 @@
           <th style="width:12rem;">Tags</th>
           <th style="width:9rem;">Created</th>
           <th style="width:9rem;">Modified</th>
+          <th style="width:4rem;"></th>
         </tr>
       </thead>
       <tbody>
@@ -51,7 +52,7 @@
         {{template "_digest_row" .}}
         {{end}}
         {{else}}
-        <tr><td colspan="6" style="text-align:center; padding:1rem;">No digests found.</td></tr>
+        <tr><td colspan="7" style="text-align:center; padding:1rem;">No digests found.</td></tr>
         {{end}}
       </tbody>
     </table>

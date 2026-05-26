@@ -46,9 +46,15 @@ stack is built and soaked.** Real-SPC flip-back stays a working escape hatch.
     device-authoritative — a server-only soft-delete does NOT propagate (device
     re-asserts via `update/summary`, which UB no-ops → benign re-push divergence). A
     future UB/web-initiated digest delete (D2) needs a **tombstone** the device honors.
-  - **D2 — UB-native surfacing (not built).** Index digest `content` into FTS
-    (`digest_content`/`digest_fts`) + RAG-embed + a `DigestService` + `internal/web`
-    Digests tab + `/api/v1/digests`. Where digests become first-class *inside* UB.
+  - **D2 — UB-native surfacing: DONE 2026-05-26.** Digests index into the shared
+    `note_content`/`note_fts`/`note_embeddings` at `digest://<uid>` (not parallel tables) via
+    `internal/digestindex`; `service.DigestService` + `internal/web` `/digests` tab.
+    **Tombstone: built 2026-05-26 (web-path verified; hardware-pending).** A web-initiated
+    delete (`DELETE /digests/{id}` → `DigestService.DeleteDigest`) soft-deletes, de-indexes,
+    and pushes a `DELETE_DIGEST` over the `digest` socket event via
+    `notify.NotifyDigestDelete` so the device honors the delete (wire shape in
+    `spc-protocol.md §8`). Items-only for v1 (group-delete tombstone deferred — wire shape
+    not yet captured). `/api/v1/digests` MCP surface deferred (browse + search cover it).
   - **D3 — proactive `DIGEST-SYN` push (capture-gated, not built).** `notify.NotifyDigest`
     over the `digest` socket event; only if a capture shows the device needs it (it polls
     `query/summary/hash` every sync, so round-trip works without it).

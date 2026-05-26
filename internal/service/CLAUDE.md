@@ -32,11 +32,18 @@ all implemented by unexported structs and constructed via
   retriever (not the bare FTS index) and accepts a source-type
   facet (`supernote|boox|forestnote|digest`); each `SearchResult`
   carries its `SourceType`.
-- **`DigestService`** (`digest.go`) — read surface over
+- **`DigestService`** (`digest.go`) — read + delete surface over
   `digeststore` for the web Digests tab: `ListDigests(group, tag,
-  page, perPage)` + `ListGroups`. All-users reads (single-user
-  instance). Constructed only in SPC server mode; the web handler
-  holds it via `SetDigestService` (nil ⇒ tab + nav entry hide).
+  page, perPage)` + `ListGroups`, plus `DeleteDigest(id)`. All-users
+  reads (single-user instance). Constructed only in SPC server mode;
+  the web handler holds it via `SetDigestService` (nil ⇒ tab + nav
+  entry hide). `DeleteDigest` soft-deletes, de-indexes via an
+  injected `DigestDeindexer` (`*digestindex.Bridge`), and pushes a
+  `DELETE_DIGEST` tombstone via a `DigestTombstoneNotifier` wired
+  through `SetTombstoneNotifier` (D2; `*notify.SocketNotifier`
+  satisfies it structurally so `service` never imports `spcserver`).
+  Soft-delete is authoritative (its error propagates); de-index +
+  push are best-effort.
 - **`ConfigService`** — config get/save and sources CRUD. (The
   sync-status delegate was removed with the legacy SPC client
   2026-05-25; device sync now lives entirely in `internal/spcserver`.)

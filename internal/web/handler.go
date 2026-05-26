@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/sysop/ultrabridge/internal/appconfig"
+	"github.com/sysop/ultrabridge/internal/digeststore"
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/mcpauth"
 	"github.com/sysop/ultrabridge/internal/notedb"
@@ -256,6 +257,7 @@ func NewHandler(
 	h.mux.HandleFunc("GET /files/supernote", h.handleFilesSupernote)
 	h.mux.HandleFunc("GET /files/boox", h.handleFilesBoox)
 	h.mux.HandleFunc("GET /digests", h.handleDigests)
+	h.mux.HandleFunc("DELETE /digests/{id}", h.handleDeleteDigest)
 	h.mux.HandleFunc("GET /search", h.handleSearch)
 	h.mux.HandleFunc("POST /files/queue", h.handleFilesQueue)
 	h.mux.HandleFunc("POST /files/skip", h.handleFilesSkip)
@@ -573,6 +575,33 @@ func (h *Handler) handleDigests(w http.ResponseWriter, r *http.Request) {
 	}
 	data["filesTotalPages"] = totalPages
 	h.renderTemplate(w, r, "digests", data)
+}
+
+// handleDeleteDigest soft-deletes a digest and propagates the delete to the
+// device (D2 tombstone). On HX it returns an empty 200 so the row swaps out
+// (hx-target="closest tr"); non-HX redirects back to the tab.
+func (h *Handler) handleDeleteDigest(w http.ResponseWriter, r *http.Request) {
+	if h.digests == nil {
+		http.NotFound(w, r) // digest sync disabled (no SPC server)
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad digest id", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	if err := h.digests.DeleteDigest(ctx, id); err != nil {
+		if errors.Is(err, digeststore.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		h.logger.Error("delete digest", "id", id, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	h.respondEmptyOrRedirect(w, r, "/digests")
 }
 
 func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
