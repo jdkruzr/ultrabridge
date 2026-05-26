@@ -44,7 +44,7 @@ func notebookOp(site string, opSeq, wall int64, name string, deletedAt any) Op {
 func TestApplyBatch_MaterializesAndProvenance(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	if _, err := s.ApplyBatch(ctx, []Op{notebookOp(siteA, 1, 1000, "Journal", nil)}); err != nil {
+	if _, err := s.ApplyBatch(ctx, siteA, []Op{notebookOp(siteA, 1, 1000, "Journal", nil)}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	var name string
@@ -61,7 +61,7 @@ func TestApplyBatch_MaterializesAndProvenance(t *testing.T) {
 func TestApplyBatch_LWWHigherWins(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	_, err := s.ApplyBatch(ctx, []Op{
+	_, err := s.ApplyBatch(ctx, siteA, []Op{
 		notebookOp(siteA, 1, 1000, "Old", nil),
 		notebookOp(siteA, 2, 2000, "New", nil),
 	})
@@ -80,20 +80,20 @@ func TestApplyBatch_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	batch := []Op{notebookOp(siteA, 1, 1000, "Journal", nil), notebookOp(siteA, 2, 2000, "Renamed", nil)}
 
-	r1, err := s.ApplyBatch(ctx, batch)
+	r1, err := s.ApplyBatch(ctx, siteA, batch)
 	if err != nil {
 		t.Fatalf("apply1: %v", err)
 	}
-	if len(r1.Settled) != 2 {
-		t.Fatalf("first apply: want 2 settled, got %d", len(r1.Settled))
+	if r1.AcceptedThrough != 2 {
+		t.Fatalf("first apply: want accepted_through 2, got %d", r1.AcceptedThrough)
 	}
 
-	r2, err := s.ApplyBatch(ctx, batch) // replay
+	r2, err := s.ApplyBatch(ctx, siteA, batch) // replay
 	if err != nil {
 		t.Fatalf("apply2: %v", err)
 	}
-	if len(r2.Settled) != 2 {
-		t.Errorf("replay: want 2 settled (deduped), got %d", len(r2.Settled))
+	if r2.AcceptedThrough != 2 {
+		t.Errorf("replay: want accepted_through 2 (deduped), got %d", r2.AcceptedThrough)
 	}
 	// no duplicate changelog rows
 	var n int
@@ -107,21 +107,23 @@ func TestApplyBatch_RejectsMalformed(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	bad := []Op{
-		{Table: "bogus", PK: nb1, SiteID: siteA, OpSeq: 1, WallTS: 1, Cols: map[string]any{}},                       // unknown table
-		{Table: "notebook", PK: "short", SiteID: siteA, OpSeq: 2, WallTS: 1, Cols: map[string]any{}},                 // bad pk
-		{Table: "notebook", PK: nb1, SiteID: siteA, OpSeq: 0, WallTS: 1, Cols: map[string]any{}},                     // op_seq 0
-		{Table: "notebook", PK: nb1, SiteID: siteA, OpSeq: 3, WallTS: 1, Cols: map[string]any{"name": "x"}},          // missing cols
-		notebookOp(siteA, 4, 1000, "Good", nil),                                                                      // valid
+		{Table: "bogus", PK: nb1, SiteID: siteA, OpSeq: 1, WallTS: 1, Cols: map[string]any{}},               // unknown table
+		{Table: "notebook", PK: "short", SiteID: siteA, OpSeq: 2, WallTS: 1, Cols: map[string]any{}},        // bad pk
+		{Table: "notebook", PK: nb1, SiteID: siteA, OpSeq: 0, WallTS: 1, Cols: map[string]any{}},            // op_seq 0
+		{Table: "notebook", PK: nb1, SiteID: siteA, OpSeq: 3, WallTS: 1, Cols: map[string]any{"name": "x"}}, // missing cols
+		notebookOp(siteA, 4, 1000, "Good", nil),                                                             // valid
 	}
-	res, err := s.ApplyBatch(ctx, bad)
+	res, err := s.ApplyBatch(ctx, siteA, bad)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if len(res.Rejected) != 4 {
 		t.Errorf("want 4 rejected, got %d: %+v", len(res.Rejected), res.Rejected)
 	}
-	if len(res.Settled) != 1 {
-		t.Errorf("want 1 settled (the valid op), got %d", len(res.Settled))
+	// op_seqs 1,2,3 rejected, 4 applied → contiguous high-water is 4 (poison ops
+	// don't wedge the water).
+	if res.AcceptedThrough != 4 {
+		t.Errorf("want accepted_through 4, got %d", res.AcceptedThrough)
 	}
 }
 
@@ -136,7 +138,7 @@ func TestApplyBatch_ChangedPagesFromStroke(t *testing.T) {
 			"z": float64(0), "created_at": float64(1000), "deleted_at": nil,
 		},
 	}
-	res, err := s.ApplyBatch(ctx, []Op{stroke})
+	res, err := s.ApplyBatch(ctx, siteA, []Op{stroke})
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -149,7 +151,7 @@ func TestOpsSince_ExcludesSelfAndPages(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	// site A authors 3 notebook revisions
-	_, err := s.ApplyBatch(ctx, []Op{
+	_, err := s.ApplyBatch(ctx, siteA, []Op{
 		notebookOp(siteA, 1, 1000, "v1", nil),
 		notebookOp(siteA, 2, 2000, "v2", nil),
 		notebookOp(siteA, 3, 3000, "v3", nil),
@@ -186,13 +188,73 @@ func TestOpsSince_ExcludesSelfAndPages(t *testing.T) {
 	}
 }
 
+// poison op mid-batch: 1 and 3 valid, 2 missing a column → 2 rejected. The water
+// must reach 3 (1 present, 2 rejected, 3 present) — not stall at 1, not skip 2.
+func TestAcceptedThrough_PoisonOpDoesNotWedge(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	poison := Op{Table: "notebook", PK: nb1, SiteID: siteA, OpSeq: 2, WallTS: 2000,
+		Cols: map[string]any{"name": "x"}} // missing sort_order/created_at/deleted_at
+	res, err := s.ApplyBatch(ctx, siteA, []Op{
+		notebookOp(siteA, 1, 1000, "v1", nil),
+		poison,
+		notebookOp(siteA, 3, 3000, "v3", nil),
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(res.Rejected) != 1 || res.Rejected[0].OpSeq != 2 {
+		t.Fatalf("want op 2 rejected, got %+v", res.Rejected)
+	}
+	if res.AcceptedThrough != 3 {
+		t.Errorf("want accepted_through 3 (poison op 2 counted), got %d", res.AcceptedThrough)
+	}
+}
+
+// a genuine gap (op never sent, never rejected) caps the water so the device
+// keeps resending: send 1 and 3, skip 2 → water stops at 1.
+func TestAcceptedThrough_GapCapsWater(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	res, err := s.ApplyBatch(ctx, siteA, []Op{
+		notebookOp(siteA, 1, 1000, "v1", nil),
+		notebookOp(siteA, 3, 3000, "v3", nil), // op_seq 2 missing
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if res.AcceptedThrough != 1 {
+		t.Errorf("want accepted_through 1 (gap at 2 caps water), got %d", res.AcceptedThrough)
+	}
+}
+
+// the high-water persists across calls: call 1 settles 1..2, call 2 sends 3 and
+// must advance to 3 (not recompute from a non-existent op 1 in this batch).
+func TestAcceptedThrough_PersistsAcrossCalls(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.ApplyBatch(ctx, siteA, []Op{
+		notebookOp(siteA, 1, 1000, "v1", nil),
+		notebookOp(siteA, 2, 2000, "v2", nil),
+	}); err != nil {
+		t.Fatalf("call1: %v", err)
+	}
+	res, err := s.ApplyBatch(ctx, siteA, []Op{notebookOp(siteA, 3, 3000, "v3", nil)})
+	if err != nil {
+		t.Fatalf("call2: %v", err)
+	}
+	if res.AcceptedThrough != 3 {
+		t.Errorf("want accepted_through 3 across calls, got %d", res.AcceptedThrough)
+	}
+}
+
 func TestLastSeq(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	if seq, _ := s.LastSeq(ctx); seq != 0 {
 		t.Errorf("fresh LastSeq = %d, want 0", seq)
 	}
-	s.ApplyBatch(ctx, []Op{notebookOp(siteA, 1, 1000, "x", nil)})
+	s.ApplyBatch(ctx, siteA, []Op{notebookOp(siteA, 1, 1000, "x", nil)})
 	if seq, _ := s.LastSeq(ctx); seq != 1 {
 		t.Errorf("LastSeq after 1 op = %d, want 1", seq)
 	}

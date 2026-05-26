@@ -33,7 +33,8 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 
 		`CREATE TABLE IF NOT EXISTS sync_cursors (
 			site_id       TEXT PRIMARY KEY,
-			last_pull_seq INTEGER NOT NULL DEFAULT 0,
+			last_pull_seq INTEGER NOT NULL DEFAULT 0, -- global relay high-water this device has pulled
+			acked_op_seq  INTEGER NOT NULL DEFAULT 0, -- contiguous accepted_through for this device (spec §4.1)
 			updated_at    INTEGER NOT NULL
 		)`,
 

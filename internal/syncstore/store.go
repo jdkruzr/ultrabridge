@@ -17,25 +17,21 @@ type Store struct {
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
-// SettledOp identifies an op that is durably dealt with (applied or already
-// present). RejectedOp identifies a permanently refused op (spec §7.2).
-type SettledOp struct {
-	SiteID string
-	OpSeq  int64
-}
+// RejectedOp identifies a permanently refused op (spec §7.2).
 type RejectedOp struct {
 	SiteID string `json:"site_id"`
 	OpSeq  int64  `json:"op_seq"`
 	Reason string `json:"reason"`
 }
 
-// ApplyResult reports the outcome of an ApplyBatch. The service layer (syncsvc)
-// turns Settled+Rejected into the contiguous accepted_through (spec §4.1) and
-// hands ChangedPages to the pipeline bridge (Phase 2).
+// ApplyResult reports the outcome of an ApplyBatch for the requesting device.
+// AcceptedThrough is the contiguous high-water (spec §4.1), computed and
+// persisted inside the apply transaction. Rejected is returned verbatim to the
+// client; ChangedPages feeds the pipeline bridge (Phase 2).
 type ApplyResult struct {
-	Settled      []SettledOp
-	Rejected     []RejectedOp
-	ChangedPages []TablePK // pages whose live render input may have changed
+	AcceptedThrough int64
+	Rejected        []RejectedOp
+	ChangedPages    []TablePK // pages whose live render input may have changed
 }
 
 // validateOp returns "" if op is structurally acceptable, else a permanent
@@ -63,10 +59,12 @@ func validateOp(op Op) string {
 	return ""
 }
 
-// ApplyBatch validates, dedups, merges, and records each op in one transaction.
+// ApplyBatch validates, dedups, merges, and records each op in one transaction,
+// then computes and persists the requesting device's contiguous accepted_through.
+// siteID is the authenticated device; accepted_through is computed for it.
 // Render/OCR are intentionally NOT here — the bridge runs after commit so it
 // cannot stall /sync/v1 against the single-writer notedb.
-func (s *Store) ApplyBatch(ctx context.Context, ops []Op) (ApplyResult, error) {
+func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyResult, error) {
 	var res ApplyResult
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -75,19 +73,26 @@ func (s *Store) ApplyBatch(ctx context.Context, ops []Op) (ApplyResult, error) {
 	defer tx.Rollback()
 
 	now := time.Now().UnixMilli()
+	rejectedSeqs := make(map[int64]bool) // op_seqs permanently rejected for siteID this call
+	reject := func(op Op, reason string) {
+		res.Rejected = append(res.Rejected, RejectedOp{op.SiteID, op.OpSeq, reason})
+		if op.SiteID == siteID {
+			rejectedSeqs[op.OpSeq] = true
+		}
+	}
+
 	for _, op := range ops {
 		if reason := validateOp(op); reason != "" {
-			res.Rejected = append(res.Rejected, RejectedOp{op.SiteID, op.OpSeq, reason})
+			reject(op, reason)
 			continue
 		}
 
-		// Dedup: already in the changelog → settled, no re-apply (spec §7.3).
+		// Dedup: already in the changelog → already settled, no re-apply (spec §7.3).
 		var dummy int
 		err := tx.QueryRowContext(ctx,
 			`SELECT 1 FROM sync_ops WHERE site_id = ? AND op_seq = ?`,
 			op.SiteID, op.OpSeq).Scan(&dummy)
 		if err == nil {
-			res.Settled = append(res.Settled, SettledOp{op.SiteID, op.OpSeq})
 			continue
 		} else if err != sql.ErrNoRows {
 			return res, fmt.Errorf("dedup check: %w", err)
@@ -97,11 +102,12 @@ func (s *Store) ApplyBatch(ctx context.Context, ops []Op) (ApplyResult, error) {
 		changed, pagePK, mErr := mergeRow(ctx, tx, n)
 		if mErr != nil {
 			// Malformed value type in a known column → permanent rejection.
-			res.Rejected = append(res.Rejected, RejectedOp{op.SiteID, op.OpSeq, mErr.Error()})
+			reject(op, mErr.Error())
 			continue
 		}
 
 		// Assign the next global seq and append the op verbatim (relay payload).
+		// A losing op (mirror unchanged) is still recorded for relay completeness.
 		var seq int64
 		if err := tx.QueryRowContext(ctx,
 			`UPDATE sync_seq SET last_seq = last_seq + 1 WHERE id = 1 RETURNING last_seq`).
@@ -119,16 +125,65 @@ func (s *Store) ApplyBatch(ctx context.Context, ops []Op) (ApplyResult, error) {
 			return res, fmt.Errorf("insert sync_ops: %w", err)
 		}
 
-		res.Settled = append(res.Settled, SettledOp{op.SiteID, op.OpSeq})
 		if changed && pagePK != "" {
 			res.ChangedPages = append(res.ChangedPages, TablePK{Table: "page", PK: pagePK})
 		}
 	}
 
+	accepted, err := advanceAccepted(ctx, tx, siteID, rejectedSeqs, now)
+	if err != nil {
+		return res, err
+	}
+	res.AcceptedThrough = accepted
+
 	if err := tx.Commit(); err != nil {
 		return res, fmt.Errorf("commit: %w", err)
 	}
 	return res, nil
+}
+
+// advanceAccepted computes and persists siteID's contiguous accepted_through
+// (spec §4.1): the greatest N such that every op_seq 1..N is durably settled —
+// present in sync_ops (applied or deduped from any call) OR permanently rejected
+// this call. Walking from the persisted high-water means a rejected op is counted
+// once (here), advanced past, and never revisited — so a poison op neither wedges
+// the water nor is silently lost.
+func advanceAccepted(ctx context.Context, tx *sql.Tx, siteID string, rejectedSeqs map[int64]bool, now int64) (int64, error) {
+	var h int64
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT acked_op_seq FROM sync_cursors WHERE site_id = ?`, siteID).Scan(&h); err {
+	case nil, sql.ErrNoRows:
+		// h is 0 on ErrNoRows (Scan leaves it zero)
+	default:
+		return 0, fmt.Errorf("read acked_op_seq: %w", err)
+	}
+
+	for {
+		next := h + 1
+		if rejectedSeqs[next] {
+			h = next
+			continue
+		}
+		var dummy int
+		err := tx.QueryRowContext(ctx,
+			`SELECT 1 FROM sync_ops WHERE site_id = ? AND op_seq = ?`, siteID, next).Scan(&dummy)
+		if err == nil {
+			h = next
+			continue
+		}
+		if err == sql.ErrNoRows {
+			break
+		}
+		return 0, fmt.Errorf("accepted walk: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO sync_cursors (site_id, acked_op_seq, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(site_id) DO UPDATE SET acked_op_seq = excluded.acked_op_seq, updated_at = excluded.updated_at`,
+		siteID, h, now); err != nil {
+		return 0, fmt.Errorf("persist acked_op_seq: %w", err)
+	}
+	return h, nil
 }
 
 // mergeRow applies the LWW rule to one mirror row. Returns whether the row was
