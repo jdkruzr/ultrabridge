@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/sysop/ultrabridge/internal/forestrender"
+	"github.com/sysop/ultrabridge/internal/rag"
 	"github.com/sysop/ultrabridge/internal/syncstore"
 )
 
@@ -35,7 +36,8 @@ type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
 type EmbedStore interface {
-	Save(ctx context.Context, notePath string, page int, embedding []float32, model string) error
+	Save(ctx context.Context, notePath string, page, chunk int, embedding []float32, model string) error
+	DeletePage(ctx context.Context, notePath string, page int) error
 	Delete(ctx context.Context, notePath string) error
 }
 
@@ -179,11 +181,7 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 	}
 
 	if text != "" && b.deps.Embedder != nil && b.deps.EmbedStore != nil {
-		if vec, err := b.deps.Embedder.Embed(ctx, text); err != nil {
-			b.logger.Warn("syncbridge: embed failed", "page", pagePK, "err", err)
-		} else if err := b.deps.EmbedStore.Save(ctx, path, 0, vec, b.deps.EmbedModel); err != nil {
-			b.logger.Warn("syncbridge: embed save failed", "page", pagePK, "err", err)
-		}
+		rag.EmbedAndStorePage(ctx, b.deps.Embedder, b.deps.EmbedStore, path, 0, text, b.deps.EmbedModel, b.logger)
 	}
 }
 

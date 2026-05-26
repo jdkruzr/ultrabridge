@@ -2486,7 +2486,7 @@ func TestHandleSettingsSave_SPC(t *testing.T) {
 
 	// First save: set all fields including secrets.
 	cfg := postSPCSettings(t, h, db, url.Values{
-		"spc_mode":            {"server"},
+		"spc_enabled":         {"on"},
 		"spc_listen_addr":     {":9999"},
 		"spc_file_root":       {"/tmp/root1"},
 		"spc_device_account":  {"dev@example.com"},
@@ -2503,7 +2503,7 @@ func TestHandleSettingsSave_SPC(t *testing.T) {
 	// Second save: blank secrets keep current; non-secret field updates;
 	// unparseable quota keeps the prior value.
 	cfg = postSPCSettings(t, h, db, url.Values{
-		"spc_mode":            {"server"},
+		"spc_enabled":         {"on"},
 		"spc_listen_addr":     {":9999"},
 		"spc_file_root":       {"/tmp/root2"},
 		"spc_device_account":  {"dev@example.com"},
@@ -2526,10 +2526,19 @@ func TestHandleSettingsSave_SPC(t *testing.T) {
 
 	// Third save: a non-blank secret overwrites.
 	cfg = postSPCSettings(t, h, db, url.Values{
-		"spc_mode":            {"server"},
+		"spc_enabled":         {"on"},
 		"spc_device_password": {"secret2"},
 	})
 	if cfg.SPCDevicePassword != "secret2" {
 		t.Errorf("password not overwritten; got %q", cfg.SPCDevicePassword)
+	}
+
+	// Fourth save: an unchecked "Enable device sync server" box submits no
+	// spc_enabled field → the SPC server is disabled (SPCMode "client").
+	cfg = postSPCSettings(t, h, db, url.Values{
+		"spc_listen_addr": {":9999"},
+	})
+	if cfg.SPCMode != "client" {
+		t.Errorf("absent spc_enabled should disable the server (client); got %q", cfg.SPCMode)
 	}
 }

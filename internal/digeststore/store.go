@@ -215,6 +215,89 @@ func (s *Store) ListByIDs(ctx context.Context, userID int64, ids []int64) ([]Dig
 	return scanRows(rows)
 }
 
+// ListAllItemsForIndex returns every non-deleted digest item (not groups),
+// across all users, for the search/RAG backfill at startup. This instance is
+// single-user, so "all users" is effectively the one device account.
+func (s *Store) ListAllItemsForIndex(ctx context.Context) ([]Digest, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+digestColumns+` FROM digests WHERE is_deleted='N' AND is_group='N'`)
+	if err != nil {
+		return nil, fmt.Errorf("digeststore ListAllItemsForIndex: %w", err)
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+// --- Web read path (all users; the instance is single-user) ---
+
+// ListItems returns non-deleted digest items (not groups), newest-modified
+// first, plus the total matching count, for the web Digests tab. parentUID ""
+// means no group filter; tag "" means no tag filter (tag matches the
+// comma-separated Tags column). page is 1-based; size <= 0 means no limit.
+func (s *Store) ListItems(ctx context.Context, parentUID, tag string, page, size int) ([]Digest, int64, error) {
+	where := `WHERE is_deleted='N' AND is_group='N'`
+	var args []any
+	if parentUID != "" {
+		where += ` AND parent_unique_identifier=?`
+		args = append(args, parentUID)
+	}
+	if tag != "" {
+		// Tags is a comma-separated list; match the whole token.
+		where += ` AND (',' || REPLACE(tags, ', ', ',') || ',') LIKE ?`
+		args = append(args, "%,"+tag+",%")
+	}
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM digests `+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("digeststore ListItems count: %w", err)
+	}
+
+	q := `SELECT ` + digestColumns + ` FROM digests ` + where + ` ORDER BY last_modified_time DESC, id DESC`
+	if size > 0 {
+		if page < 1 {
+			page = 1
+		}
+		q += ` LIMIT ? OFFSET ?`
+		args = append(args, size, (page-1)*size)
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("digeststore ListItems: %w", err)
+	}
+	defer rows.Close()
+	out, err := scanRows(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// ListGroups returns non-deleted digest groups (all users), newest first, for
+// the Digests tab group filter pills.
+func (s *Store) ListGroups(ctx context.Context) ([]Digest, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+digestColumns+` FROM digests WHERE is_deleted='N' AND is_group='Y' ORDER BY last_modified_time DESC, id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("digeststore ListGroups: %w", err)
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+// GetItem returns a single non-deleted digest by id (any user), or ErrNotFound.
+func (s *Store) GetItem(ctx context.Context, id int64) (*Digest, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+digestColumns+` FROM digests WHERE id=? AND is_deleted='N'`, id)
+	d, err := scanDigest(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("digeststore GetItem: %w", err)
+	}
+	return &d, nil
+}
+
 func scanRows(rows *sql.Rows) ([]Digest, error) {
 	var out []Digest
 	for rows.Next() {

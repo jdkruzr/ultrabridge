@@ -63,13 +63,22 @@ type Config struct {
 	// the device syncs digests to/from. Nil ⇒ the summary query endpoints fall
 	// back to empty-success stubs and the write endpoints stay 404 (pre-Phase-D).
 	DigestStore DigestStore
-	Logger      *slog.Logger
+	// DigestIndexer (optional, Phase D2) surfaces synced digests in UB's shared
+	// FTS5/RAG index. Nil ⇒ digests still round-trip to the device but are not
+	// searchable in UB.
+	DigestIndexer DigestIndexer
+	Logger        *slog.Logger
 }
 
 // DigestStore is the digest store the SPC server needs (Phase D). Aliased from
 // the handlers package so main can hold an interface-typed value (and a true nil
 // when digest migration fails) without importing handlers directly.
 type DigestStore = handlers.DigestStore
+
+// DigestIndexer surfaces digests in UB's search/RAG index (Phase D2). Aliased
+// from handlers so main can pass a *digestindex.Bridge without spcserver
+// importing digestindex.
+type DigestIndexer = handlers.DigestIndexer
 
 // UploadEnqueuerFunc adapts a plain func to handlers.Enqueuer (the processor's
 // own Enqueue is variadic, so it can't satisfy the interface directly). The
@@ -253,6 +262,7 @@ func (s *Server) registerRoutes() {
 			Root:    s.cfg.FileRoot,
 			Signer:  &oss.Signer{Secret: s.cfg.OssSecret},
 			Staging: s.staging,
+			Indexer: s.cfg.DigestIndexer,
 			Logger:  s.cfg.Logger,
 		}
 		s.mux.Handle("POST /api/file/add/summary", protect(sum.AddSummary))

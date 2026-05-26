@@ -25,6 +25,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/booxpipeline"
 	ubcaldav "github.com/sysop/ultrabridge/internal/caldav"
 	"github.com/sysop/ultrabridge/internal/chat"
+	"github.com/sysop/ultrabridge/internal/digestindex"
 	"github.com/sysop/ultrabridge/internal/digeststore"
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/mcpauth"
@@ -310,6 +311,7 @@ func main() {
 	// back the STARTSYNC notifier the CalDAV backend and task service use; the
 	// listener itself is launched later. Otherwise taskNotifier stays a no-op.
 	var spcSrv *spcserver.Server
+	var digestSvc service.DigestService // web Digests tab; set in server mode below
 	if cfg.SPCMode == "server" {
 		// Phase 2 file listing: migrate the path↔id table (gated to server mode,
 		// like mcpauth.Migrate). Best-effort — a failure disables file listing
@@ -327,10 +329,40 @@ func main() {
 		// gating). Best-effort — a failure leaves DigestStore nil, so the summary
 		// endpoints fall back to the pre-Phase-D stubs and task sync still works.
 		var digestStore spcserver.DigestStore
+		var digestIndexer spcserver.DigestIndexer
 		if err := digeststore.Migrate(context.Background(), noteDB); err != nil {
 			logger.Error("spc digest migration failed; digest sync disabled", "err", err)
 		} else {
-			digestStore = digeststore.New(noteDB)
+			ds := digeststore.New(noteDB)
+			digestStore = ds
+			digestSvc = service.NewDigestService(ds)
+
+			// Phase D2: surface synced digests in the shared FTS5/RAG index so they
+			// are searchable and feed chat retrieval. Embedding is wired only when
+			// the embed pipeline is enabled (guard the concrete *rag.Store against
+			// the typed-nil trap).
+			deps := digestindex.Deps{Indexer: si, EmbedModel: cfg.OllamaEmbedModel}
+			if embedStore != nil {
+				deps.Embedder = embedder
+				deps.EmbedStore = embedStore
+			}
+			bridge := digestindex.New(deps, logger)
+			bridge.Start(context.Background())
+			defer bridge.Stop()
+			digestIndexer = bridge
+
+			// Backfill: index digests that synced before D2 (best-effort, async).
+			if items, err := ds.ListAllItemsForIndex(context.Background()); err != nil {
+				logger.Warn("digest index backfill list failed", "err", err)
+			} else {
+				for i := range items {
+					d := &items[i]
+					bridge.Index(d.UniqueIdentifier, d.Name, d.Content, d.CommentStr, d.Tags)
+				}
+				if len(items) > 0 {
+					logger.Info("digest index backfill enqueued", "count", len(items))
+				}
+			}
 		}
 		// Phase 3 download: ensure a persistent OSS signing secret exists
 		// (auto-generated on first boot). Best-effort — on failure we fall back
@@ -374,6 +406,7 @@ func main() {
 			UploadEnqueuer: spcEnqueuer,
 			OCRWatchDir:    snNotesPath,
 			DigestStore:    digestStore,
+			DigestIndexer:  digestIndexer,
 			Logger:         logger,
 		})
 		taskNotifier = notify.NewSocketNotifier(
@@ -617,6 +650,7 @@ func main() {
 		configSvc = service.NewConfigService(noteDB, cfg)
 
 		webHandler = web.NewHandler(taskSvc, noteSvc, searchSvc, configSvc, noteDB, snNotesPath, booxNotesPath, logger, broadcaster)
+		webHandler.SetDigestService(digestSvc)
 
 		// OAuth2 flow for Claude.ai
 		// /authorize requires user auth (browser login)

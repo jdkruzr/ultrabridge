@@ -17,6 +17,7 @@ import (
 
 	gosnote "github.com/jdkruzr/go-sn/note"
 	"github.com/sysop/ultrabridge/internal/notestore"
+	"github.com/sysop/ultrabridge/internal/rag"
 )
 
 // processJob executes the full pipeline for one job.
@@ -204,14 +205,9 @@ func (s *Store) executeJob(ctx context.Context, job *Job) error {
 				s.logger.Error("failed to index page", "path", job.NotePath, "page", pageIdx, "err", err)
 			}
 		}
-		// Embed the OCR'd text
+		// Embed the OCR'd text (chunked; long pages embed as multiple vectors).
 		if s.cfg.Embedder != nil && s.cfg.EmbedStore != nil && text != "" {
-			vec, err := s.cfg.Embedder.Embed(ctx, text)
-			if err != nil {
-				s.logger.Warn("embedding failed", "path", job.NotePath, "page", pageIdx, "err", err)
-			} else if err := s.cfg.EmbedStore.Save(ctx, job.NotePath, pageIdx, vec, s.cfg.EmbedModel); err != nil {
-				s.logger.Warn("save embedding failed", "path", job.NotePath, "page", pageIdx, "err", err)
-			}
+			rag.EmbedAndStorePage(ctx, s.cfg.Embedder, s.cfg.EmbedStore, job.NotePath, pageIdx, text, s.cfg.EmbedModel, s.logger)
 		}
 	}
 

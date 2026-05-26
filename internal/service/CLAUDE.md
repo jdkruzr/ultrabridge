@@ -1,6 +1,6 @@
 # internal/service
 
-Last verified: 2026-04-28
+Last verified: 2026-05-26
 
 ## Purpose
 
@@ -13,7 +13,7 @@ test doubles plug in by satisfying these interfaces.
 
 ## Contracts
 
-Four public service interfaces, all defined in `interfaces.go`,
+Five public service interfaces, all defined in `interfaces.go`,
 all implemented by unexported structs and constructed via
 `New*Service` factories:
 
@@ -28,6 +28,15 @@ all implemented by unexported structs and constructed via
 - **`SearchService`** — FTS5+vector hybrid search, vLLM-streamed
   chat (returns `<-chan ChatResponse` for SSE), embedding
   backfill. `HasEmbeddingPipeline()` gates the chat tab.
+  `Search(ctx, query, folder, sources)` runs through the `rag`
+  retriever (not the bare FTS index) and accepts a source-type
+  facet (`supernote|boox|forestnote|digest`); each `SearchResult`
+  carries its `SourceType`.
+- **`DigestService`** (`digest.go`) — read surface over
+  `digeststore` for the web Digests tab: `ListDigests(group, tag,
+  page, perPage)` + `ListGroups`. All-users reads (single-user
+  instance). Constructed only in SPC server mode; the web handler
+  holds it via `SetDigestService` (nil ⇒ tab + nav entry hide).
 - **`ConfigService`** — config get/save and sources CRUD. (The
   sync-status delegate was removed with the legacy SPC client
   2026-05-25; device sync now lives entirely in `internal/spcserver`.)

@@ -153,14 +153,9 @@ func (p *Processor) executeNoteJob(ctx context.Context, job *BooxJob) error {
 		if err := p.cfg.Indexer.IndexPage(ctx, notePath, i, "api", ocrText, titleText, keywords); err != nil {
 			return fmt.Errorf("index page %d: %w", i, err)
 		}
-		// Embed page text if embedder is available
+		// Embed page text if embedder is available (chunked; long pages → many vectors)
 		if p.cfg.Embedder != nil && p.cfg.EmbedStore != nil && ocrText != "" {
-			vec, err := p.cfg.Embedder.Embed(ctx, ocrText)
-			if err != nil {
-				p.logger.Warn("embedding failed", "path", notePath, "page", i, "err", err)
-			} else if err := p.cfg.EmbedStore.Save(ctx, notePath, i, vec, p.cfg.EmbedModel); err != nil {
-				p.logger.Warn("save embedding failed", "path", notePath, "page", i, "err", err)
-			}
+			rag.EmbedAndStorePage(ctx, p.cfg.Embedder, p.cfg.EmbedStore, notePath, i, ocrText, p.cfg.EmbedModel, p.logger)
 		}
 	}
 
@@ -254,14 +249,9 @@ func (p *Processor) executePDFJob(ctx context.Context, job *BooxJob) error {
 		if err := p.cfg.Indexer.IndexPage(ctx, pdfPath, i, "api", ocrText, titleText, ""); err != nil {
 			return fmt.Errorf("index page %d: %w", i, err)
 		}
-		// Embed page text if embedder is available
+		// Embed page text if embedder is available (chunked; long pages → many vectors)
 		if p.cfg.Embedder != nil && p.cfg.EmbedStore != nil && ocrText != "" {
-			vec, err := p.cfg.Embedder.Embed(ctx, ocrText)
-			if err != nil {
-				p.logger.Warn("embedding failed", "path", pdfPath, "page", i, "err", err)
-			} else if err := p.cfg.EmbedStore.Save(ctx, pdfPath, i, vec, p.cfg.EmbedModel); err != nil {
-				p.logger.Warn("save embedding failed", "path", pdfPath, "page", i, "err", err)
-			}
+			rag.EmbedAndStorePage(ctx, p.cfg.Embedder, p.cfg.EmbedStore, pdfPath, i, ocrText, p.cfg.EmbedModel, p.logger)
 		}
 	}
 

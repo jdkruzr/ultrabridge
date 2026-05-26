@@ -275,7 +275,7 @@ type mockSearchService struct {
 	chatEnabled bool
 }
 
-func (m *mockSearchService) Search(ctx context.Context, query, folder string) ([]service.SearchResult, error) {
+func (m *mockSearchService) Search(ctx context.Context, query, folder string, sources []string) ([]service.SearchResult, error) {
 	return m.results, nil
 }
 func (m *mockSearchService) Ask(ctx context.Context, question string, sessionID int) (<-chan service.ChatResponse, error) {

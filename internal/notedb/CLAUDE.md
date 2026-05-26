@@ -1,6 +1,6 @@
 # Note Database
 
-Last verified: 2026-04-09
+Last verified: 2026-05-26
 
 ## Purpose
 Opens and migrates the SQLite database used by the Supernote pipeline, Boox pipeline, RAG embeddings, and chat subsystem.
@@ -28,7 +28,7 @@ Centralizes schema ownership so all packages share one DB connection.
 - `note_fts` is a contentless FTS5 table synced via triggers on `note_content`
 - `note_content` has UNIQUE(note_path, page) -- one content row per page per note
 - `note_content` is shared by both Supernote and Boox pipelines (unified search)
-- `note_embeddings` has UNIQUE(note_path, page) -- one embedding per page per note
+- `note_embeddings` has UNIQUE(note_path, page, chunk) -- long pages embed as multiple chunk vectors (chunk 0..N); pre-chunking rows migrate to chunk 0 via an in-place table rebuild (see schema.go)
 - `chat_messages.session_id` has FK to `chat_sessions.id`
 
 ## Schema Tables

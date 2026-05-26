@@ -11,8 +11,16 @@ import (
 
 	"github.com/sysop/ultrabridge/internal/appconfig"
 	"github.com/sysop/ultrabridge/internal/logging"
+	"github.com/sysop/ultrabridge/internal/rag"
 	"github.com/sysop/ultrabridge/internal/search"
 )
+
+// fakeRetriever returns canned hybrid-search results for tests.
+type fakeRetriever struct{ results []rag.SearchResult }
+
+func (f *fakeRetriever) Search(_ context.Context, _ rag.SearchRequest) ([]rag.SearchResult, error) {
+	return f.results, nil
+}
 
 // configSearchIndex implements SearchIndex with configurable results for testing
 type configSearchIndex struct {
@@ -34,23 +42,14 @@ func (c *configSearchIndex) ListFolders(_ context.Context) ([]string, error) {
 	return nil, nil
 }
 
-// boox-notes-pipeline.AC6.2: Search results include source badges (Boox and Supernote)
+// boox-notes-pipeline.AC6.2: Search results include source badges. Badges now
+// derive from each result's SourceType (set by the hybrid retriever), not from
+// a path-prefix guess — so this drives the page through a fake retriever.
 func TestSearchPage_SourceBadges(t *testing.T) {
-	// Set up handler with search index returning results from both sources
-	searchIdx := &configSearchIndex{
-		results: []search.SearchResult{
-			{
-				Path:    "/boox/notes/test.note",
-				Page:    0,
-				Snippet: "test boox content here",
-				Score:   -1.5,
-			},
-			{
-				Path:    "/notes/supernote.note",
-				Page:    0,
-				Snippet: "test supernote content here",
-				Score:   -1.6,
-			},
+	retriever := &fakeRetriever{
+		results: []rag.SearchResult{
+			{NotePath: "/boox/notes/test.note", Page: 0, BodyText: "test boox content here", SourceType: rag.SourceBoox, Score: -1.5},
+			{NotePath: "/notes/supernote.note", Page: 0, BodyText: "test supernote content here", SourceType: rag.SourceSupernote, Score: -1.6},
 		},
 	}
 
@@ -61,7 +60,7 @@ func TestSearchPage_SourceBadges(t *testing.T) {
 		newMockTaskStore(),
 		&mockNotifier{},
 		newMockNoteStore(),
-		searchIdx,
+		nil, // searchIndex (unused; retriever drives the search tab now)
 		newMockProcessor(),
 		&mockScanner{},
 		nil, // syncProvider removed
@@ -72,12 +71,12 @@ func TestSearchPage_SourceBadges(t *testing.T) {
 		nil, // noteDB
 		logger,
 		broadcaster,
-		nil, // embedder
-		nil, // embedStore
-		"",  // embedModel
-		nil, // retriever
-		nil, // chatHandler
-		nil, // chatStore
+		nil,       // embedder
+		nil,       // embedStore
+		"",        // embedModel
+		retriever, // hybrid retriever
+		nil,       // chatHandler
+		nil,       // chatStore
 		RAGDisplayConfig{},
 		&appconfig.Config{},
 	)

@@ -8,9 +8,21 @@ import (
 	"log/slog"
 	"path"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sysop/ultrabridge/internal/search"
+)
+
+// Source type constants tag each result by its origin so the UI can facet on
+// them. Derived in enrichResult from the note_path namespace and the
+// boox_notes/notes tables — there is no source_type column.
+const (
+	SourceSupernote = "supernote"
+	SourceBoox      = "boox"
+	SourceForestNote = "forestnote"
+	SourceDigest    = "digest"
 )
 
 // SearchRequest is the input for hybrid search.
@@ -18,6 +30,7 @@ type SearchRequest struct {
 	Query    string
 	Folder   string    // filter by folder path segment (empty = all)
 	Device   string    // filter by device model (empty = all)
+	Sources  []string  // filter by source type (empty = all); see Source* consts
 	DateFrom time.Time // zero = no lower bound
 	DateTo   time.Time // zero = no upper bound
 	Limit    int       // 0 = default (20)
@@ -25,14 +38,15 @@ type SearchRequest struct {
 
 // SearchResult is one ranked result with full metadata for citation.
 type SearchResult struct {
-	NotePath  string
-	Page      int
-	BodyText  string
-	TitleText string
-	Score     float64
-	Folder    string
-	Device    string
-	NoteDate  time.Time
+	NotePath   string
+	Page       int
+	BodyText   string
+	TitleText  string
+	Score      float64
+	Folder     string
+	Device     string
+	SourceType string // one of the Source* consts
+	NoteDate   time.Time
 }
 
 // SearchRetriever is the interface for hybrid search. Defined as an interface
@@ -67,11 +81,18 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 		limit = 20
 	}
 
+	// Post-merge filters (source/folder/device/date) prune after fusion, so
+	// over-fetch from each leg to keep a full page when a filter is active.
+	overfetch := 2
+	if len(req.Sources) > 0 || req.Device != "" || !req.DateFrom.IsZero() || !req.DateTo.IsZero() {
+		overfetch = 4
+	}
+
 	// 1. FTS5 keyword search (always available)
 	ftsResults, err := r.searchIndex.Search(ctx, search.SearchQuery{
 		Text:   req.Query,
 		Folder: req.Folder,
-		Limit:  limit * 2, // fetch extra for fusion
+		Limit:  limit * overfetch, // fetch extra for fusion + post-merge filtering
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fts search: %w", err)
@@ -101,17 +122,26 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 				sort.Slice(candidates, func(i, j int) bool {
 					return candidates[i].score > candidates[j].score
 				})
-				// Take top results for fusion
-				topN := limit * 2
-				if topN > len(candidates) {
-					topN = len(candidates)
-				}
-				for rank, c := range candidates[:topN] {
+				// Take the top results for fusion, deduped to the best-scoring
+				// chunk per (path,page) — a page embeds as multiple chunks, but
+				// fusion ranks at page granularity, so counting every chunk would
+				// over-weight long (many-chunk) pages.
+				topN := limit * overfetch
+				seenPage := map[string]bool{}
+				for _, c := range candidates {
+					key := c.rec.NotePath + "\x00" + strconv.Itoa(c.rec.Page)
+					if seenPage[key] {
+						continue
+					}
+					seenPage[key] = true
 					vecRanked = append(vecRanked, rankedDoc{
 						notePath: c.rec.NotePath,
 						page:     c.rec.Page,
-						rank:     rank + 1,
+						rank:     len(vecRanked) + 1,
 					})
+					if len(vecRanked) >= topN {
+						break
+					}
 				}
 			}
 		}
@@ -148,19 +178,24 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 	sort.Slice(merged, func(i, j int) bool {
 		return merged[i].score > merged[j].score
 	})
-	if len(merged) > limit {
-		merged = merged[:limit]
-	}
 
-	// 4. Enrich with metadata via SQL JOINs
-	results := make([]SearchResult, 0, len(merged))
+	// 4. Enrich + filter in score order, stopping once we have `limit` results.
+	// No pre-truncation: post-merge filters (source/folder/device/date) may prune,
+	// so we may need to look past the first `limit` fused candidates.
+	results := make([]SearchResult, 0, limit)
 	for _, entry := range merged {
+		if len(results) >= limit {
+			break
+		}
 		result, err := r.enrichResult(ctx, entry.key.notePath, entry.key.page, entry.score)
 		if err != nil {
 			r.logger.Warn("enrich result failed", "path", entry.key.notePath, "page", entry.key.page, "err", err)
 			continue
 		}
-		// Apply post-merge filters (folder, device, date range)
+		// Apply post-merge filters (source type, folder, device, date range)
+		if len(req.Sources) > 0 && !containsStr(req.Sources, result.SourceType) {
+			continue
+		}
 		if req.Folder != "" && result.Folder != req.Folder {
 			continue
 		}
@@ -177,6 +212,15 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 	}
 
 	return results, nil
+}
+
+func containsStr(ss []string, v string) bool {
+	for _, s := range ss {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
 
 type rankedDoc struct {
@@ -202,6 +246,20 @@ func (r *Retriever) enrichResult(ctx context.Context, notePath string, page int,
 		return nil, fmt.Errorf("query note_content: %w", err)
 	}
 
+	// Opaque-path sources are classified by their note_path namespace (no
+	// boox_notes/notes row exists for them). Digest and ForestNote content live
+	// only in note_content, keyed by these prefixes.
+	if strings.HasPrefix(notePath, "digest://") {
+		result.SourceType = SourceDigest
+		result.Device = "Supernote"
+		return result, nil
+	}
+	if strings.HasPrefix(notePath, "forestnote://") {
+		result.SourceType = SourceForestNote
+		result.Device = "ForestNote"
+		return result, nil
+	}
+
 	// Try boox_notes first for metadata
 	var folder, device sql.NullString
 	var createdAt sql.NullInt64
@@ -210,6 +268,7 @@ func (r *Retriever) enrichResult(ctx context.Context, notePath string, page int,
 		notePath,
 	).Scan(&folder, &device, &createdAt)
 	if err == nil {
+		result.SourceType = SourceBoox
 		result.Folder = folder.String
 		result.Device = device.String
 		if createdAt.Valid && createdAt.Int64 > 0 {
@@ -227,6 +286,7 @@ func (r *Retriever) enrichResult(ctx context.Context, notePath string, page int,
 		notePath,
 	).Scan(&relPath, &snCreatedAt)
 	if err == nil {
+		result.SourceType = SourceSupernote
 		result.Device = "Supernote"
 		if relPath.Valid {
 			// Extract folder from relative path
@@ -242,8 +302,10 @@ func (r *Retriever) enrichResult(ctx context.Context, notePath string, page int,
 		return result, nil
 	}
 
-	// Neither table matched — fall back to path-based folder extraction
-	// This provides defense-in-depth for orphaned note_content rows
+	// Neither table matched — fall back to path-based folder extraction.
+	// Defense-in-depth for orphaned note_content rows; default the source to
+	// Supernote (the device's native content) so a facet filter still includes it.
+	result.SourceType = SourceSupernote
 	if notePath != "" {
 		dir := path.Dir(notePath)
 		result.Folder = path.Base(dir)

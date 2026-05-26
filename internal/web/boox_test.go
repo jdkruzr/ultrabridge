@@ -502,18 +502,16 @@ func TestFilesPage_NoBooxStore(t *testing.T) {
 	}
 }
 
-// TestNoteSourceFunction verifies the noteSource template helper still
-// classifies paths correctly. Previously asserted via a combined /files view
-// that rendered B/SN badges inline; that view no longer exists post-split,
-// but the helper is still used by search.html for cross-source search
-// results, so this test now exercises it through a rendered search page.
+// TestNoteSourceFunction verifies search results render a per-source badge.
+// Badges now derive from each result's SourceType (set by the hybrid
+// retriever / service), not from a path-prefix guess.
 func TestNoteSourceFunction(t *testing.T) {
 	handler := newTestHandler()
 	handler.booxNotesPath = "/boox/notes"
 	search := handler.search.(*mockSearchService)
 	search.results = []service.SearchResult{
-		{Path: "/boox/notes/one.note", Snippet: "boox snippet"},
-		{Path: "/sn/notes/two.note", Snippet: "sn snippet"},
+		{Path: "/boox/notes/one.note", Snippet: "boox snippet", SourceType: "boox"},
+		{Path: "/sn/notes/two.note", Snippet: "sn snippet", SourceType: "supernote"},
 	}
 
 	req := httptest.NewRequest("GET", "/search?q=foo", nil)

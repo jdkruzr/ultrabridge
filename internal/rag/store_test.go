@@ -33,7 +33,7 @@ func TestStore_Save(t *testing.T) {
 
 	// First save
 	embedding1 := []float32{0.1, 0.2, 0.3}
-	if err := store.Save(ctx, "note1.note", 0, embedding1, "test-model"); err != nil {
+	if err := store.Save(ctx, "note1.note", 0, 0, embedding1, "test-model"); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
@@ -63,7 +63,7 @@ func TestStore_Save(t *testing.T) {
 
 	// Update with UPSERT
 	embedding2 := []float32{0.4, 0.5, 0.6}
-	if err := store.Save(ctx, "note1.note", 0, embedding2, "new-model"); err != nil {
+	if err := store.Save(ctx, "note1.note", 0, 0, embedding2, "new-model"); err != nil {
 		t.Fatalf("Save (update) failed: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestStore_SaveUpdatesCache(t *testing.T) {
 	ctx := context.Background()
 
 	embedding := []float32{0.1, 0.2, 0.3}
-	if err := store.Save(ctx, "note1.note", 0, embedding, "model1"); err != nil {
+	if err := store.Save(ctx, "note1.note", 0, 0, embedding, "model1"); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
@@ -137,10 +137,10 @@ func TestStore_Delete(t *testing.T) {
 	store := NewStore(db, slog.Default())
 	ctx := context.Background()
 
-	if err := store.Save(ctx, "keep.note", 0, []float32{0.1, 0.2}, "m"); err != nil {
+	if err := store.Save(ctx, "keep.note", 0, 0, []float32{0.1, 0.2}, "m"); err != nil {
 		t.Fatalf("Save keep: %v", err)
 	}
-	if err := store.Save(ctx, "gone.note", 0, []float32{0.3, 0.4}, "m"); err != nil {
+	if err := store.Save(ctx, "gone.note", 0, 0, []float32{0.3, 0.4}, "m"); err != nil {
 		t.Fatalf("Save gone: %v", err)
 	}
 
@@ -397,7 +397,7 @@ func TestStore_AllEmbeddings(t *testing.T) {
 
 	// Save an embedding
 	embedding := []float32{0.1, 0.2}
-	if err := store.Save(ctx, "note1.note", 0, embedding, "model"); err != nil {
+	if err := store.Save(ctx, "note1.note", 0, 0, embedding, "model"); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 

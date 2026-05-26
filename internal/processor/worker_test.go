@@ -1120,13 +1120,20 @@ type testEmbedStore struct {
 	embeddings map[string]map[int][]float32 // note_path -> page -> embedding
 }
 
-func (s *testEmbedStore) Save(ctx context.Context, notePath string, page int, embedding []float32, model string) error {
+func (s *testEmbedStore) Save(ctx context.Context, notePath string, page, chunk int, embedding []float32, model string) error {
 	if s.embeddings[notePath] == nil {
 		s.embeddings[notePath] = make(map[int][]float32)
 	}
 	vec := make([]float32, len(embedding))
 	copy(vec, embedding)
 	s.embeddings[notePath][page] = vec
+	return nil
+}
+
+func (s *testEmbedStore) DeletePage(ctx context.Context, notePath string, page int) error {
+	if s.embeddings[notePath] != nil {
+		delete(s.embeddings[notePath], page)
+	}
 	return nil
 }
 

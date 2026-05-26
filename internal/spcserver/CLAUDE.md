@@ -25,6 +25,8 @@ Device-facing reimplementation of the Supernote Private Cloud (SPC) protocol so 
 
 Storage for digests lives **outside** this package in `internal/digeststore` (the canonical store, faithful to SPC's `t_summary`/`t_summary_tag`), migrated package-locally in server mode from main — same precedent as `fileids`/`staging`. The protocol layer owns no digest storage (cf. tasks → `taskdb`).
 
+**Phase D2 (UB-side surfacing, 2026-05-26):** `SummaryHandler` now also takes an optional `DigestIndexer` (Config.DigestIndexer; a `*digestindex.Bridge`) and calls it on add/update (index) and delete/group-delete (deindex) so synced digests become searchable. Digests index into the **shared** `note_content`/`note_fts`/`note_embeddings` tables at `digest://<uniqueIdentifier>` (source `"digest"`) — no parallel tables — so they appear in unified search + chat. Nil indexer ⇒ digests still round-trip to the device, just not searchable. Web browse is `internal/web` `/digests` (via `service.DigestService` over `digeststore`).
+
 This package does **not** own storage (tasks → `taskdb`; files/notes → notestore) or human UI (`internal/web`).
 
 ## Contracts / invariants

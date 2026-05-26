@@ -111,12 +111,13 @@ type fakeEmbedStore struct {
 	deleted []string // paths
 }
 
-func (f *fakeEmbedStore) Save(_ context.Context, path string, _ int, _ []float32, _ string) error {
+func (f *fakeEmbedStore) Save(_ context.Context, path string, _ int, _ int, _ []float32, _ string) error {
 	f.mu.Lock()
 	f.saved = append(f.saved, path)
 	f.mu.Unlock()
 	return nil
 }
+func (f *fakeEmbedStore) DeletePage(_ context.Context, _ string, _ int) error { return nil }
 func (f *fakeEmbedStore) Delete(_ context.Context, path string) error {
 	f.mu.Lock()
 	f.deleted = append(f.deleted, path)

@@ -46,6 +46,15 @@ type DigestStore interface {
 	ListTags(ctx context.Context, userID int64) ([]digeststore.Tag, error)
 }
 
+// DigestIndexer makes a digest item searchable in UB's shared FTS5/RAG index
+// (satisfied by *digestindex.Bridge). Calls are best-effort and non-blocking;
+// a nil Indexer disables UB-side surfacing (the digest still round-trips to the
+// device). The protocol layer owns no index, just as it owns no storage.
+type DigestIndexer interface {
+	Index(uid, name, content, comment, tags string)
+	Deindex(uid string)
+}
+
 // SummaryHandler implements F_SummaryController: the device-facing digest
 // ("summary") sync surface — item/group/tag CRUD plus the .mark handwriting
 // blob transfer, which reuses the Phase 3/4 OSS signed-URL + staging path.
@@ -57,7 +66,25 @@ type SummaryHandler struct {
 	Root    string
 	Signer  *oss.Signer
 	Staging *staging.Store
+	Indexer DigestIndexer // optional; nil disables UB-side search/RAG surfacing
 	Logger  *slog.Logger
+}
+
+// index (re)indexes a digest item for UB search/RAG. No-op for groups, for
+// records without a stable identity, or when no indexer is wired.
+func (h *SummaryHandler) index(d *digeststore.Digest) {
+	if h.Indexer == nil || d == nil || d.IsGroup || d.UniqueIdentifier == "" {
+		return
+	}
+	h.Indexer.Index(d.UniqueIdentifier, d.Name, d.Content, d.CommentStr, d.Tags)
+}
+
+// deindex removes a digest from UB search/RAG by its stable identity.
+func (h *SummaryHandler) deindex(uid string) {
+	if h.Indexer == nil || uid == "" {
+		return
+	}
+	h.Indexer.Deindex(uid)
 }
 
 func (h *SummaryHandler) log() *slog.Logger {
@@ -96,6 +123,7 @@ func (h *SummaryHandler) AddSummary(w http.ResponseWriter, r *http.Request) {
 				h.internalErr(w, "add/summary update", err)
 				return
 			}
+			h.index(existing)
 			envelope.WriteJSON(w, dto.AddSummaryVO{BaseVO: envelope.OK(), ID: existing.ID})
 			return
 		}
@@ -108,6 +136,7 @@ func (h *SummaryHandler) AddSummary(w http.ResponseWriter, r *http.Request) {
 		h.internalErr(w, "add/summary create", err)
 		return
 	}
+	h.index(d)
 	envelope.WriteJSON(w, dto.AddSummaryVO{BaseVO: envelope.OK(), ID: id})
 }
 
@@ -146,6 +175,7 @@ func (h *SummaryHandler) UpdateSummary(w http.ResponseWriter, r *http.Request) {
 		h.internalErr(w, "update/summary", err)
 		return
 	}
+	h.index(existing)
 	envelope.WriteJSON(w, envelope.OK())
 }
 
@@ -153,10 +183,18 @@ func (h *SummaryHandler) UpdateSummary(w http.ResponseWriter, r *http.Request) {
 func (h *SummaryHandler) DeleteSummary(w http.ResponseWriter, r *http.Request) {
 	var req dto.DeleteSummaryDTO
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if err := h.Store.SoftDelete(r.Context(), userIDInt(r), req.ID); err != nil && !errors.Is(err, digeststore.ErrNotFound) {
+	uid := userIDInt(r)
+	// Resolve the stable identity before delete so we can drop the search/RAG
+	// row (GetByID excludes soft-deleted rows, so it must run first).
+	var digestUID string
+	if d, err := h.Store.GetByID(r.Context(), uid, req.ID); err == nil {
+		digestUID = d.UniqueIdentifier
+	}
+	if err := h.Store.SoftDelete(r.Context(), uid, req.ID); err != nil && !errors.Is(err, digeststore.ErrNotFound) {
 		h.internalErr(w, "delete/summary", err)
 		return
 	}
+	h.deindex(digestUID)
 	envelope.WriteJSON(w, envelope.OK())
 }
 
@@ -242,6 +280,13 @@ func (h *SummaryHandler) DeleteSummaryGroup(w http.ResponseWriter, r *http.Reque
 	uid := userIDInt(r)
 
 	if grp, err := h.Store.GetByID(r.Context(), uid, req.ID); err == nil && grp.UniqueIdentifier != "" {
+		// Deindex member items before the cascade soft-delete (List excludes
+		// soft-deleted rows, so it must run first). size<=0 = no limit.
+		if members, _, lerr := h.Store.List(r.Context(), uid, false, grp.UniqueIdentifier, 0, 0); lerr == nil {
+			for i := range members {
+				h.deindex(members[i].UniqueIdentifier)
+			}
+		}
 		if _, derr := h.Store.SoftDeleteByParent(r.Context(), uid, grp.UniqueIdentifier); derr != nil {
 			h.log().Warn("delete/summary/group cascade", "uid", grp.UniqueIdentifier, "err", derr)
 		}
