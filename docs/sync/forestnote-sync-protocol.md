@@ -128,7 +128,14 @@ row and the merge therefore consider only the known column set. (Conformance vec
 // Response (200)
 {
   "protocol_version": 1,
-  "accepted_through": <int64>,  // max op_seq from THIS device durably accepted
+  "accepted_through": <int64>,  // contiguous high-water of THIS device's op_seq that the
+                                //   server is now done with (accepted OR permanently
+                                //   rejected). The device stops resending at/below it. (§4.1)
+  "rejected": [                 // ops this device sent that were PERMANENTLY refused; the
+    { "site_id": "<ULID>",      //   device drops them from its outbox and surfaces an error.
+      "op_seq": <int64>,        //   Empty/absent => nothing rejected. (§4.1, §7.2)
+      "reason": "<string>" }
+  ],
   "ops": [ Op, ... ],           // ops with global seq > cursor, EXCLUDING this site_id
   "cursor": <int64>,            // new high-water mark for this device
   "has_more": <bool>            // server capped the batch; call again immediately
@@ -137,18 +144,31 @@ row and the merge therefore consider only the known column set. (Conformance vec
 
 ### 4.1 Server obligations
 
-1. Validate envelope: `protocol_version == 1`, `schema_hash` matches (§6) → else error (§7).
+1. Validate envelope: `protocol_version == 1`, `schema_hash` matches (§6) → else error (§7.1).
+   Envelope errors apply **nothing** — atomic reject.
 2. Apply `ops` in one transaction (§5): per-op validate → dedup → merge → assign global seq
-   → append to changelog. Malformed individual ops are skipped + logged; the batch still
-   succeeds.
-3. `accepted_through` = the greatest `op_seq` from this `site_id` that is now durably in the
-   changelog (whether newly applied or already present from a prior call). The device uses
-   this to stop resending acked ops.
+   → append to changelog. An individual op that is **permanently** unacceptable (malformed,
+   §7.2) is added to `rejected` and skipped; valid and deduped ops are applied. The batch
+   still returns `200`.
+3. `accepted_through` = the greatest `N` such that **every** op_seq `1..N` from this
+   `site_id` is now durably *settled* — either present in the changelog (applied or deduped
+   from a prior call) **or** in this response's `rejected` list. It is the **contiguous**
+   high-water over (accepted ∪ rejected), so a permanently-rejected op does **not** wedge the
+   water (the device is told via `rejected` and drops it), and a merely-absent op_seq (one
+   the device hasn't sent yet, or a transient `5xx` swallowed) **caps** the water so the
+   device keeps resending it. The device stops resending at/below `accepted_through`.
 4. Select relay ops: changelog entries with global `seq > cursor` **and** `site_id !=` the
    requesting device, in ascending `seq`, capped at the batch limit (`SyncBatchLimit`,
    default 500).
 5. `cursor` (response) = the global seq of the last relay op returned (or the request cursor
    if none). `has_more` = true iff more entries above that seq exist.
+
+> **Why contiguous, not max.** If op_seq 5 is malformed but 4 and 6 apply, reporting
+> `accepted_through: 6` would make the device stop resending 5 → silent data loss. Reporting
+> a plain contiguous max would cap at 4 and make the device resend the poison op 5 forever.
+> Counting a *permanently-rejected* op as settled (and naming it in `rejected`) raises the
+> water past 5 **and** tells the device, so it quarantines op 5 instead of losing or looping
+> on it.
 
 ### 4.2 Client loop
 
@@ -156,15 +176,23 @@ row and the merge therefore consider only the known column set. (Conformance vec
 loop:
   ops := outbox entries with op_seq > acked_through, in op_seq order
   resp := POST /sync/v1 { cursor: localCursor, ops }
+  for r in resp.rejected:                       # permanent failures: do NOT resend
+    quarantine r.(site_id, op_seq); log r.reason # (drop from outbox; surface to telemetry)
   mark outbox acked through resp.accepted_through
-  for op in resp.ops: apply(op) idempotently via the single-writer store
-  localCursor = resp.cursor
+  applyAll(resp.ops) transactionally            # all-or-nothing; cursor advances only on success
+  localCursor = resp.cursor                      # adopt server cursor as authoritative (§7.4)
   if resp.has_more: continue
   else: break
 ```
 
-Applying a relayed op is **idempotent** (same merge rule, §5) so retries and duplicate
-delivery are safe. On any transport error, retry with backoff; resends cannot corrupt state.
+- Applying a relayed op is **idempotent** (same merge rule, §5) so retries and duplicate
+  delivery are safe. On any transport error or `5xx`, retry the whole batch with backoff;
+  resends cannot corrupt state (§7.3).
+- Advance `localCursor` **only after** `resp.ops` are durably applied. If the local apply
+  fails (e.g. disk full), retry from the *same* cursor — the relayed ops are re-fetched and
+  re-applied idempotently.
+- `accepted_through` is computed from the server's **durable** state, so a response lost in
+  flight is harmless: the device resends, the server dedups, and reports the same water (§7.3).
 
 ---
 
@@ -207,12 +235,13 @@ Consequences that fall out for free:
 For each incoming op, in order:
 
 1. **Validate** — known `table`; `cols` parseable; `op_seq > 0`; `pk` and `site_id` are
-   valid ULIDs. Fail → skip op, log, continue the batch.
-2. **Dedup** — if `(site_id, op_seq)` is already in the changelog, skip (idempotent). It
-   still counts toward `accepted_through`.
-3. **Normalize** — drop unknown columns (§3.2); fill missing-but-known columns? No: a valid
-   op MUST carry all known columns for its table (a full-row upsert). Missing a known column
-   is a malformed op → skip + log.
+   valid ULIDs. Fail → add to `rejected` (reason), skip, continue the batch. These are
+   **permanent** failures: the same bytes fail identically, so resending cannot help (§7.2).
+2. **Dedup** — if `(site_id, op_seq)` is already in the changelog, skip (idempotent). It is
+   already settled, so it counts toward `accepted_through`.
+3. **Normalize** — drop unknown columns (§3.2). A valid op MUST carry all known columns for
+   its table (a full-row upsert); missing a known column is malformed → add to `rejected`
+   (reason), skip (same as step 1).
 4. **Merge** — load the current mirror row for `(table, pk)`. The incoming op wins **iff**
    `key(incoming) > key(stored_winner)` (or no row exists). On win, write `cols` and record
    the winner's `(wall_ts, op_seq, site_id)`. On loss/tie-to-stored, the mirror is unchanged
@@ -253,20 +282,79 @@ identity/envelope fields `pk`, `site_id`, `op_seq`, `wall_ts` are not part of it
 
 ---
 
-## 7. Auth and error codes
+## 7. Error handling
 
-Reuse UB's existing `auth` middleware: bearer token via `mcpauth` preferred, Basic auth
-fallback.
+Errors live at two layers: **envelope** errors reject the whole request atomically (nothing
+is applied); **per-op** errors are reported in the `200` response's `rejected` list while the
+rest of the batch proceeds. Auth reuses UB's existing `auth` middleware (bearer via `mcpauth`
+preferred, Basic fallback).
 
-| Status | Meaning |
-|---|---|
-| `200` | success (some individual ops may have been skipped + logged) |
-| `400` | malformed request envelope |
-| `401` | unauthenticated |
-| `409` | `schema_hash` unrecognized, or `protocol_version` unsupported |
+### 7.1 Envelope errors (HTTP status; whole request rejected, atomic)
 
-Individual malformed ops inside an otherwise-valid batch are **skipped and logged**, not
-fatal (mirrors the pipeline's "skip bad shape" tolerance). The batch returns `200`.
+| Status | Trigger | Retryable? | Client reaction |
+|---|---|---|---|
+| `200` | request well-formed (may carry a non-empty `rejected` list) | — | process `rejected` (§7.2), then `accepted_through`/`ops` |
+| `400` | JSON won't parse; missing or non-ULID `site_id`; `cursor < 0`; `ops` not an array | **No** | client bug — the identical bytes fail identically; surface/log, do not loop |
+| `401` | missing/invalid bearer or Basic credentials | **No** (until re-auth) | stop looping; prompt for credentials / token refresh |
+| `409` | `schema_hash` unrecognized **or** `protocol_version` unsupported | **No** (until coordinated bump) | surface "update required"; retry only after a schema/version bump on both sides (§8) |
+| `413` | request `ops` array exceeds the server's max push size | **No** as-is | chunk the push into smaller batches and resend |
+| `5xx` | transient server fault (DB locked, recovered panic) | **Yes** | retry the **whole batch** with backoff — ops are idempotent (§7.3) |
+
+The server **applies nothing** on any non-`200`. Because pushes are idempotent (§7.3), a
+client may safely retry a `5xx` batch verbatim.
+
+`413` is **reserved**: v1 servers MAY accept arbitrarily large pushes (single user, small
+batches) and never emit it; clients SHOULD nonetheless tolerate it by chunking, so a future
+server-side cap doesn't wedge an older client.
+
+### 7.2 Per-op rejection (inside a `200` batch)
+
+An individual op that is **permanently** unacceptable — unknown `table`, unparseable `cols`,
+`op_seq <= 0`, non-ULID `pk`/`site_id`, or missing a known column (§5.3 steps 1, 3) — is
+added to the response's `rejected` list as `{ site_id, op_seq, reason }` and skipped. The
+batch still returns `200` and all valid ops in it are applied.
+
+"Permanent" is the key word: these failures are **deterministic** — the same bytes fail the
+same way on every retry — so the contract is that the device **quarantines** the op (drops it
+from its outbox, surfaces the `reason` to logs/telemetry) rather than resending it. Because
+`accepted_through` counts rejected ops as *settled* (§4.1), a poison op neither wedges the
+high-water nor is silently lost: it is named, skipped, and the device moves on. Since the
+client authors its own oplog, a `rejected` entry is a real client/schema bug worth alerting
+on — not normal flow.
+
+(Contrast with transient trouble — a `5xx`, a dropped connection — which is **not** a
+per-op rejection: the op simply isn't in the changelog yet, so it stays below
+`accepted_through` and is resent on the next call.)
+
+### 7.3 Idempotency & at-least-once delivery
+
+- **Dedup key `(site_id, op_seq)`.** The changelog append and the dedup check are in the
+  same transaction as the merge (§5.3), so a resend after a crash-between-commit-and-response
+  is consistent: the op is found, deduped, and counted toward `accepted_through`.
+- **Lost response.** Client POSTs → server commits → the response is lost in flight. The
+  client resends the same batch; the server dedups every op and reports the **same**
+  `accepted_through`. No double-apply. This holds *only* because `accepted_through` is
+  derived from durable changelog state, never from "what I saw this call."
+- **Client-side relay apply** is itself transactional and advances `cursor` only on success
+  (§4.2), so a failure to persist relayed ops re-fetches and re-applies them idempotently.
+
+### 7.4 Cursor reconciliation (server rollback / restore)
+
+If a client's request `cursor` is **greater** than the server's current `last_seq` — e.g.
+the server's `notedb` was restored from an older backup — the server returns no relay ops and
+echoes its own `last_seq` as the response `cursor`. **The client adopts the response `cursor`
+as authoritative** (§4.2). This prevents a client from being permanently stuck above a
+rewound server. (The reverse — client cursor behind — is the normal case and just streams the
+gap.)
+
+### 7.5 Clock quality (not a protocol error)
+
+`wall_ts` comes from the authoring device's clock. A wildly wrong clock (far-future) makes
+that device's writes win LWW until its clock corrects — a data-quality risk, not a protocol
+violation. v1 does **not** clamp or reject on clock skew (single user, few devices, the
+`clock-skew` vector documents the intended ordering). A future server MAY reject ops whose
+`wall_ts` is more than a bounded interval ahead of server time with `400`; this is reserved,
+not required.
 
 ---
 

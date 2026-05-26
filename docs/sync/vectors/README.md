@@ -96,3 +96,8 @@ Kotlin, not Python.
 | `duplicate-ops` | duplicated ops converge to one state (idempotence) |
 | `unknown-columns-ignored` | unknown `cols` keys dropped on materialize (forward-compat) |
 | `multi-table` | notebook + page + strokes, one erased, full mirror incl. deleted row |
+
+**Out of scope for vectors:** transport/envelope error handling, per-op `rejected` semantics,
+`accepted_through` contiguity, idempotent resend, and cursor reconciliation are *protocol*
+behaviors (spec §7), not pure-merge properties. They are covered by each implementation's
+HTTP/integration tests, not by these vectors.
