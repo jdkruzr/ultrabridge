@@ -243,16 +243,63 @@ func (h *FileHandler) GetSpaceUsage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// CreateFolderV2 is a canned-success stub. Phase 2 is read-only, so it does NOT
-// create anything on disk (honors the no-device-writes exit state). The device
-// was not observed calling it in the 0b capture; it becomes real in Phase 4.
+// CreateFolderV2 creates the requested folder under FileRoot and returns its
+// metadata (tag/id/name/path_display). The server-assigned id is load-bearing:
+// the device records it and uses it to upload notes into the new folder — when
+// UB returned an empty metadata stub, the device aborted the sync right after
+// create_folder_v2 (wire-confirmed 2026-05-26: query/by/path → create_folder_v2
+// → synchronous/end, no upload). The id comes from the same fileids registry
+// list_folder uses, so a later listing reports the identical id.
+//
+// Collision (the path already exists): with autorename=false the real server
+// returns E0322; UB mirrors that. With autorename=true UB is idempotent and
+// returns the existing folder's metadata (the device queries by path first and
+// only sends autorename=false, so the real server's rename-with-suffix scheme
+// is not yet replicated — left for a capture that shows the device needs it).
 func (h *FileHandler) CreateFolderV2(w http.ResponseWriter, r *http.Request) {
 	var req dto.CreateFolderLocalDTO
 	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	abs, err := mapping.SafeResolve(h.Root, req.Path)
+	if err != nil {
+		h.log().Warn("create_folder_v2 bad path", "path", req.Path, "err", err)
+		envelope.WriteError(w, "E0322", "invalid path")
+		return
+	}
+
+	if fi, statErr := os.Stat(abs); statErr == nil {
+		// Path exists. A file (not a dir) collision, or a dir collision without
+		// autorename, is the real server's E0322. With autorename we fall through
+		// to the idempotent MkdirAll (no-op) and return the existing folder.
+		if !fi.IsDir() || !req.Autorename {
+			envelope.WriteError(w, "E0322", "folder already exists")
+			return
+		}
+	}
+
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		h.log().Error("create_folder_v2 mkdir", "path", abs, "err", err)
+		envelope.WriteError(w, "E0322", "create failed")
+		return
+	}
+
+	// Build metadata via the same machinery list_folder uses, so the id and
+	// path_display are identical to what a subsequent listing reports.
+	entry, err := mapping.EntryFor(r.Context(), h.Root, abs, h.Reg)
+	if err != nil {
+		h.log().Error("create_folder_v2 EntryFor", "path", abs, "err", err)
+		envelope.WriteError(w, "E0322", "create failed")
+		return
+	}
 	envelope.WriteJSON(w, dto.CreateFolderLocalVO{
 		BaseVO:      envelope.OK(),
 		EquipmentNo: req.EquipmentNo,
-		// metadata omitted — nothing was created
+		Metadata: &dto.MetadataVO{
+			Tag:         entry.Tag,
+			ID:          entry.ID,
+			Name:        entry.Name,
+			PathDisplay: entry.PathDisplay,
+		},
 	})
 }
 

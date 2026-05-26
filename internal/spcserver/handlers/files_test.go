@@ -347,17 +347,80 @@ func TestGetSpaceUsage(t *testing.T) {
 	}
 }
 
-// TestCreateFolderStubNoWrite: create_folder_v2 returns success WITHOUT creating
-// the directory (Phase 2 is read-only; honors the no-device-writes exit state).
-func TestCreateFolderStubNoWrite(t *testing.T) {
+// TestCreateFolderV2_CreatesAndReturnsMetadata: create_folder_v2 mkdir's the
+// folder under FileRoot and returns metadata{tag,id,name,path_display} — the
+// device needs the server-assigned id to then upload notes into the folder
+// (without it the device aborts the sync; wire-confirmed 2026-05-26).
+func TestCreateFolderV2_CreatesAndReturnsMetadata(t *testing.T) {
 	root := t.TempDir()
-	h := newFileHandler(t, root)
-	out := decodeMap(t, h.CreateFolderV2, `{"equipmentNo":"SN078","path":"/Note/NewFolder","autorename":false}`)
-	if out["success"] != true || out["equipmentNo"] != "SN078" {
-		t.Errorf("got %v; want success:true equipmentNo:SN078", out)
+	if err := os.MkdirAll(filepath.Join(root, "NOTE", "Note"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "Note", "NewFolder")); !os.IsNotExist(err) {
-		t.Errorf("create_folder_v2 must not create a directory in Phase 2 (stat err=%v)", err)
+	h := newFileHandler(t, root)
+	out := decodeMap(t, h.CreateFolderV2, `{"equipmentNo":"SN078","path":"/NOTE/Note/Moffitt","autorename":false}`)
+
+	if out["success"] != true || out["equipmentNo"] != "SN078" {
+		t.Fatalf("got %v; want success:true equipmentNo:SN078", out)
+	}
+	abs := filepath.Join(root, "NOTE", "Note", "Moffitt")
+	fi, err := os.Stat(abs)
+	if err != nil || !fi.IsDir() {
+		t.Fatalf("folder not created on disk: stat err=%v", err)
+	}
+	md, ok := out["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("response missing metadata object: %v", out)
+	}
+	if md["tag"] != "folder" || md["name"] != "Moffitt" || md["path_display"] != "/NOTE/Note/Moffitt" {
+		t.Errorf("metadata wrong: %v", md)
+	}
+	id, _ := md["id"].(string)
+	if id == "" || id == "0" {
+		t.Errorf("metadata.id must be a non-zero folder id, got %q", md["id"])
+	}
+	// The id must match what the registry assigns the same path, so a later
+	// list_folder reports the identical id.
+	want, err := h.Reg.IDFor(context.Background(), abs)
+	if err != nil || md["id"] != strconv.FormatInt(want, 10) {
+		t.Errorf("metadata.id %v != registry id %d (err=%v)", md["id"], want, err)
+	}
+}
+
+// TestCreateFolderV2_ExistsNoAutorename_E0322: a collision with autorename=false
+// returns E0322 (matches the real SPC server).
+func TestCreateFolderV2_ExistsNoAutorename_E0322(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "NOTE", "Note", "Moffitt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := newFileHandler(t, root)
+	out := decodeMap(t, h.CreateFolderV2, `{"equipmentNo":"SN078","path":"/NOTE/Note/Moffitt","autorename":false}`)
+
+	if out["success"] != false || out["errorCode"] != "E0322" {
+		t.Errorf("collision w/o autorename: got %v; want success:false errorCode:E0322", out)
+	}
+}
+
+// TestCreateFolderV2_ExistsAutorename_Idempotent: a collision with autorename=true
+// is idempotent — returns the existing folder's metadata (UB does not yet
+// replicate the real server's rename-with-suffix scheme; the device queries by
+// path first and only sends autorename=false, so this branch is defensive).
+func TestCreateFolderV2_ExistsAutorename_Idempotent(t *testing.T) {
+	root := t.TempDir()
+	abs := filepath.Join(root, "NOTE", "Note", "Moffitt")
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := newFileHandler(t, root)
+	want, _ := h.Reg.IDFor(context.Background(), abs)
+
+	out := decodeMap(t, h.CreateFolderV2, `{"equipmentNo":"SN078","path":"/NOTE/Note/Moffitt","autorename":true}`)
+	if out["success"] != true {
+		t.Fatalf("autorename collision should succeed: %v", out)
+	}
+	md, _ := out["metadata"].(map[string]any)
+	if md == nil || md["id"] != strconv.FormatInt(want, 10) {
+		t.Errorf("expected existing folder id %d, got %v", want, out["metadata"])
 	}
 }
 

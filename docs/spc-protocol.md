@@ -385,6 +385,27 @@ So the move/copy target is `SafeResolve(to_path)` directly — do **not** join t
 source basename onto it (same double-nesting bug as upload: it produced
 `…/<newname>.note/<oldname>.note`). The new filename is `filepath.Base(to_path)`.
 
+### Folder create + delete: the device never sends a folder delete (hardware-confirmed 2026-05-26)
+
+`create_folder_v2` must be **real**, not a success stub: on a device sync the device
+calls `query/by/path_v3` for the new folder (gets `entriesVO:null`), then
+`create_folder_v2 {"autorename":false,"path":"/NOTE/Note/<folder>"}` and **requires
+the response `metadata{tag:"folder",id,name,path_display}`** — the server-assigned `id`
+is what it parents the subsequent note `upload/apply` to. With an empty-metadata stub
+the device aborts the sync right after create (`… → create_folder_v2 → synchronous/end`,
+no upload — nothing reaches disk). UB `MkdirAll`s under FileRoot, mints the id via the
+`fileids` registry, returns metadata; collision → `E0322` if `autorename=false`.
+
+**Deleting a folder = deleting its contents.** The device sends `delete_folder_v3` with
+each contained **file's** id (e.g. `{"id":"1767"}`), one per file, and **never** a delete
+for the folder itself; it then mirrors `list_folder` for folder existence. Two
+consequences UB must handle: (1) after a delete (or `move_v3`) empties a user folder, UB
+**prunes** it (`pruneEmptyParents`, stopping at native buckets) or `list_folder` re-syncs
+the empty dir back as a **zombie folder** (the device re-creates it locally and, having it
+again, never deletes it — self-perpetuating); (2) an **already-empty** folder the user
+deletes sends nothing to UB, so UB cannot auto-remove it (it re-syncs until removed
+server-side — a web folder-delete is the future fix).
+
 ### Summary (digest) DTO casing + sync semantics (Phase D — hardware-confirmed 2026-05-25)
 
 Unlike the file DTOs (snake_case: `to_path`, `content_hash`), the `F_SummaryController`

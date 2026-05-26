@@ -246,6 +246,84 @@ func TestDeleteFolderUnknownID(t *testing.T) {
 	}
 }
 
+// TestDeleteFolderPrunesEmptiedUserFolder: deleting a folder's last file removes
+// the now-empty user folder too, so it can't re-sync ("zombie") back to the
+// device (the device deletes folder *contents* by file id and never sends a
+// folder delete; hardware-confirmed 2026-05-26). Native buckets are preserved.
+func TestDeleteFolderPrunesEmptiedUserFolder(t *testing.T) {
+	root := t.TempDir()
+	abs := writeFile(t, root, "NOTE/Note/Moffitt/note.note", []byte("bye"))
+	h, reg := newMutationHandler(t, root)
+	id, _ := reg.IDFor(context.Background(), abs)
+
+	out := decodeMap(t, h.DeleteFolder, `{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`"}`)
+	if out["success"] != true {
+		t.Fatalf("success = %v (%v)", out["success"], out)
+	}
+	// The emptied user folder is gone...
+	if _, err := os.Stat(filepath.Join(root, "NOTE", "Note", "Moffitt")); !os.IsNotExist(err) {
+		t.Errorf("emptied user folder should be pruned, stat err=%v", err)
+	}
+	// ...but the native bucket subtree is preserved.
+	if _, err := os.Stat(filepath.Join(root, "NOTE", "Note")); err != nil {
+		t.Errorf("native bucket NOTE/Note must be preserved, stat err=%v", err)
+	}
+}
+
+// TestDeleteFolderKeepsNonEmptyFolder: deleting one of several files leaves the
+// (still non-empty) folder in place.
+func TestDeleteFolderKeepsNonEmptyFolder(t *testing.T) {
+	root := t.TempDir()
+	a := writeFile(t, root, "NOTE/Note/Moffitt/a.note", []byte("a"))
+	writeFile(t, root, "NOTE/Note/Moffitt/b.note", []byte("b"))
+	h, reg := newMutationHandler(t, root)
+	id, _ := reg.IDFor(context.Background(), a)
+
+	decodeMap(t, h.DeleteFolder, `{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`"}`)
+	if _, err := os.Stat(filepath.Join(root, "NOTE", "Note", "Moffitt")); err != nil {
+		t.Errorf("non-empty folder must be kept, stat err=%v", err)
+	}
+}
+
+// TestDeleteFolderDoesNotPruneBucket: deleting a file directly under a native
+// bucket subdir (NOTE/Note) must NOT prune that bucket.
+func TestDeleteFolderDoesNotPruneBucket(t *testing.T) {
+	root := t.TempDir()
+	abs := writeFile(t, root, "NOTE/Note/loose.note", []byte("x"))
+	h, reg := newMutationHandler(t, root)
+	id, _ := reg.IDFor(context.Background(), abs)
+
+	decodeMap(t, h.DeleteFolder, `{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`"}`)
+	if _, err := os.Stat(filepath.Join(root, "NOTE", "Note")); err != nil {
+		t.Errorf("native bucket NOTE/Note must never be pruned, stat err=%v", err)
+	}
+}
+
+// TestMovePrunesEmptiedSourceFolder: moving the last note out of a user folder
+// prunes the emptied source folder (same zombie risk as delete). Native buckets
+// are preserved.
+func TestMovePrunesEmptiedSourceFolder(t *testing.T) {
+	root := t.TempDir()
+	src := writeFile(t, root, "NOTE/Note/Src/m.note", []byte("move me"))
+	h, reg := newMutationHandler(t, root)
+	id, _ := reg.IDFor(context.Background(), src)
+
+	out := decodeMap(t, h.Move,
+		`{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`","to_path":"/NOTE/Note/m.note"}`)
+	if out["success"] != true {
+		t.Fatalf("move success = %v (%v)", out["success"], out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "NOTE", "Note", "Src")); !os.IsNotExist(err) {
+		t.Errorf("emptied source folder should be pruned, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "NOTE", "Note", "m.note")); err != nil {
+		t.Errorf("moved note should be at destination, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "NOTE", "Note")); err != nil {
+		t.Errorf("native bucket NOTE/Note must be preserved, stat err=%v", err)
+	}
+}
+
 func writeFile(t *testing.T, root, rel string, body []byte) string {
 	t.Helper()
 	abs := filepath.Join(root, filepath.FromSlash(rel))

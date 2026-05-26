@@ -136,6 +136,12 @@ func (h *MutationHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 	// index time (pipeline.Enqueue → note_content/note_embeddings.note_path).
 	h.deindex(r.Context(), abs)
 
+	// Prune any user folder this delete just emptied. The device deletes a
+	// folder's *contents* by file id and never sends a folder delete, so without
+	// this the emptied folder lingers and list_folder re-syncs it back ("zombie"
+	// folder, hardware-confirmed 2026-05-26). Native buckets are never pruned.
+	h.pruneEmptyParents(filepath.Dir(abs))
+
 	if h.Notifier != nil {
 		_ = h.Notifier.NotifyFile(r.Context())
 	}
@@ -205,6 +211,31 @@ func (h *MutationHandler) reindexCopy(ctx context.Context, src, dst string) {
 	}
 }
 
+// pruneEmptyParents removes now-empty ancestor directories left behind when the
+// device deletes a folder's last file. It walks up from dir, os.Remove-ing each
+// empty directory, and stops at the device's native buckets: only user folders
+// (root-relative depth >= 3, e.g. NOTE/Note/<folder>) are prunable — never the
+// FileRoot, the top-level buckets (NOTE/DOCUMENT/EXPORT/…), or their standard
+// subdirs (NOTE/Note, DOCUMENT/Document, both depth 2). Best-effort: os.Remove
+// fails on a non-empty dir (ENOTEMPTY), which naturally stops the walk; any
+// error stops it. Pruned folders aren't recycled — an empty dir carries no data,
+// and a later restore of the file from .recycle recreates the parent.
+func (h *MutationHandler) pruneEmptyParents(dir string) {
+	for {
+		rel, err := filepath.Rel(h.Root, dir)
+		if err != nil || rel == "." {
+			return
+		}
+		if len(strings.Split(filepath.ToSlash(rel), "/")) < 3 {
+			return // a native bucket / standard subdir / the root itself
+		}
+		if err := os.Remove(dir); err != nil {
+			return // non-empty or already gone — stop walking up
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
 // recycle moves abs (whose root-relative path is pathDisplay) under
 // .recycle/<millis>/<relPath>, creating parents. The timestamped generation
 // keeps repeated deletes of the same path from colliding.
@@ -258,6 +289,11 @@ func (h *MutationHandler) Move(w http.ResponseWriter, r *http.Request) {
 	// Repoint the search/RAG index + notes inventory so the moved note follows
 	// its file instead of going stale at the old path (best-effort).
 	h.reindexMove(r.Context(), src, dest)
+	// Prune the source folder if moving the note out just emptied it — same
+	// zombie risk as delete (the device never sends a folder delete, so an
+	// emptied user folder would re-sync via list_folder). Native buckets are
+	// never pruned.
+	h.pruneEmptyParents(filepath.Dir(src))
 	h.respondEntry(w, r, dest, func(e *dto.EntriesVO) {
 		envelope.WriteJSON(w, dto.FileMoveLocalVO{BaseVO: envelope.OK(), EquipmentNo: req.EquipmentNo, EntriesVO: e})
 	}, func() { fail(errMoveMissingCode, errMoveMissingMsg) })
