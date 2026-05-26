@@ -117,7 +117,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = ws.SetReadDeadline(time.Now().Add(readTimeout))
 
-		switch kind, event, payload := ClassifyFrame(msg); kind {
+		switch kind, event, _ := ClassifyFrame(msg); kind {
 		case KindPing:
 			pings++
 			_ = c.write([]byte{eioPong}) // "3"
@@ -135,13 +135,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						// Emit the payload as a STRING arg (the device gson-parses
 						// args[0]) — same convention as the to-do/ServerMessage
 						// nudges and the real server's sendEvent("digest", json).
-						_ = c.write(EncodeEvent("digest", p))
+						if err := c.write(EncodeEvent("digest", p)); err == nil {
+							// The device sends no app-level ack for a digest push
+							// (hardware-confirmed: device→server is pure ratta_ping),
+							// so clear the delivered tombstones on our own successful
+							// emit rather than waiting for a "Received" that never
+							// comes (which would re-send every ping).
+							h.digest.AckDigest(r.Context(), userID)
+						}
 					}
 				}
-			case event == "digest" && h.digest != nil && string(payload) == `"Received"`:
-				// The device confirms it processed the digest frame; clear the
-				// delivered tombstones so they aren't re-sent on the next ping.
-				h.digest.AckDigest(r.Context(), userID)
 			default:
 				others++
 				h.logger.Debug("spc socket event ignored", "event", event, "userId", userID)

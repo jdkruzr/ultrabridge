@@ -447,21 +447,26 @@ D1 (device round-trip). **D2 tombstone (built 2026-05-26) — a DURABLE per-devi
 drained on the heartbeat:** a UB/web-initiated delete enqueues a tombstone
 (`internal/spcserver/digesttomb`, keyed per device-user); on each `ratta_ping` the socket
 handler drains the user's pending tombstones and emits them as a `DELETE_DIGEST` over the
-**`digest`** event, then deletes them when the device replies `42["digest","Received"]` (a
-30-day TTL sweep reclaims any a never-returning device leaves). This mirrors the real
-server, which **always queues** digest messages (per socket-session in Redis) and drains
-them on the heartbeat — UB keys per device-user so they survive reconnects/restarts (the
-real server's per-session queue orphans on reconnect). A live-only push would be a
-correctness bug: devices aren't always connected, and `query/summary/hash` carries no
-tombstone, so a missed delete would never be caught. Wire shape replicates
+**`digest`** event, then clears them **on its own successful emit** — the device sends NO
+app-level ack for a digest push (hardware-confirmed 2026-05-26: device→server is pure
+`ratta_ping`; the decompiled server's `42["digest","Received"]` ack path is not exercised by
+this firmware, and waiting for it would re-send the frame every ping). A 30-day TTL sweep
+backstops anything a never-returning device leaves. This mirrors the real server, which
+**always queues** digest messages (per socket-session in Redis) and drains them on the
+heartbeat — UB keys per device-user so they survive reconnects/restarts (the real server's
+per-session queue orphans on reconnect). A live-only push would be a correctness bug:
+devices aren't always connected, and `query/summary/hash` carries no tombstone, so a missed
+delete would never be caught. **Hardware-validated 2026-05-26:** deleting a digest in UB's
+web UI while the device was offline queued the tombstone; on reconnect the device's first
+`ratta_ping` drained it and the digest vanished on the device (`dataType:"4"` — the digest's
+sourceType — was tolerated; the device keys on `id`). Wire shape replicates
 `SocketDigestMessageData<DigestMessageTemplate>` (`EVENT_DIGEST` / `MSG_TYPE_DIGEST =
 "DIGEST-SYN"`): per deleted digest, only `messageType`/`dataType`/`equipmentNo`/`timestamp`/
 `id` are set (`dataType` = sourceType: "1"=PDF, "2"=note); the payload rides as a **string
 arg** (the device gson-parses `args[0]`), like the `to-do`/`ServerMessage` nudges. `id` is
 UB's own digest id (= what it returns in `query/summary/hash`, so the device's local key
-matches). `equipmentNo` is sent as `"ultrabridge"` (device expected to key on `id`);
-**the `equipmentNo` value and the device's honoring of the frame are pending hardware
-capture** (NPM flip → `:8089` tcpdump). `update/summary` can also *add* handwriting to a previously text-only
+matches). `equipmentNo` is sent as `"ultrabridge"` and the device honored the frame anyway
+(it keys on `id`) — both confirmed in the 2026-05-26 capture. `update/summary` can also *add* handwriting to a previously text-only
 digest (new `.mark` uploaded + promoted) and move an item between groups via
 `parentUniqueIdentifier` — both device-confirmed.
 
