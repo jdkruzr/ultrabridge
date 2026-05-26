@@ -734,6 +734,15 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		if v := r.FormValue("spc_oss_secret"); v != "" {
 			cfg.SPCOssSecret = v
 		}
+	case "sync":
+		// ForestNote device sync. Both keys are restart-required (route + service
+		// are wired once at startup), so UpdateConfig flags the banner.
+		cfg.SyncEnabled = r.FormValue("sync_enabled") == "true"
+		if v := strings.TrimSpace(r.FormValue("sync_batch_limit")); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cfg.SyncBatchLimit = n
+			}
+		}
 	case "general":
 		cfg.EmbedEnabled = r.FormValue("embed_enabled") == "true"
 		cfg.OllamaURL, cfg.OllamaEmbedModel = r.FormValue("ollama_url"), r.FormValue("ollama_embed_model")

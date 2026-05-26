@@ -42,6 +42,9 @@ import (
 	"github.com/sysop/ultrabridge/internal/spcserver/fileids"
 	"github.com/sysop/ultrabridge/internal/spcserver/notify"
 	"github.com/sysop/ultrabridge/internal/spcserver/staging"
+	"github.com/sysop/ultrabridge/internal/synchttp"
+	"github.com/sysop/ultrabridge/internal/syncstore"
+	"github.com/sysop/ultrabridge/internal/syncsvc"
 	"github.com/sysop/ultrabridge/internal/taskdb"
 	"github.com/sysop/ultrabridge/internal/web"
 	ubwebdav "github.com/sysop/ultrabridge/internal/webdav"
@@ -475,6 +478,20 @@ func main() {
 	mux.Handle("/.well-known/caldav", wellKnownCalDAV)
 	mux.Handle("/.well-known/caldav/", wellKnownCalDAV)
 
+	// ForestNote device sync (/sync/v1), gated by the SyncEnabled setting. Plain
+	// authenticated REST behind authMW — NOT the SPC Engine.IO/Socket.IO machinery.
+	// Migration is package-local + best-effort (precedent: fileids/staging/digests).
+	// The pipeline bridge (render→OCR→index→embed) is Phase 2; nil bridge = sync-only.
+	if cfg.SyncEnabled {
+		if err := syncstore.Migrate(context.Background(), noteDB); err != nil {
+			logger.Error("syncstore migration failed; device sync disabled", "err", err)
+		} else {
+			syncSvc := syncsvc.New(syncstore.New(noteDB), cfg.SyncBatchLimit, nil, logger)
+			mux.Handle("/sync/v1", authMW.Wrap(synchttp.New(syncSvc, synchttp.DefaultMaxBytes, logger)))
+			logger.Info("ForestNote device sync enabled", "route", "/sync/v1", "batch_limit", cfg.SyncBatchLimit)
+		}
+	}
+
 	// MCP discovery for Claude/OAuth clients
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -690,4 +707,3 @@ func envBoolOrDefault(key string, def bool) bool {
 	}
 	return strings.EqualFold(v, "true") || v == "1"
 }
-

@@ -89,6 +89,10 @@ type Config struct {
 
 	// SPC OSS signing (Phase 3 download)
 	SPCOssSecret string // signs/verifies presigned URLs ("" = generate on first boot)
+
+	// ForestNote device sync (roll-our-own SQLite sync)
+	SyncEnabled    bool // gates the /sync/v1 route + syncstore migration (default off)
+	SyncBatchLimit int  // max relay ops per /sync/v1 response
 }
 
 // SaveResult reports the outcome of a Save operation.
@@ -171,6 +175,8 @@ func loadConfigFromDB(ctx context.Context, db *sql.DB, applyEnv bool) (*Config, 
 		SPCFileRoot:          dbVals[KeySPCFileRoot],
 		SPCQuotaBytes:        parseInt64WithDefault(dbVals[KeySPCQuotaBytes], 1<<40),
 		SPCOssSecret:         dbVals[KeySPCOssSecret],
+		SyncEnabled:          parseBool(dbVals[KeySyncEnabled]),
+		SyncBatchLimit:       parseIntWithDefault(dbVals[KeySyncBatchLimit], 500),
 	}
 
 	return cfg, nil
@@ -298,6 +304,8 @@ func configToMap(cfg *Config) map[string]string {
 		KeySPCFileRoot:          cfg.SPCFileRoot,
 		KeySPCQuotaBytes:        strconv.FormatInt(cfg.SPCQuotaBytes, 10),
 		KeySPCOssSecret:         cfg.SPCOssSecret,
+		KeySyncEnabled:          boolToString(cfg.SyncEnabled),
+		KeySyncBatchLimit:       strconv.Itoa(cfg.SyncBatchLimit),
 	}
 	return m
 }

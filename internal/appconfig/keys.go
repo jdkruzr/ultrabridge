@@ -77,6 +77,12 @@ const (
 	// SPC's hardcoded SECRET_KEY — see docs/spc-protocol.md §6.
 	KeySPCOssSecret = "spc_oss_secret"
 
+	// ForestNote device sync (roll-our-own SQLite sync). KeySyncEnabled gates the
+	// /sync/v1 route + syncstore migration (default off). KeySyncBatchLimit caps
+	// relay ops returned per response. See docs/sync/forestnote-sync-protocol.md.
+	KeySyncEnabled    = "sync_enabled"
+	KeySyncBatchLimit = "sync_batch_limit"
+
 	// Runtime-configurable (existing keys, read at job time via closures — NOT loaded into Config struct)
 	// These are included here for completeness but are accessed via notedb.GetSetting directly.
 	KeySNInjectEnabled     = "sn_inject_enabled"
@@ -138,6 +144,8 @@ var envVarForKey = map[string]string{
 	KeySPCFileRoot:          "UB_SPC_FILE_ROOT",
 	KeySPCQuotaBytes:        "UB_SPC_QUOTA_BYTES",
 	KeySPCOssSecret:         "UB_SPC_OSS_SECRET",
+	KeySyncEnabled:          "UB_SYNC_ENABLED",
+	KeySyncBatchLimit:       "UB_SYNC_BATCH_LIMIT",
 }
 
 // defaultValues provides the default for each setting key when neither DB nor env var is set.
@@ -167,6 +175,8 @@ var defaultValues = map[string]string{
 	// 1 TiB = 1099511627776 bytes; a generous fake total so the device never
 	// thinks it's full (UB does not actually enforce a quota).
 	KeySPCQuotaBytes: "1099511627776",
+	// Device-sync relay batch cap (ops per /sync/v1 response).
+	KeySyncBatchLimit: "500",
 }
 
 // restartRequired is the set of keys whose changes require a restart to take effect.
@@ -203,4 +213,6 @@ var restartRequired = map[string]bool{
 	KeySPCFileRoot:          true,
 	KeySPCQuotaBytes:        true,
 	KeySPCOssSecret:         true,
+	KeySyncEnabled:          true,
+	KeySyncBatchLimit:       true,
 }

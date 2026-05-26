@@ -277,6 +277,38 @@
   </div>
   {{end}}
 
+  {{if .Config}}
+  <div class="card">
+    <h2>ForestNote Device Sync</h2>
+    <p class="device-info" style="margin-bottom: 1rem;">
+      UltraBridge's native device-sync server for ForestNote (and future UB-native clients).
+      Exposes <code>/sync/v1</code> on the main app port, behind the same authentication as the web UI.
+      Synced notes flow into the OCR / search / RAG pipeline like Supernote and Boox notes.
+      <strong>Changes here require an application restart to take effect.</strong>
+    </p>
+    <form hx-post="/settings/save" hx-target="#main-content">
+      <input type="hidden" name="section" value="sync">
+
+      <div class="form-group">
+        <label for="sync-enabled">Enabled</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">When off, <code>/sync/v1</code> is not served (default off).</p>
+        <select id="sync-enabled" name="sync_enabled">
+          <option value="false"{{if not .Config.SyncEnabled}} selected{{end}}>false</option>
+          <option value="true"{{if .Config.SyncEnabled}} selected{{end}}>true</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="sync-batch-limit">Relay Batch Limit</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">Max ops returned per sync response. Default 500.</p>
+        <input id="sync-batch-limit" type="number" name="sync_batch_limit" value="{{.Config.SyncBatchLimit}}">
+      </div>
+
+      <button type="submit" class="btn-small">Save Sync Settings</button>
+    </form>
+  </div>
+  {{end}}
+
   <div class="card{{if not .BooxActive}} settings-inactive{{end}}">
     <h2>Boox Settings</h2>
     {{if not .BooxActive}}
