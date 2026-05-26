@@ -389,6 +389,12 @@ func main() {
 				spcEnqueuer = func(ctx context.Context, path string) error { return pl.Enqueue(ctx, path) }
 			}
 		}
+		// Guard the typed-nil: a nil *rag.Store assigned to the Deindexer
+		// interface field would be non-nil and panic when the handler calls it.
+		var spcEmbedDeleter spcserver.Deindexer
+		if embedStore != nil {
+			spcEmbedDeleter = embedStore
+		}
 		spcSrv = spcserver.New(spcserver.Config{
 			Mode:           cfg.SPCMode,
 			ListenAddr:     cfg.SPCListenAddr,
@@ -407,6 +413,8 @@ func main() {
 			OCRWatchDir:    snNotesPath,
 			DigestStore:    digestStore,
 			DigestIndexer:  digestIndexer,
+			ContentDeleter: si,
+			EmbedDeleter:   spcEmbedDeleter,
 			Logger:         logger,
 		})
 		taskNotifier = notify.NewSocketNotifier(
@@ -638,6 +646,11 @@ func main() {
 			booxCachePath = filepath.Join(booxNotesPath, ".cache")
 		}
 		noteSvc := service.NewNoteService(ns, proc, booxStore, booxImporter, booxProc, si, scanner, noteDB, booxCachePath, booxNotesPath, logger)
+		// Wire the embedding store so Boox deletes drop RAG embeddings (not just
+		// FTS content). Only when embedding is enabled — a typed-nil would panic.
+		if embedStore != nil {
+			noteSvc.SetEmbedDeleter(embedStore)
+		}
 
 		// 3. Search Service
 		var chatStore *chat.Store

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,15 +37,27 @@ const (
 	errSameNameMsg       = "A file with the same name already exists"
 )
 
+// Deindexer removes a note path from a UB index (FTS content or RAG
+// embeddings). search.Store and *rag.Store both satisfy it. A delete drops the
+// recycled file's search/RAG entries so it stops surfacing in unified search.
+type Deindexer interface {
+	Delete(ctx context.Context, path string) error
+}
+
 // MutationHandler serves the SPC file-mutation write-path (Phase 4c): delete
 // (soft, to .recycle/), move, and copy. It shares the FileHandler's Root and
 // registry. Notifier (optional) fires a best-effort FILE-SYN after a change.
+// ContentDeleter/EmbedDeleter (optional) de-index a deleted file from the FTS
+// index and RAG embeddings; both nil ⇒ no de-index (a deleted note would keep
+// surfacing in search/chat).
 type MutationHandler struct {
-	Root     string
-	Reg      *fileids.Registry
-	Notifier UploadNotifier
-	Now      func() time.Time
-	Logger   *slog.Logger
+	Root           string
+	Reg            *fileids.Registry
+	Notifier       UploadNotifier
+	ContentDeleter Deindexer
+	EmbedDeleter   Deindexer
+	Now            func() time.Time
+	Logger         *slog.Logger
 }
 
 func (h *MutationHandler) log() *slog.Logger {
@@ -105,6 +118,11 @@ func (h *MutationHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// De-index best-effort: the file is already recycled, so a de-index error
+	// must not fail the device's delete. Keyed on the same absolute path used at
+	// index time (pipeline.Enqueue → note_content/note_embeddings.note_path).
+	h.deindex(r.Context(), abs)
+
 	if h.Notifier != nil {
 		_ = h.Notifier.NotifyFile(r.Context())
 	}
@@ -118,6 +136,21 @@ func (h *MutationHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 			PathDisplay: entry.PathDisplay,
 		},
 	})
+}
+
+// deindex drops the file's FTS content and RAG embeddings, best-effort: each
+// deleter is optional and a failure is logged, never propagated.
+func (h *MutationHandler) deindex(ctx context.Context, abs string) {
+	if h.ContentDeleter != nil {
+		if err := h.ContentDeleter.Delete(ctx, abs); err != nil {
+			h.log().Error("delete_folder_v3 deindex content", "path", abs, "err", err)
+		}
+	}
+	if h.EmbedDeleter != nil {
+		if err := h.EmbedDeleter.Delete(ctx, abs); err != nil {
+			h.log().Error("delete_folder_v3 deindex embeddings", "path", abs, "err", err)
+		}
+	}
 }
 
 // recycle moves abs (whose root-relative path is pathDisplay) under

@@ -63,6 +63,13 @@ type FileScanner interface {
 	ScanNow(ctx context.Context)
 }
 
+// EmbedDeleter removes a note path's RAG embeddings (every chunk) and evicts the
+// in-memory cache. *rag.Store satisfies it. Used on Boox delete, where the boox
+// store already clears FTS content but not embeddings.
+type EmbedDeleter interface {
+	Delete(ctx context.Context, path string) error
+}
+
 type noteService struct {
 	noteStore     notestore.NoteStore
 	proc          processor.Processor
@@ -70,6 +77,7 @@ type noteService struct {
 	booxImporter  BooxImporter
 	booxProc      BooxProcessor
 	searchIndex   search.SearchIndex
+	embedDeleter  EmbedDeleter // optional; set via SetEmbedDeleter
 	scanner       FileScanner
 	noteDB        *sql.DB // for settings
 	booxCachePath string
@@ -104,6 +112,12 @@ func NewNoteService(
 		logger:        logger,
 	}
 }
+
+// SetEmbedDeleter wires the RAG embedding store so deletes drop embeddings.
+// Nil-safe: pass a non-nil *rag.Store only when embedding is enabled (a typed-nil
+// would be a non-nil interface and panic on use). Mirrors the SetDigestService
+// pattern — keeps NewNoteService's signature (and all its callers) untouched.
+func (s *noteService) SetEmbedDeleter(d EmbedDeleter) { s.embedDeleter = d }
 
 func (s *noteService) ListFiles(ctx context.Context, path string, sortField, order string, page, perPage int) ([]NoteFile, int, error) {
 	var files []NoteFile
@@ -566,6 +580,14 @@ func (s *noteService) DeleteNote(ctx context.Context, path string) error {
 		noteID, _ := s.booxStore.GetNoteID(ctx, path)
 		if err := s.booxStore.DeleteNote(ctx, path); err != nil {
 			return err
+		}
+		// DeleteNote clears note_content (FTS) but not note_embeddings; drop the
+		// RAG embeddings too so the note stops surfacing in chat retrieval.
+		// Best-effort: the note is already gone, so a failure is logged not fatal.
+		if s.embedDeleter != nil {
+			if err := s.embedDeleter.Delete(ctx, path); err != nil {
+				s.logger.Warn("delete boox embeddings", "path", path, "error", err)
+			}
 		}
 		if noteID != "" && s.booxCachePath != "" {
 			os.RemoveAll(filepath.Join(s.booxCachePath, noteID))

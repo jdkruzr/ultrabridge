@@ -67,8 +67,19 @@ type Config struct {
 	// FTS5/RAG index. Nil ⇒ digests still round-trip to the device but are not
 	// searchable in UB.
 	DigestIndexer DigestIndexer
-	Logger        *slog.Logger
+	// ContentDeleter/EmbedDeleter (optional) de-index a device-deleted note from
+	// the FTS index (search.Store) and RAG embeddings (*rag.Store) so a deleted
+	// note stops surfacing in search/chat. Nil ⇒ no de-index. EmbedDeleter must
+	// be left nil (not a typed-nil *rag.Store) when embedding is disabled.
+	ContentDeleter Deindexer
+	EmbedDeleter   Deindexer
+	Logger         *slog.Logger
 }
+
+// Deindexer removes a note path from a UB index. Aliased from handlers so main
+// can hold interface-typed values (search.Store, *rag.Store) without importing
+// handlers directly.
+type Deindexer = handlers.Deindexer
 
 // DigestStore is the digest store the SPC server needs (Phase D). Aliased from
 // the handlers package so main can hold an interface-typed value (and a true nil
@@ -241,10 +252,12 @@ func (s *Server) registerRoutes() {
 	// File mutations (Phase 4c) — delete (soft, to .recycle/), move, copy. All
 	// JWT-protected business calls operating on the shared registry + FileRoot.
 	mut := &handlers.MutationHandler{
-		Root:     s.cfg.FileRoot,
-		Reg:      reg,
-		Notifier: fileNotifier,
-		Logger:   s.cfg.Logger,
+		Root:           s.cfg.FileRoot,
+		Reg:            reg,
+		Notifier:       fileNotifier,
+		ContentDeleter: s.cfg.ContentDeleter,
+		EmbedDeleter:   s.cfg.EmbedDeleter,
+		Logger:         s.cfg.Logger,
 	}
 	s.mux.Handle("POST /api/file/3/files/delete_folder_v3", protect(mut.DeleteFolder))
 	s.mux.Handle("POST /api/file/3/files/move_v3", protect(mut.Move))

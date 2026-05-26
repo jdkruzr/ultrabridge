@@ -223,6 +223,7 @@ func (m *mockNoteService) BulkDelete(ctx context.Context, paths []string) error 
 	m.deletedPaths = append(m.deletedPaths, paths...)
 	return nil
 }
+func (m *mockNoteService) SetEmbedDeleter(d service.EmbedDeleter) {}
 func (m *mockNoteService) StartProcessor(ctx context.Context) error {
 	m.processorStarted = true
 	return nil

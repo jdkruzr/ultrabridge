@@ -4,12 +4,55 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/sysop/ultrabridge/internal/booxpipeline"
 	"github.com/sysop/ultrabridge/internal/notestore"
 	"github.com/sysop/ultrabridge/internal/processor"
 )
+
+type recordingEmbedDeleter struct {
+	paths []string
+	err   error
+}
+
+func (r *recordingEmbedDeleter) Delete(_ context.Context, path string) error {
+	r.paths = append(r.paths, path)
+	return r.err
+}
+
+// Deleting a Boox note also drops its RAG embeddings (booxStore.DeleteNote
+// already clears FTS content). The embed deleter is called with the note path.
+func TestNoteService_DeleteNote_BooxDeindexesEmbeddings(t *testing.T) {
+	embed := &recordingEmbedDeleter{}
+	s := &noteService{
+		booxStore:     &mockBooxStore{},
+		booxNotesPath: "/boox",
+		embedDeleter:  embed,
+		logger:        slog.Default(),
+	}
+	const path = "/boox/notebook.note"
+	if err := s.DeleteNote(context.Background(), path); err != nil {
+		t.Fatalf("DeleteNote: %v", err)
+	}
+	if len(embed.paths) != 1 || embed.paths[0] != path {
+		t.Fatalf("embed deleter paths = %v, want [%q]", embed.paths, path)
+	}
+}
+
+// De-index is best-effort: an embed-delete error is logged, not propagated.
+func TestNoteService_DeleteNote_BooxEmbedErrorIsBestEffort(t *testing.T) {
+	s := &noteService{
+		booxStore:     &mockBooxStore{},
+		booxNotesPath: "/boox",
+		embedDeleter:  &recordingEmbedDeleter{err: errors.New("boom")},
+		logger:        slog.Default(),
+	}
+	if err := s.DeleteNote(context.Background(), "/boox/notebook.note"); err != nil {
+		t.Fatalf("embed-delete error must not fail the delete: %v", err)
+	}
+}
 
 type mockNoteStore struct {
 	files []notestore.NoteFile

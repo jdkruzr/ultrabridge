@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -70,6 +71,63 @@ func TestDeleteFolderSoftDeletes(t *testing.T) {
 		t.Fatalf("deleted file not found under .recycle/")
 	}
 }
+
+// recordingDeindexer records the paths passed to Delete and optionally returns
+// an error, to verify the delete handler drives de-index seams best-effort.
+type recordingDeindexer struct {
+	paths []string
+	err   error
+}
+
+func (r *recordingDeindexer) Delete(_ context.Context, path string) error {
+	r.paths = append(r.paths, path)
+	return r.err
+}
+
+// A successful delete also de-indexes: the handler calls both the FTS and the
+// embedding deleter with the file's resolved absolute path.
+func TestDeleteFolderDeindexes(t *testing.T) {
+	root := t.TempDir()
+	abs := writeFile(t, root, "Note/indexed.note", []byte("searchable"))
+	h, reg := newMutationHandler(t, root)
+	content := &recordingDeindexer{}
+	embed := &recordingDeindexer{}
+	h.ContentDeleter = content
+	h.EmbedDeleter = embed
+	id, err := reg.IDFor(context.Background(), abs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := decodeMap(t, h.DeleteFolder, `{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`"}`)
+	if out["success"] != true {
+		t.Fatalf("success = %v (%v)", out["success"], out)
+	}
+	if len(content.paths) != 1 || content.paths[0] != abs {
+		t.Fatalf("content deleter paths = %v, want [%q]", content.paths, abs)
+	}
+	if len(embed.paths) != 1 || embed.paths[0] != abs {
+		t.Fatalf("embed deleter paths = %v, want [%q]", embed.paths, abs)
+	}
+}
+
+// De-index is best-effort: a deleter error is logged, not propagated, so the
+// device still gets a success envelope (the file is already recycled).
+func TestDeleteFolderDeindexErrorIsBestEffort(t *testing.T) {
+	root := t.TempDir()
+	abs := writeFile(t, root, "Note/indexed.note", []byte("searchable"))
+	h, reg := newMutationHandler(t, root)
+	h.ContentDeleter = &recordingDeindexer{err: errDeindexBoom}
+	h.EmbedDeleter = &recordingDeindexer{err: errDeindexBoom}
+	id, _ := reg.IDFor(context.Background(), abs)
+
+	out := decodeMap(t, h.DeleteFolder, `{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`"}`)
+	if out["success"] != true {
+		t.Fatalf("de-index failure must not fail the delete; got %v", out)
+	}
+}
+
+var errDeindexBoom = fmt.Errorf("boom")
 
 // AC4.1: an unknown id → success:false with E0318, never a 500.
 func TestDeleteFolderUnknownID(t *testing.T) {
