@@ -13,3 +13,6 @@ ultrabridge-data/
 # python reference-oracle bytecode
 __pycache__/
 *.pyc
+
+# playwright MCP scratch output
+.playwright-mcp/
