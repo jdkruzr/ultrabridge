@@ -95,33 +95,3 @@ func (n *SocketNotifier) NotifyFile(ctx context.Context) error {
 	}
 	return nil
 }
-
-// NotifyDigestDelete pushes a DELETE_DIGEST tombstone over the "digest" event so
-// the device removes its local copy of a server/web-deleted digest. Unlike the
-// STARTSYNC nudges above, this carries the item id: the device treats a digest
-// merely *absent* from query/summary/hash as something to re-assert (re-push),
-// so only an explicit DELETE_DIGEST makes it delete locally (D2 tombstone). The
-// wire shape mirrors the real SPC server's SocketDigestMessageData<
-// DigestMessageTemplate> (SocketIoConstant.EVENT_DIGEST / MSG_TYPE_DIGEST), which
-// on a delete populates only messageType/dataType/equipmentNo/timestamp/id.
-// dataType is the digest's sourceType ("1"=PDF, "2"=note). Best-effort like the
-// other notifiers: no userId / no live connection returns nil.
-func (n *SocketNotifier) NotifyDigestDelete(ctx context.Context, id int64, dataType string) error {
-	userID, err := n.userID(ctx)
-	if err != nil {
-		n.logger.Warn("DIGEST-SYN: userId resolve failed", "error", err)
-		return nil
-	}
-	if userID == "" {
-		return nil // no device has logged in yet
-	}
-	now := time.Now().UnixMilli()
-	payload := fmt.Sprintf(
-		`{"code":"200","timestamp":%d,"msgType":"DIGEST-SYN","data":[{"messageType":"DELETE_DIGEST","dataType":%q,"equipmentNo":"ultrabridge","timestamp":%d,"id":%d}]}`,
-		now, dataType, now, id,
-	)
-	if n.reg.Emit(userID, "digest", payload) == 0 {
-		n.logger.Debug("digest DELETE_DIGEST: no device connected", "userId", userID)
-	}
-	return nil
-}

@@ -237,10 +237,10 @@ type DigestService interface {
 	ListDigests(ctx context.Context, group, tag string, page, perPage int) ([]DigestView, int, error)
 	ListGroups(ctx context.Context) ([]DigestGroupView, error)
 	// DeleteDigest soft-deletes a digest and propagates the delete to the device
-	// via a DELETE_DIGEST tombstone (D2).
+	// via a durable DELETE_DIGEST tombstone (D2).
 	DeleteDigest(ctx context.Context, id int64) error
-	// SetTombstoneNotifier wires the device-push seam (SPC server mode only).
-	SetTombstoneNotifier(n DigestTombstoneNotifier)
+	// SetTombstoneQueue wires the durable device-tombstone seam (SPC server mode only).
+	SetTombstoneQueue(q DigestTombstoneQueue)
 }
 
 // ConfigService manages system configuration and sources.

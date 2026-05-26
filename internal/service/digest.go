@@ -28,18 +28,21 @@ type DigestDeindexer interface {
 	Deindex(uid string)
 }
 
-// DigestTombstoneNotifier pushes a DELETE_DIGEST tombstone to the connected
-// device so a UB/web-initiated delete propagates down (without it the device
-// re-asserts the digest). *spcserver/notify.SocketNotifier satisfies it
-// structurally, so this package never imports spcserver.
-type DigestTombstoneNotifier interface {
-	NotifyDigestDelete(ctx context.Context, id int64, dataType string) error
+// DigestTombstoneQueue durably records a DELETE_DIGEST tombstone for the device
+// so a UB/web-initiated delete propagates down even if the device is offline:
+// the digest socket layer drains the queue on the device's next heartbeat
+// (without it the device re-asserts the digest). The real SPC server queues
+// these per socket-session in Redis; UB persists them per device-user.
+// *spcserver/digesttomb.Store satisfies it structurally, so this package never
+// imports spcserver.
+type DigestTombstoneQueue interface {
+	Enqueue(ctx context.Context, userID, digestID int64, dataType string) error
 }
 
 type digestService struct {
 	store     DigestStore
-	deindexer DigestDeindexer         // optional; nil skips search/RAG de-index
-	tombstone DigestTombstoneNotifier // optional; nil skips the device push
+	deindexer DigestDeindexer      // optional; nil skips search/RAG de-index
+	tombstone DigestTombstoneQueue // optional; nil skips the device tombstone
 	logger    *slog.Logger
 }
 
@@ -53,15 +56,15 @@ func NewDigestService(store DigestStore, deindexer DigestDeindexer) DigestServic
 	return &digestService{store: store, deindexer: deindexer, logger: slog.Default()}
 }
 
-// SetTombstoneNotifier wires the device-push seam after construction (the
-// notifier is built later in main, over the SPC server's socket registry).
-func (s *digestService) SetTombstoneNotifier(n DigestTombstoneNotifier) { s.tombstone = n }
+// SetTombstoneQueue wires the durable device-tombstone seam after construction
+// (the queue is built later in main, in SPC server mode).
+func (s *digestService) SetTombstoneQueue(q DigestTombstoneQueue) { s.tombstone = q }
 
-// DeleteDigest soft-deletes a digest, drops it from search/RAG, and pushes a
-// DELETE_DIGEST tombstone so the device removes its local copy (D2). The
-// soft-delete is authoritative (its error propagates); de-index and the device
-// push are best-effort — the row is already gone, and the device's next sync
-// catches any missed push.
+// DeleteDigest soft-deletes a digest, drops it from search/RAG, and enqueues a
+// DELETE_DIGEST tombstone so the device removes its local copy on its next
+// heartbeat (D2 — durable so it survives the device being offline). The
+// soft-delete is authoritative (its error propagates); de-index and the
+// tombstone enqueue are best-effort.
 func (s *digestService) DeleteDigest(ctx context.Context, id int64) error {
 	d, err := s.store.GetItem(ctx, id)
 	if err != nil {
@@ -74,8 +77,8 @@ func (s *digestService) DeleteDigest(ctx context.Context, id int64) error {
 		s.deindexer.Deindex(d.UniqueIdentifier)
 	}
 	if s.tombstone != nil {
-		if err := s.tombstone.NotifyDigestDelete(ctx, id, strconv.Itoa(d.SourceType)); err != nil {
-			s.logger.Warn("digest delete tombstone push", "id", id, "error", err)
+		if err := s.tombstone.Enqueue(ctx, d.UserID, id, strconv.Itoa(d.SourceType)); err != nil {
+			s.logger.Warn("digest delete tombstone enqueue", "id", id, "error", err)
 		}
 	}
 	return nil

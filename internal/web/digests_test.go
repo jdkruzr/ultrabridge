@@ -30,7 +30,7 @@ func (f *fakeDigestService) DeleteDigest(_ context.Context, id int64) error {
 	f.deletedIDs = append(f.deletedIDs, id)
 	return nil
 }
-func (f *fakeDigestService) SetTombstoneNotifier(service.DigestTombstoneNotifier) {}
+func (f *fakeDigestService) SetTombstoneQueue(service.DigestTombstoneQueue) {}
 
 func TestDigestsTab_RendersItems(t *testing.T) {
 	h := newTestHandler()

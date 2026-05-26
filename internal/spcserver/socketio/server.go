@@ -1,6 +1,7 @@
 package socketio
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
@@ -16,12 +17,27 @@ import (
 // (/socket.io/). It authenticates on the handshake token, completes the EIO
 // open + SIO connect exchange, answers keepalives, and registers the live
 // connection so the rest of UB can push to it. See docs/spc-protocol.md §3.
+// DigestQueue is the optional digest-tombstone seam. On each ratta_ping the
+// handler drains the user's pending DELETE_DIGEST frames (DrainDigest) and emits
+// them on the "digest" event; when the device replies 42["digest","Received"]
+// the handler clears the delivered rows (AckDigest). nil disables it.
+// *spcserver/notify.TombstoneQueue satisfies it.
+type DigestQueue interface {
+	DrainDigest(ctx context.Context, userID string) (payload string, ok bool)
+	AckDigest(ctx context.Context, userID string)
+}
+
 type Handler struct {
 	secret   string
 	reg      *Registry
 	logger   *slog.Logger
 	upgrader websocket.Upgrader
+	digest   DigestQueue
 }
+
+// SetDigestQueue wires the digest-tombstone delivery seam (SPC server mode with
+// a digest store; nil otherwise). Set before serving.
+func (h *Handler) SetDigestQueue(q DigestQueue) { h.digest = q }
 
 // NewHandler builds the websocket handler. permessage-deflate is intentionally
 // not negotiated (EnableCompression stays false) — see the 1c design note; the
@@ -101,17 +117,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = ws.SetReadDeadline(time.Now().Add(readTimeout))
 
-		switch kind, event, _ := ClassifyFrame(msg); kind {
+		switch kind, event, payload := ClassifyFrame(msg); kind {
 		case KindPing:
 			pings++
 			_ = c.write([]byte{eioPong}) // "3"
 		case KindConnect:
 			_ = c.write([]byte("40")) // echo Socket.IO connect
 		case KindEvent:
-			if event == "ratta_ping" {
+			switch {
+			case event == "ratta_ping":
 				rattas++
 				_ = c.write(EncodeEvent("ratta_ping", "Received"))
-			} else {
+				// Drain any pending digest tombstones to this device — the real
+				// SPC server delivers queued digest messages on the heartbeat.
+				if h.digest != nil {
+					if p, ok := h.digest.DrainDigest(r.Context(), userID); ok {
+						// Emit the payload as a STRING arg (the device gson-parses
+						// args[0]) — same convention as the to-do/ServerMessage
+						// nudges and the real server's sendEvent("digest", json).
+						_ = c.write(EncodeEvent("digest", p))
+					}
+				}
+			case event == "digest" && h.digest != nil && string(payload) == `"Received"`:
+				// The device confirms it processed the digest frame; clear the
+				// delivered tombstones so they aren't re-sent on the next ping.
+				h.digest.AckDigest(r.Context(), userID)
+			default:
 				others++
 				h.logger.Debug("spc socket event ignored", "event", event, "userId", userID)
 			}

@@ -42,13 +42,15 @@ type recordingDeindexer struct{ uids []string }
 func (r *recordingDeindexer) Deindex(uid string) { r.uids = append(r.uids, uid) }
 
 type recordingTombstone struct {
+	userIDs   []int64
 	ids       []int64
 	dataTypes []string
 	err       error
 }
 
-func (r *recordingTombstone) NotifyDigestDelete(_ context.Context, id int64, dataType string) error {
-	r.ids = append(r.ids, id)
+func (r *recordingTombstone) Enqueue(_ context.Context, userID, digestID int64, dataType string) error {
+	r.userIDs = append(r.userIDs, userID)
+	r.ids = append(r.ids, digestID)
 	r.dataTypes = append(r.dataTypes, dataType)
 	return r.err
 }
@@ -56,7 +58,7 @@ func (r *recordingTombstone) NotifyDigestDelete(_ context.Context, id int64, dat
 func newDeleteSvc(store DigestStore, di DigestDeindexer) (*digestService, *recordingTombstone) {
 	s := NewDigestService(store, di).(*digestService)
 	tomb := &recordingTombstone{}
-	s.SetTombstoneNotifier(tomb)
+	s.SetTombstoneQueue(tomb)
 	return s, tomb
 }
 
@@ -74,8 +76,8 @@ func TestDeleteDigest_SoftDeletesDeindexesAndPushes(t *testing.T) {
 	if len(di.uids) != 1 || di.uids[0] != "abc" {
 		t.Errorf("Deindex(uid) not called with %q: %v", "abc", di.uids)
 	}
-	if len(tomb.ids) != 1 || tomb.ids[0] != 7 || tomb.dataTypes[0] != "2" {
-		t.Errorf("tombstone push wrong: ids=%v dataTypes=%v", tomb.ids, tomb.dataTypes)
+	if len(tomb.ids) != 1 || tomb.userIDs[0] != 3 || tomb.ids[0] != 7 || tomb.dataTypes[0] != "2" {
+		t.Errorf("tombstone enqueue wrong: userIDs=%v ids=%v dataTypes=%v", tomb.userIDs, tomb.ids, tomb.dataTypes)
 	}
 }
 

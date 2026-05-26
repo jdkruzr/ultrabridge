@@ -76,7 +76,11 @@ type Config struct {
 	// FileRecords (optional) repoints the notes/jobs inventory on move so the
 	// Files tab + job history track the new path. *notestore.Store satisfies it.
 	FileRecords FileMover
-	Logger      *slog.Logger
+	// DigestDeliverer (optional, Phase D2) drains durable digest tombstones to the
+	// device on its heartbeat and clears them on ack. *notify.TombstoneQueue
+	// satisfies it; nil disables digest-delete propagation.
+	DigestDeliverer DigestDeliverer
+	Logger          *slog.Logger
 }
 
 // IndexStore and FileMover are aliased from handlers so main can hold
@@ -84,6 +88,11 @@ type Config struct {
 // importing handlers directly.
 type IndexStore = handlers.IndexStore
 type FileMover = handlers.FileMover
+
+// DigestDeliverer is the digest-tombstone delivery seam wired into the socket
+// handler (Phase D2). Aliased from socketio so main can hold the value without
+// importing socketio directly.
+type DigestDeliverer = socketio.DigestQueue
 
 // DigestStore is the digest store the SPC server needs (Phase D). Aliased from
 // the handlers package so main can hold an interface-typed value (and a true nil
@@ -307,7 +316,11 @@ func (s *Server) registerRoutes() {
 
 	// Engine.IO v3 websocket on the same listener (1c). The device connects to
 	// /socket.io/ directly over websocket; demux is by path.
-	s.mux.Handle("/socket.io/", socketio.NewHandler(s.cfg.JWTSecret, s.reg, s.cfg.Logger))
+	sockHandler := socketio.NewHandler(s.cfg.JWTSecret, s.reg, s.cfg.Logger)
+	if s.cfg.DigestDeliverer != nil {
+		sockHandler.SetDigestQueue(s.cfg.DigestDeliverer)
+	}
+	s.mux.Handle("/socket.io/", sockHandler)
 }
 
 // uploadSweepInterval is how often Run reclaims abandoned upload stages whose
