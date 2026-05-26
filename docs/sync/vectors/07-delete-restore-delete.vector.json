@@ -1,0 +1,51 @@
+{
+  "name": "delete-restore-delete",
+  "description": "A restore op that loses on key stays lost: the newest op is a delete, so the row converges to DELETED regardless of an intervening restore.",
+  "ops": [
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 2,
+      "wall_ts": 2000,
+      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": 2000 }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 3,
+      "wall_ts": 3000,
+      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 4,
+      "wall_ts": 4000,
+      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": 4000 }
+    }
+  ],
+  "expected_state": {
+    "notebook": [
+      {
+        "pk": "00000000000000000000000NB1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 4,
+        "wall_ts": 4000,
+        "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": 4000 }
+      }
+    ],
+    "page": [],
+    "stroke": []
+  }
+}

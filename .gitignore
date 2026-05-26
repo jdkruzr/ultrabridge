@@ -9,3 +9,7 @@
 *.note
 node_modules/
 ultrabridge-data/
+
+# python reference-oracle bytecode
+__pycache__/
+*.pyc

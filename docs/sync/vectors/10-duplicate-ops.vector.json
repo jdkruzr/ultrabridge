@@ -1,0 +1,51 @@
+{
+  "name": "duplicate-ops",
+  "description": "An op delivered more than once (identical site_id+op_seq) is idempotent: the duplicate ties on key and does not overwrite. Converges to the same state as if seen once.",
+  "ops": [
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": { "name": "Old name", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 2,
+      "wall_ts": 2000,
+      "cols": { "name": "New name", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 2,
+      "wall_ts": 2000,
+      "cols": { "name": "New name", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": { "name": "Old name", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    }
+  ],
+  "expected_state": {
+    "notebook": [
+      {
+        "pk": "00000000000000000000000NB1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 2,
+        "wall_ts": 2000,
+        "cols": { "name": "New name", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      }
+    ],
+    "page": [],
+    "stroke": []
+  }
+}

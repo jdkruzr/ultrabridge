@@ -1,0 +1,35 @@
+{
+  "name": "clock-skew",
+  "description": "wall_ts is the primary key, not op_seq: device B has a much higher op_seq but an earlier wall_ts, so device A's later-walltime op wins.",
+  "ops": [
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000B",
+      "op_seq": 99,
+      "wall_ts": 4000,
+      "cols": { "name": "B high op_seq, early clock", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 9,
+      "wall_ts": 5000,
+      "cols": { "name": "A low op_seq, late clock", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    }
+  ],
+  "expected_state": {
+    "notebook": [
+      {
+        "pk": "00000000000000000000000NB1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 9,
+        "wall_ts": 5000,
+        "cols": { "name": "A low op_seq, late clock", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      }
+    ],
+    "page": [],
+    "stroke": []
+  }
+}

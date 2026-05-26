@@ -1,0 +1,127 @@
+{
+  "name": "multi-table",
+  "description": "A full mini-notebook: one notebook, one page under it, two strokes — one of which was erased (deleted_at set). The erased stroke remains in the materialized mirror with deleted_at non-null; read layers filter it, the merge does not.",
+  "ops": [
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": { "name": "Sketches", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "page",
+      "pk": "00000000000000000000000PG1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 2,
+      "wall_ts": 1010,
+      "cols": { "notebook_id": "00000000000000000000000NB1", "sort_order": 0, "created_at": 1010, "deleted_at": null }
+    },
+    {
+      "table": "stroke",
+      "pk": "00000000000000000000000ST1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 3,
+      "wall_ts": 1020,
+      "cols": {
+        "page_id": "00000000000000000000000PG1",
+        "color": 4278190080,
+        "pen_width_min": 2,
+        "pen_width_max": 6,
+        "points": "CgAAABQAAACAAAAAAAAAAAUAAAALAAAAFgAAAIIAAAAAAAAACQAAAA==",
+        "z": 0,
+        "created_at": 1020,
+        "deleted_at": null
+      }
+    },
+    {
+      "table": "stroke",
+      "pk": "00000000000000000000000ST2",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 4,
+      "wall_ts": 1030,
+      "cols": {
+        "page_id": "00000000000000000000000PG1",
+        "color": 4278190080,
+        "pen_width_min": 2,
+        "pen_width_max": 6,
+        "points": "MgAAADwAAADIAAAAAAAAAAEAAAA=",
+        "z": 1,
+        "created_at": 1030,
+        "deleted_at": null
+      }
+    },
+    {
+      "table": "stroke",
+      "pk": "00000000000000000000000ST2",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 5,
+      "wall_ts": 1040,
+      "cols": {
+        "page_id": "00000000000000000000000PG1",
+        "color": 4278190080,
+        "pen_width_min": 2,
+        "pen_width_max": 6,
+        "points": "MgAAADwAAADIAAAAAAAAAAEAAAA=",
+        "z": 1,
+        "created_at": 1030,
+        "deleted_at": 1040
+      }
+    }
+  ],
+  "expected_state": {
+    "notebook": [
+      {
+        "pk": "00000000000000000000000NB1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 1,
+        "wall_ts": 1000,
+        "cols": { "name": "Sketches", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      }
+    ],
+    "page": [
+      {
+        "pk": "00000000000000000000000PG1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 2,
+        "wall_ts": 1010,
+        "cols": { "notebook_id": "00000000000000000000000NB1", "sort_order": 0, "created_at": 1010, "deleted_at": null }
+      }
+    ],
+    "stroke": [
+      {
+        "pk": "00000000000000000000000ST1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 3,
+        "wall_ts": 1020,
+        "cols": {
+          "page_id": "00000000000000000000000PG1",
+          "color": 4278190080,
+          "pen_width_min": 2,
+          "pen_width_max": 6,
+          "points": "CgAAABQAAACAAAAAAAAAAAUAAAALAAAAFgAAAIIAAAAAAAAACQAAAA==",
+          "z": 0,
+          "created_at": 1020,
+          "deleted_at": null
+        }
+      },
+      {
+        "pk": "00000000000000000000000ST2",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 5,
+        "wall_ts": 1040,
+        "cols": {
+          "page_id": "00000000000000000000000PG1",
+          "color": 4278190080,
+          "pen_width_min": 2,
+          "pen_width_max": 6,
+          "points": "MgAAADwAAADIAAAAAAAAAAEAAAA=",
+          "z": 1,
+          "created_at": 1030,
+          "deleted_at": 1040
+        }
+      }
+    ]
+  }
+}
