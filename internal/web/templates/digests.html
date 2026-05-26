@@ -1,0 +1,73 @@
+<!-- Digests Tab -->
+<div id="digests" class="tab-content active">
+  {{if .digestsError}}
+    <div class="card" style="border-color: var(--status-text-failed);">
+        <p class="text-danger">{{.digestsError}}</p>
+    </div>
+  {{else}}
+    <div class="toolbar">
+      <span class="text-small">{{.digestsTotal}} digests</span>
+      <div class="flex-spacer"></div>
+      {{if .digestTagFilter}}
+      <span class="text-small">Tag: <strong>{{.digestTagFilter}}</strong></span>
+      <a href="/digests{{if .digestGroupFilter}}?group={{.digestGroupFilter | urlquery}}{{end}}"
+         hx-get="/digests{{if .digestGroupFilter}}?group={{.digestGroupFilter | urlquery}}{{end}}"
+         hx-target="#main-content" hx-push-url="true" class="pill">✕ clear tag</a>
+      {{end}}
+    </div>
+
+    {{if .digestGroups}}
+    <div class="toolbar" style="flex-wrap: wrap; gap: 0.35rem;">
+      <span class="text-small" style="margin-right:0.25rem;">Groups:</span>
+      <a href="/digests{{if .digestTagFilter}}?tag={{.digestTagFilter | urlquery}}{{end}}"
+         hx-get="/digests{{if .digestTagFilter}}?tag={{.digestTagFilter | urlquery}}{{end}}"
+         hx-target="#main-content" hx-push-url="true"
+         class="pill{{if not .digestGroupFilter}} active{{end}}">All</a>
+      {{range .digestGroups}}
+      <a href="/digests?group={{.UID | urlquery}}{{if $.digestTagFilter}}&tag={{$.digestTagFilter | urlquery}}{{end}}"
+         hx-get="/digests?group={{.UID | urlquery}}{{if $.digestTagFilter}}&tag={{$.digestTagFilter | urlquery}}{{end}}"
+         hx-target="#main-content" hx-push-url="true"
+         class="pill{{if eq $.digestGroupFilter .UID}} active{{end}}">{{if .Name}}{{.Name}}{{else}}(unnamed){{end}}</a>
+      {{end}}
+    </div>
+    {{end}}
+
+    <div class="card">
+    <div class="table-container">
+    <table class="task-table">
+      <thead>
+        <tr>
+          <th>Digest</th>
+          <th style="width:10rem;">Group</th>
+          <th style="width:5rem;">Source</th>
+          <th style="width:12rem;">Tags</th>
+          <th style="width:9rem;">Created</th>
+          <th style="width:9rem;">Modified</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{if .digests}}
+        {{range .digests}}
+        {{template "_digest_row" .}}
+        {{end}}
+        {{else}}
+        <tr><td colspan="6" style="text-align:center; padding:1rem;">No digests found.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+    </div>
+    </div>
+
+    {{if gt .filesTotalPages 1}}
+    <div style="margin-top:0.75rem; display:flex; align-items:center; gap:0.5rem; font-size:0.9rem;">
+      {{if gt .filesPage 1}}
+        <button class="btn-small" hx-get="/digests?page={{sub .filesPage 1}}{{if .digestGroupFilter}}&group={{.digestGroupFilter | urlquery}}{{end}}{{if .digestTagFilter}}&tag={{.digestTagFilter | urlquery}}{{end}}" hx-target="#main-content" hx-push-url="true">◂ Prev</button>
+      {{end}}
+      <span>Page {{.filesPage}} of {{.filesTotalPages}}</span>
+      {{if lt .filesPage .filesTotalPages}}
+        <button class="btn-small" hx-get="/digests?page={{add .filesPage 1}}{{if .digestGroupFilter}}&group={{.digestGroupFilter | urlquery}}{{end}}{{if .digestTagFilter}}&tag={{.digestTagFilter | urlquery}}{{end}}" hx-target="#main-content" hx-push-url="true">Next ▸</button>
+      {{end}}
+    </div>
+    {{end}}
+  {{end}}
+</div>

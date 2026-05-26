@@ -28,16 +28,9 @@ func Backfill(ctx context.Context, store *Store, embedder Embedder, model string
 			return embedded, ctx.Err()
 		}
 
-		vec, err := embedder.Embed(ctx, p.BodyText)
-		if err != nil {
-			logger.Warn("backfill embed failed", "path", p.NotePath, "page", p.Page, "err", err)
-			continue
+		if n := EmbedAndStorePage(ctx, embedder, store, p.NotePath, p.Page, p.BodyText, model, logger); n > 0 {
+			embedded++
 		}
-		if err := store.Save(ctx, p.NotePath, p.Page, vec, model); err != nil {
-			logger.Warn("backfill save failed", "path", p.NotePath, "page", p.Page, "err", err)
-			continue
-		}
-		embedded++
 	}
 
 	logger.Info("embedding backfill complete", "embedded", embedded, "total", len(pages))

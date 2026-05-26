@@ -79,33 +79,73 @@ func (s *searchService) HasEmbeddingPipeline() bool {
 	return s.embedder != nil && s.embedStore != nil
 }
 
-func (s *searchService) Search(ctx context.Context, query, folder string) ([]SearchResult, error) {
-	var results []SearchResult
+func (s *searchService) Search(ctx context.Context, query, folder string, sources []string) ([]SearchResult, error) {
+	if s.retriever == nil {
+		return nil, nil
+	}
+	// Hybrid retrieval (FTS5 + vector RRF) with the source-type facet. Going
+	// through the retriever (rather than the bare FTS index) means digests and
+	// ForestNote pages are searchable here exactly as they are in chat, and each
+	// result carries its source type for the UI facet/badge.
+	rr, err := s.retriever.Search(ctx, rag.SearchRequest{
+		Query:   query,
+		Folder:  folder,
+		Sources: sources,
+	})
+	if err != nil {
+		s.logger.Error("search failed", "error", err)
+		return nil, err
+	}
+	results := make([]SearchResult, 0, len(rr))
+	for _, r := range rr {
+		results = append(results, SearchResult{
+			Path:       r.NotePath,
+			Page:       r.Page,
+			Title:      r.TitleText,
+			Snippet:    makeSnippet(r.BodyText, query, 240),
+			Score:      float32(r.Score),
+			SourceType: r.SourceType,
+		})
+	}
+	return results, nil
+}
 
-	// 1. Keyword Search
-	if s.searchIndex != nil {
-		kwResults, err := s.searchIndex.Search(ctx, search.SearchQuery{Text: query, Folder: folder})
-		if err != nil {
-			s.logger.Error("keyword search failed", "error", err)
-		} else {
-			for _, r := range kwResults {
-				results = append(results, SearchResult{
-					Path:    r.Path,
-					Page:    r.Page,
-					Snippet: r.Snippet,
-					Score:   float32(r.Score),
-				})
-			}
+// makeSnippet builds a short preview from body text, centered on the first
+// query-term match when present (the hybrid retriever returns full body text,
+// not an FTS snippet). Byte-based; good enough for a preview.
+func makeSnippet(body, query string, max int) string {
+	body = strings.TrimSpace(body)
+	if body == "" || len(body) <= max {
+		return body
+	}
+	lb := strings.ToLower(body)
+	idx := -1
+	for _, term := range strings.Fields(strings.ToLower(query)) {
+		if i := strings.Index(lb, term); i >= 0 {
+			idx = i
+			break
 		}
 	}
-
-	// 2. RAG Search (if enabled and no folder filter, or if we want to merge)
-	// Currently the UI keeps them somewhat separate or uses keyword by default.
-	// For a unified "SearchService", we might want to merge or prioritize.
-	// For now, let's just return keyword results if they exist, or RAG if not.
-	// This can be refined later.
-
-	return results, nil
+	if idx < 0 {
+		return strings.TrimSpace(body[:max]) + "…"
+	}
+	start := idx - max/3
+	if start < 0 {
+		start = 0
+	}
+	end := start + max
+	if end > len(body) {
+		end = len(body)
+		start = end - max
+	}
+	snip := strings.TrimSpace(body[start:end])
+	if start > 0 {
+		snip = "…" + snip
+	}
+	if end < len(body) {
+		snip = snip + "…"
+	}
+	return snip
 }
 
 func (s *searchService) Ask(ctx context.Context, question string, sessionID int) (<-chan ChatResponse, error) {

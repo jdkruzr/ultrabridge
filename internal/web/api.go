@@ -25,7 +25,8 @@ func (h *Handler) handleAPISearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	folder := r.URL.Query().Get("folder")
-	results, err := h.search.Search(r.Context(), q, folder)
+	sources := r.URL.Query()["source"] // repeated: ?source=digest&source=supernote
+	results, err := h.search.Search(r.Context(), q, folder, sources)
 	if err != nil {
 		h.logger.Error("api search failed", "err", err)
 		apiError(w, http.StatusInternalServerError, "search failed")

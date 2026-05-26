@@ -176,15 +176,19 @@ type NoteService interface {
 
 // SearchResult represents a single search match.
 type SearchResult struct {
-	Path    string `json:"path"`
-	Page    int    `json:"page"`
-	Snippet string `json:"snippet"`
-	Score   float32 `json:"score"`
+	Path       string  `json:"path"`
+	Page       int     `json:"page"`
+	Title      string  `json:"title"` // note/digest title, if any
+	Snippet    string  `json:"snippet"`
+	Score      float32 `json:"score"`
+	SourceType string  `json:"source_type"` // supernote|boox|forestnote|digest
 }
 
 // SearchService manages search and chat interactions.
 type SearchService interface {
-	Search(ctx context.Context, query, folder string) ([]SearchResult, error)
+	// Search runs hybrid (FTS5 + vector) retrieval. sources filters by source
+	// type (empty = all); see rag.Source* constants for the values.
+	Search(ctx context.Context, query, folder string, sources []string) ([]SearchResult, error)
 	
 	// Chat (SSE stream)
 	Ask(ctx context.Context, question string, sessionID int) (<-chan ChatResponse, error)
@@ -201,6 +205,34 @@ type ChatResponse struct {
 	Type    string      `json:"type"` // session, content, error
 	Content string      `json:"content,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
+}
+
+// DigestView is one digest ("summary") item for the web Digests tab.
+type DigestView struct {
+	ID             int64    `json:"id"`
+	Name           string   `json:"name"`
+	Excerpt        string   `json:"excerpt"`         // the saved Content
+	Comment        string   `json:"comment"`         // handwriting comment text
+	Tags           []string `json:"tags"`            // split from the comma-separated column
+	Group          string   `json:"group"`           // parent group name (resolved), if any
+	SourceLabel    string   `json:"source_label"`    // "Note" or "PDF"
+	HasHandwriting bool     `json:"has_handwriting"` // a .mark annotation exists
+	CreatedAt      int64    `json:"created_at"`      // millis UTC
+	ModifiedAt     int64    `json:"modified_at"`     // millis UTC
+}
+
+// DigestGroupView is a digest group/library, used for the filter pills.
+type DigestGroupView struct {
+	UID  string `json:"uid"`
+	Name string `json:"name"`
+}
+
+// DigestService is the web read surface over the digest store (Phase D2).
+// Constructed only in SPC server mode with a digest store; nil otherwise, so
+// the Digests tab and nav entry hide when no digests can exist.
+type DigestService interface {
+	ListDigests(ctx context.Context, group, tag string, page, perPage int) ([]DigestView, int, error)
+	ListGroups(ctx context.Context) ([]DigestGroupView, error)
 }
 
 // ConfigService manages system configuration and sources.

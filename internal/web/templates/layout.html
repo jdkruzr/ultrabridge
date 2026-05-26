@@ -121,6 +121,20 @@
             color: white;
         }
 
+        /* Device-group headings + indented sub-items in the sidebar. */
+        .nav-group-label {
+            padding: 0.6rem 1rem 0.15rem;
+            font-size: 0.7rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+        .nav-item.nav-sub {
+            padding-left: 1.75rem;
+            font-weight: 400;
+        }
+
         /* Main Content */
         .content {
             flex: 1;
@@ -273,7 +287,11 @@
         .badge-unsupported { background: var(--bg-color); color: var(--text-muted); font-style: italic; }
         .badge-boox { background: #6b7280; color: white; margin-left: 0.5rem; }
         .badge-sn { background: #3b82f6; color: white; margin-left: 0.5rem; }
-        
+        .badge-fn { background: #16a34a; color: white; margin-left: 0.5rem; }
+        .badge-digest { background: #9333ea; color: white; margin-left: 0.5rem; }
+        .search-facet { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-secondary); }
+        .search-facet label { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; }
+
         .device-info { font-size: 0.75rem; color: var(--text-muted); }
 
         /* Toolbar & Controls */
@@ -452,29 +470,43 @@
         <nav class="sidebar">
             <h1><a href="/" hx-get="/" hx-target="#main-content" hx-push-url="true">UltraBridge</a></h1>
             <div class="nav-links">
-                <a class="nav-item {{if eq .activeTab "tasks"}}active{{end}}" 
+                <a class="nav-item {{if eq .activeTab "tasks"}}active{{end}}"
                    href="/" hx-get="/" hx-target="#main-content" hx-push-url="true">Tasks</a>
+
+                {{/* Supernote group: Files + Digests (digests are Supernote-only). */}}
+                {{if or .HasSupernoteSource .HasDigests}}
+                <div class="nav-group-label">Supernote</div>
                 {{if .HasSupernoteSource}}
-                <a class="nav-item {{if eq .activeTab "files-supernote"}}active{{end}}"
-                   href="/files/supernote" hx-get="/files/supernote" hx-target="#main-content" hx-push-url="true">Supernote Files</a>
+                <a class="nav-item nav-sub {{if eq .activeTab "files-supernote"}}active{{end}}"
+                   href="/files/supernote" hx-get="/files/supernote" hx-target="#main-content" hx-push-url="true">Files</a>
                 {{end}}
+                {{if .HasDigests}}
+                <a class="nav-item nav-sub {{if eq .activeTab "digests"}}active{{end}}"
+                   href="/digests" hx-get="/digests" hx-target="#main-content" hx-push-url="true">Digests</a>
+                {{end}}
+                {{end}}
+
+                {{/* Boox group: Files. */}}
                 {{if .HasBooxSource}}
-                <a class="nav-item {{if eq .activeTab "files-boox"}}active{{end}}"
-                   href="/files/boox" hx-get="/files/boox" hx-target="#main-content" hx-push-url="true">Boox Files</a>
+                <div class="nav-group-label">Boox</div>
+                <a class="nav-item nav-sub {{if eq .activeTab "files-boox"}}active{{end}}"
+                   href="/files/boox" hx-get="/files/boox" hx-target="#main-content" hx-push-url="true">Files</a>
                 {{end}}
-                {{if and (not .HasSupernoteSource) (not .HasBooxSource)}}
+
+                {{if and (not .HasSupernoteSource) (not .HasBooxSource) (not .HasDigests)}}
                 <a class="nav-item {{if eq .activeTab "files"}}active{{end}}"
                    href="/files" hx-get="/files" hx-target="#main-content" hx-push-url="true">Files</a>
                 {{end}}
-                <a class="nav-item {{if eq .activeTab "search"}}active{{end}}" 
+
+                <a class="nav-item {{if eq .activeTab "search"}}active{{end}}"
                    href="/search" hx-get="/search" hx-target="#main-content" hx-push-url="true">Search</a>
                 {{if .chatEnabled}}
-                <a class="nav-item {{if eq .activeTab "chat"}}active{{end}}" 
+                <a class="nav-item {{if eq .activeTab "chat"}}active{{end}}"
                    href="/chat" hx-get="/chat" hx-target="#main-content" hx-push-url="true">Chat</a>
                 {{end}}
-                <a class="nav-item {{if eq .activeTab "logs"}}active{{end}}" 
+                <a class="nav-item {{if eq .activeTab "logs"}}active{{end}}"
                    href="/logs" hx-get="/logs" hx-target="#main-content" hx-push-url="true">Logs</a>
-                <a class="nav-item {{if eq .activeTab "settings"}}active{{end}}" 
+                <a class="nav-item {{if eq .activeTab "settings"}}active{{end}}"
                    href="/settings" hx-get="/settings" hx-target="#main-content" hx-push-url="true">Settings</a>
             </div>
         </nav>

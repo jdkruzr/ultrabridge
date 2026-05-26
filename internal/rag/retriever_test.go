@@ -37,9 +37,9 @@ func TestRetrieverHybridFusion(t *testing.T) {
 	embedStore := NewStore(db, slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	// Save embeddings for pages that should match via vector search
-	embedStore.Save(ctx, "note1.note", 0, mockEmbedder.vectors["machine learning algorithms"], "test-model")
-	embedStore.Save(ctx, "note1.note", 1, mockEmbedder.vectors["neural networks"], "test-model")
-	embedStore.Save(ctx, "boox1.note", 0, mockEmbedder.vectors["deep learning"], "test-model")
+	embedStore.Save(ctx, "note1.note", 0, 0, mockEmbedder.vectors["machine learning algorithms"], "test-model")
+	embedStore.Save(ctx, "note1.note", 1, 0, mockEmbedder.vectors["neural networks"], "test-model")
+	embedStore.Save(ctx, "boox1.note", 0, 0, mockEmbedder.vectors["deep learning"], "test-model")
 
 	searchIndex := search.New(db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -115,9 +115,9 @@ func TestRetrieverFolderFilter(t *testing.T) {
 	}
 
 	// Save embeddings for all pages to enable vector search
-	embedStore.Save(ctx, "/notes/Work/proj1.note", 0, mockEmbedder.vectors["project details"], "test-model")
-	embedStore.Save(ctx, "/notes/Personal/diary.note", 0, mockEmbedder.vectors["personal thoughts"], "test-model")
-	embedStore.Save(ctx, "/notes/Work/proj2.note", 0, mockEmbedder.vectors["project details"], "test-model")
+	embedStore.Save(ctx, "/notes/Work/proj1.note", 0, 0, mockEmbedder.vectors["project details"], "test-model")
+	embedStore.Save(ctx, "/notes/Personal/diary.note", 0, 0, mockEmbedder.vectors["personal thoughts"], "test-model")
+	embedStore.Save(ctx, "/notes/Work/proj2.note", 0, 0, mockEmbedder.vectors["project details"], "test-model")
 
 	retriever := NewRetriever(db, searchIndex, embedStore, mockEmbedder, logger)
 
@@ -409,6 +409,69 @@ func TestRetrieverNoEmbedder(t *testing.T) {
 
 	if len(results) == 0 {
 		t.Fatalf("Expected FTS5-only results with nil embedder")
+	}
+}
+
+// TestRetrieverSourceFilter verifies SourceType classification (by path
+// namespace + table joins) and the Sources facet filter (post-merge).
+func TestRetrieverSourceFilter(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	const kw = "alpha"
+	// One indexed doc per source, all matching the same keyword.
+	insertTestNote(t, db, "digest://uid-1", 0, "Digest One", "alpha digest excerpt")
+	insertTestNote(t, db, "forestnote://nb/pg-1", 0, "", "alpha forestnote page")
+	insertBooxNote(t, db, "/notes/boox.note", "Palma2", "Work", "alpha boox content")
+	insertSupernoteNote(t, db, "/notes/sn.note", "Note/Work/sn.note", "alpha supernote content")
+
+	searchIndex := search.New(db)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	retriever := NewRetriever(db, searchIndex, NewStore(db, logger), nil, logger)
+
+	// No filter → all four, each correctly classified.
+	all, err := retriever.Search(ctx, SearchRequest{Query: kw, Limit: 20})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got := map[string]string{} // path -> sourceType
+	for _, r := range all {
+		got[r.NotePath] = r.SourceType
+	}
+	want := map[string]string{
+		"digest://uid-1":       SourceDigest,
+		"forestnote://nb/pg-1": SourceForestNote,
+		"/notes/boox.note":     SourceBoox,
+		"/notes/sn.note":       SourceSupernote,
+	}
+	for path, st := range want {
+		if got[path] != st {
+			t.Errorf("path %s classified as %q, want %q", path, got[path], st)
+		}
+	}
+
+	// Filter to digests only.
+	digestsOnly, err := retriever.Search(ctx, SearchRequest{Query: kw, Sources: []string{SourceDigest}, Limit: 20})
+	if err != nil {
+		t.Fatalf("search digests: %v", err)
+	}
+	if len(digestsOnly) != 1 || digestsOnly[0].NotePath != "digest://uid-1" {
+		t.Errorf("digest filter returned %d results: %+v", len(digestsOnly), digestsOnly)
+	}
+
+	// Filter to two sources.
+	two, err := retriever.Search(ctx, SearchRequest{Query: kw, Sources: []string{SourceBoox, SourceForestNote}, Limit: 20})
+	if err != nil {
+		t.Fatalf("search two: %v", err)
+	}
+	for _, r := range two {
+		if r.SourceType != SourceBoox && r.SourceType != SourceForestNote {
+			t.Errorf("unexpected source %q in two-source filter", r.SourceType)
+		}
+	}
+	if len(two) != 2 {
+		t.Errorf("two-source filter returned %d results, want 2", len(two))
 	}
 }
 

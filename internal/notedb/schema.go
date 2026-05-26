@@ -114,10 +114,11 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS note_embeddings (
 			note_path  TEXT NOT NULL,
 			page       INTEGER NOT NULL,
+			chunk      INTEGER NOT NULL DEFAULT 0,
 			embedding  BLOB NOT NULL,
 			model      TEXT NOT NULL,
 			created_at INTEGER NOT NULL,
-			UNIQUE(note_path, page)
+			UNIQUE(note_path, page, chunk)
 		)`,
 		`CREATE TABLE IF NOT EXISTS chat_sessions (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,6 +147,37 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if count == 0 {
 		if _, err := db.ExecContext(ctx, `ALTER TABLE jobs ADD COLUMN requeue_after INTEGER`); err != nil {
 			return fmt.Errorf("add requeue_after column: %w", err)
+		}
+	}
+
+	// note_embeddings chunk support: pre-chunking the table was UNIQUE(note_path,
+	// page) with one vector per page. Long pages now embed as multiple chunks, so
+	// widen the key to (note_path,page,chunk). SQLite can't drop a table-level
+	// UNIQUE via ALTER, so rebuild the table (existing rows become chunk 0). The
+	// CREATE above already produces the new shape on a fresh DB, so this only
+	// fires for pre-existing old-shape tables.
+	var hasChunk int
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('note_embeddings') WHERE name='chunk'`).Scan(&hasChunk)
+	if hasChunk == 0 {
+		rebuild := []string{
+			`ALTER TABLE note_embeddings RENAME TO note_embeddings_old`,
+			`CREATE TABLE note_embeddings (
+				note_path  TEXT NOT NULL,
+				page       INTEGER NOT NULL,
+				chunk      INTEGER NOT NULL DEFAULT 0,
+				embedding  BLOB NOT NULL,
+				model      TEXT NOT NULL,
+				created_at INTEGER NOT NULL,
+				UNIQUE(note_path, page, chunk)
+			)`,
+			`INSERT INTO note_embeddings (note_path, page, chunk, embedding, model, created_at)
+				SELECT note_path, page, 0, embedding, model, created_at FROM note_embeddings_old`,
+			`DROP TABLE note_embeddings_old`,
+		}
+		for i, stmt := range rebuild {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("note_embeddings chunk migration %d: %w", i, err)
+			}
 		}
 	}
 

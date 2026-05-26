@@ -51,7 +51,8 @@ type Handler struct {
 	notes    service.NoteService
 	search   service.SearchService
 	config   service.ConfigService
-	
+	digests  service.DigestService // optional; nil when no digest store (non-server mode)
+
 	noteDB          *sql.DB
 	notesPathPrefix string
 	booxNotesPath   string
@@ -254,6 +255,7 @@ func NewHandler(
 	h.mux.HandleFunc("GET /files", h.handleFiles)
 	h.mux.HandleFunc("GET /files/supernote", h.handleFilesSupernote)
 	h.mux.HandleFunc("GET /files/boox", h.handleFilesBoox)
+	h.mux.HandleFunc("GET /digests", h.handleDigests)
 	h.mux.HandleFunc("GET /search", h.handleSearch)
 	h.mux.HandleFunc("POST /files/queue", h.handleFilesQueue)
 	h.mux.HandleFunc("POST /files/skip", h.handleFilesSkip)
@@ -322,6 +324,13 @@ func NewHandler(
 	h.mux.Handle("GET /erb.png", fileServer)
 
 	return h
+}
+
+// SetDigestService wires the optional Digests read surface (Phase D2). Set from
+// main only in SPC server mode; when unset the Digests tab and nav entry hide.
+// A setter (not a constructor arg) keeps the many NewHandler call sites stable.
+func (h *Handler) SetDigestService(d service.DigestService) {
+	h.digests = d
 }
 
 func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, name string, data map[string]interface{}) {
@@ -520,12 +529,65 @@ func (h *Handler) handleFilesBoox(w http.ResponseWriter, r *http.Request) {
 	h.renderTemplate(w, r, "files_boox", data)
 }
 
+// handleDigests renders the Digests tab: the Supernote "summary" excerpts
+// synced from the device. Flat list with optional group/tag filter pills.
+func (h *Handler) handleDigests(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	data := map[string]interface{}{"activeTab": "digests"}
+	if h.digests == nil {
+		data["digestsError"] = "Digests sync is only available when the UB-as-SPC device sync server is enabled."
+		h.renderTemplate(w, r, "digests", data)
+		return
+	}
+
+	group := r.URL.Query().Get("group")
+	tag := r.URL.Query().Get("tag")
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if perPage <= 0 {
+		perPage = 25
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	rows, total, err := h.digests.ListDigests(ctx, group, tag, page, perPage)
+	if err != nil {
+		h.logger.Error("list digests", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	groups, err := h.digests.ListGroups(ctx)
+	if err != nil {
+		// Non-fatal: the group-filter pills are a convenience.
+		h.logger.Error("list digest groups", "error", err)
+	}
+	data["digests"], data["digestsTotal"] = rows, total
+	data["digestGroups"], data["digestGroupFilter"] = groups, group
+	data["digestTagFilter"] = tag
+	data["filesPage"], data["filesPerPage"] = page, perPage
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	data["filesTotalPages"] = totalPages
+	h.renderTemplate(w, r, "digests", data)
+}
+
 func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{"activeTab": "search"}
 	query, folder := strings.TrimSpace(r.URL.Query().Get("q")), strings.TrimSpace(r.URL.Query().Get("folder"))
+	sources := r.URL.Query()["source"] // repeated checkbox params; empty = all
 	data["searchQuery"], data["searchFolder"] = query, folder
+	// Echo selections back so the facet checkboxes stay checked across submits.
+	selected := map[string]bool{}
+	for _, s := range sources {
+		selected[s] = true
+	}
+	data["searchSources"] = selected
 	if query != "" {
-		results, _ := h.search.Search(r.Context(), query, folder)
+		results, _ := h.search.Search(r.Context(), query, folder, sources)
 		data["searchResults"] = results
 	}
 	h.renderTemplate(w, r, "search", data)
@@ -712,8 +774,14 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		// UB-as-SPC device-sync server config. Every field is restart-required
 		// (the server is constructed once at startup), so UpdateConfig below
 		// flags the restart banner automatically.
-		if mode := r.FormValue("spc_mode"); mode == "client" || mode == "server" {
-			cfg.SPCMode = mode
+		// "Enable device sync server" checkbox: present only when checked.
+		// (Internally still the SPCMode string: server = on, client = off — the
+		// legacy SPC client was removed in PR #16, so "client" now just means
+		// the SPC server is disabled.)
+		if r.FormValue("spc_enabled") != "" {
+			cfg.SPCMode = "server"
+		} else {
+			cfg.SPCMode = "client"
 		}
 		cfg.SPCListenAddr = r.FormValue("spc_listen_addr")
 		cfg.SPCFileRoot = r.FormValue("spc_file_root")
@@ -1317,6 +1385,15 @@ func (h *Handler) baseTemplateData(ctx context.Context) map[string]interface{} {
 	if h.notes != nil {
 		data["HasSupernoteSource"] = h.notes.HasSupernoteSource()
 		data["HasBooxSource"] = h.notes.HasBooxSource()
+	}
+	// Source-type flags for the search facet and the device-grouped nav.
+	// Digests are available whenever the digest store is wired (server mode);
+	// ForestNote when device sync is enabled (error-tolerant on an unset key).
+	data["HasDigests"] = h.digests != nil
+	if h.noteDB != nil {
+		if v, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeySyncEnabled); strings.EqualFold(v, "true") || v == "1" {
+			data["HasForestNote"] = true
+		}
 	}
 	return data
 }

@@ -206,16 +206,12 @@
       <input type="hidden" name="section" value="ub-spc">
 
       <div class="form-group">
-        <label for="spc-mode">Mode</label>
-        <p class="device-info" style="margin-bottom: 0.5rem;">
-          <strong>client</strong> — no listener; UltraBridge syncs to a real SPC (default, regression-safe).
-          <strong>server</strong> — UltraBridge runs the SPC server devices connect to.
-          Switching modes only takes effect after a restart.
+        <label><input type="checkbox" name="spc_enabled"{{if eq .Config.SPCMode "server"}} checked{{end}}> Enable device sync server</label>
+        <p class="device-info" style="margin-top: 0.5rem;">
+          When enabled, UltraBridge runs the Supernote Private Cloud server that devices connect to
+          (binds the listen address below). Leave it off if you don't sync a Supernote device.
+          Takes effect after a restart.
         </p>
-        <select id="spc-mode" name="spc_mode">
-          <option value="client"{{if eq .Config.SPCMode "client"}} selected{{end}}>client</option>
-          <option value="server"{{if eq .Config.SPCMode "server"}} selected{{end}}>server</option>
-        </select>
       </div>
 
       <div class="form-group">

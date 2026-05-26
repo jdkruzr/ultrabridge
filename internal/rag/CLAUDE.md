@@ -1,6 +1,32 @@
 # RAG Embedding Infrastructure
 
-Last verified: 2026-04-08
+Last verified: 2026-05-26
+
+## Chunked embedding (added 2026-05-26)
+
+The embed model (`nomic-embed-text`, CPU-only on this deployment) has a 2048-token
+context and **rejects** over-context input with HTTP 400 (it ignores `truncate`).
+So long OCR pages are split into ≤1500-char chunks (`ChunkText`) and embedded as
+multiple vectors per page — `note_embeddings` is keyed `(note_path,page,chunk)`.
+All embed call sites (Supernote/Boox workers, ForestNote syncbridge, digestindex,
+backfill) go through **`EmbedAndStorePage`**, which chunks, embeds best-effort per
+chunk, and replaces the page's vectors (preserving prior vectors if every chunk
+fails, e.g. Ollama down). The retriever dedups chunks to the best-scoring one per
+`(path,page)` so many-chunk pages aren't over-weighted in RRF. The embed request
+timeout is generous (120s) on purpose — latency is a non-concern; see
+[[project_ollama_embedding_cpu_and_chunking]].
+
+## Source-type classification & facet (added 2026-05-26)
+
+`Retriever.Search` accepts `SearchRequest.Sources []string` and tags each
+`SearchResult.SourceType` (`supernote|boox|forestnote|digest`). Classification
+is path/table-derived — **no `source_type` column**: `digest://` and
+`forestnote://` path prefixes are unambiguous; `boox_notes`→`notes` table joins
+in `enrichResult` resolve the rest (fallback = supernote). Source/folder/device/
+date filters all prune **post-merge** (after RRF fusion), so the FTS/vector legs
+over-fetch (×4 when any filter is active) to keep a full page. Digests are
+indexed into the shared `note_content`/embeddings tables by
+`internal/digestindex`, so they ride this retriever for free.
 
 ## Purpose
 Generates and stores vector embeddings for note content, enabling semantic search.
