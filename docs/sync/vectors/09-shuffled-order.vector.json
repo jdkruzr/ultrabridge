@@ -1,0 +1,43 @@
+{
+  "name": "shuffled-order",
+  "description": "The same op set as delete-then-restore, presented out of causal order (restore, create, delete). Convergence: the merge result is independent of arrival order.",
+  "ops": [
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 3,
+      "wall_ts": 3000,
+      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 2,
+      "wall_ts": 2000,
+      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": 2000 }
+    }
+  ],
+  "expected_state": {
+    "notebook": [
+      {
+        "pk": "00000000000000000000000NB1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 3,
+        "wall_ts": 3000,
+        "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      }
+    ],
+    "page": [],
+    "stroke": []
+  }
+}

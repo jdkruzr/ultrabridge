@@ -1,0 +1,78 @@
+{
+  "name": "stroke-union",
+  "description": "Two strokes authored on two devices have distinct ULID pks, so both survive — the append-mostly union property. No same-pk collision is possible.",
+  "ops": [
+    {
+      "table": "stroke",
+      "pk": "00000000000000000000000ST1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": {
+        "page_id": "00000000000000000000000PG1",
+        "color": 4278190080,
+        "pen_width_min": 2,
+        "pen_width_max": 6,
+        "points": "CgAAABQAAACAAAAAAAAAAAUAAAALAAAAFgAAAIIAAAAAAAAACQAAAA==",
+        "z": 0,
+        "created_at": 1000,
+        "deleted_at": null
+      }
+    },
+    {
+      "table": "stroke",
+      "pk": "00000000000000000000000ST2",
+      "site_id": "0000000000000000000000000B",
+      "op_seq": 1,
+      "wall_ts": 1001,
+      "cols": {
+        "page_id": "00000000000000000000000PG1",
+        "color": 4278190080,
+        "pen_width_min": 2,
+        "pen_width_max": 6,
+        "points": "MgAAADwAAADIAAAAAAAAAAEAAAA=",
+        "z": 1,
+        "created_at": 1001,
+        "deleted_at": null
+      }
+    }
+  ],
+  "expected_state": {
+    "notebook": [],
+    "page": [],
+    "stroke": [
+      {
+        "pk": "00000000000000000000000ST1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 1,
+        "wall_ts": 1000,
+        "cols": {
+          "page_id": "00000000000000000000000PG1",
+          "color": 4278190080,
+          "pen_width_min": 2,
+          "pen_width_max": 6,
+          "points": "CgAAABQAAACAAAAAAAAAAAUAAAALAAAAFgAAAIIAAAAAAAAACQAAAA==",
+          "z": 0,
+          "created_at": 1000,
+          "deleted_at": null
+        }
+      },
+      {
+        "pk": "00000000000000000000000ST2",
+        "site_id": "0000000000000000000000000B",
+        "op_seq": 1,
+        "wall_ts": 1001,
+        "cols": {
+          "page_id": "00000000000000000000000PG1",
+          "color": 4278190080,
+          "pen_width_min": 2,
+          "pen_width_max": 6,
+          "points": "MgAAADwAAADIAAAAAAAAAAEAAAA=",
+          "z": 1,
+          "created_at": 1001,
+          "deleted_at": null
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "lww-site-id",
+  "description": "Equal wall_ts and op_seq from two devices; the greater site_id (ASCII) wins.",
+  "ops": [
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": { "name": "From A", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000B",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": { "name": "From B", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+    }
+  ],
+  "expected_state": {
+    "notebook": [
+      {
+        "pk": "00000000000000000000000NB1",
+        "site_id": "0000000000000000000000000B",
+        "op_seq": 1,
+        "wall_ts": 1000,
+        "cols": { "name": "From B", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      }
+    ],
+    "page": [],
+    "stroke": []
+  }
+}
