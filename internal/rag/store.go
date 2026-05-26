@@ -72,6 +72,27 @@ func (s *Store) Save(ctx context.Context, notePath string, page int, embedding [
 	return nil
 }
 
+// Delete removes all embeddings for a note path (every page) from the DB and the
+// in-memory cache, atomically with respect to the cache lock. Used when a synced
+// page is deleted/emptied so stale vectors stop surfacing in RAG retrieval.
+func (s *Store) Delete(ctx context.Context, notePath string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM note_embeddings WHERE note_path = ?`, notePath); err != nil {
+		return fmt.Errorf("delete embeddings: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.cache[:0]
+	for _, rec := range s.cache {
+		if rec.NotePath != notePath {
+			kept = append(kept, rec)
+		}
+	}
+	s.cache = kept
+	return nil
+}
+
 // LoadAll reads all embeddings from the database into the in-memory cache.
 // Call this on startup.
 func (s *Store) LoadAll(ctx context.Context) (int, error) {

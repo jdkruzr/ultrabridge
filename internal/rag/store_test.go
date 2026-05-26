@@ -130,6 +130,46 @@ func TestStore_SaveUpdatesCache(t *testing.T) {
 	}
 }
 
+func TestStore_Delete(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	store := NewStore(db, slog.Default())
+	ctx := context.Background()
+
+	if err := store.Save(ctx, "keep.note", 0, []float32{0.1, 0.2}, "m"); err != nil {
+		t.Fatalf("Save keep: %v", err)
+	}
+	if err := store.Save(ctx, "gone.note", 0, []float32{0.3, 0.4}, "m"); err != nil {
+		t.Fatalf("Save gone: %v", err)
+	}
+
+	if err := store.Delete(ctx, "gone.note"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	// Cache reflects the delete.
+	cached := store.AllEmbeddings()
+	if len(cached) != 1 || cached[0].NotePath != "keep.note" {
+		t.Errorf("after delete, cache = %+v, want only keep.note", cached)
+	}
+
+	// DB reflects the delete (reload from disk into a fresh cache).
+	fresh := NewStore(db, slog.Default())
+	n, err := fresh.LoadAll(ctx)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("after delete, DB has %d rows, want 1", n)
+	}
+
+	// Deleting a non-existent path is a no-op, not an error.
+	if err := store.Delete(ctx, "never.note"); err != nil {
+		t.Errorf("delete of missing path should be a no-op, got %v", err)
+	}
+}
+
 // TestStore_LoadAll verifies AC1.6:
 // LoadAll returns correct count and populates cache. AllEmbeddings() returns the loaded records.
 func TestStore_LoadAll(t *testing.T) {

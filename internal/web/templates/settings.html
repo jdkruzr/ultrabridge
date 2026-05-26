@@ -304,6 +304,12 @@
         <input id="sync-batch-limit" type="number" name="sync_batch_limit" value="{{.Config.SyncBatchLimit}}">
       </div>
 
+      <div class="form-group">
+        <label for="forestnote-ocr-prompt">OCR Prompt</label>
+        <p class="device-info" style="margin-bottom: 0.5rem;">Prompt sent to the vision model when transcribing synced ForestNote pages. Leave empty for the built-in default. Applies without restart.</p>
+        <textarea id="forestnote-ocr-prompt" name="forestnote_ocr_prompt" rows="3">{{.ForestNoteOCRPrompt}}</textarea>
+      </div>
+
       <button type="submit" class="btn-small">Save Sync Settings</button>
     </form>
   </div>

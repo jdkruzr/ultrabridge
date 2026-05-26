@@ -106,13 +106,20 @@ func (fakeEmbedder) Embed(context.Context, string) ([]float32, error) {
 }
 
 type fakeEmbedStore struct {
-	mu    sync.Mutex
-	saved []string // paths
+	mu      sync.Mutex
+	saved   []string // paths
+	deleted []string // paths
 }
 
 func (f *fakeEmbedStore) Save(_ context.Context, path string, _ int, _ []float32, _ string) error {
 	f.mu.Lock()
 	f.saved = append(f.saved, path)
+	f.mu.Unlock()
+	return nil
+}
+func (f *fakeEmbedStore) Delete(_ context.Context, path string) error {
+	f.mu.Lock()
+	f.deleted = append(f.deleted, path)
 	f.mu.Unlock()
 	return nil
 }
@@ -153,7 +160,8 @@ func TestProcessPage_DeletedPageSkipped(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 	fi := &fakeIndexer{}
-	b := New(s, Deps{Indexer: fi, OCR: fakeOCR{text: "x"}}, nil)
+	fe := &fakeEmbedStore{}
+	b := New(s, Deps{Indexer: fi, OCR: fakeOCR{text: "x"}, Embedder: fakeEmbedder{}, EmbedStore: fe}, nil)
 	b.processPage(context.Background(), pg1)
 	if fi.count() != 0 {
 		t.Errorf("deleted page should not be indexed, got %d calls", fi.count())
@@ -161,6 +169,9 @@ func TestProcessPage_DeletedPageSkipped(t *testing.T) {
 	want := "forestnote://" + nb1 + "/" + pg1
 	if fi.delCount() != 1 || fi.deleted[0] != want {
 		t.Errorf("deleted page should drop its index entry %q, got %v", want, fi.deleted)
+	}
+	if len(fe.deleted) != 1 || fe.deleted[0] != want {
+		t.Errorf("deleted page should drop its embedding %q, got %v", want, fe.deleted)
 	}
 }
 

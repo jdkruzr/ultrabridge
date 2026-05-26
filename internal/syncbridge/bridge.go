@@ -36,6 +36,7 @@ type Embedder interface {
 }
 type EmbedStore interface {
 	Save(ctx context.Context, notePath string, page int, embedding []float32, model string) error
+	Delete(ctx context.Context, notePath string) error
 }
 
 // Deps bundles the pipeline collaborators. Any may be nil: a nil OCR renders +
@@ -126,11 +127,11 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 	path := "forestnote://" + notebookID + "/" + pagePK
 
 	if !live {
-		// Deleted/missing page → drop any prior index entry so search stops
-		// returning it. (notebookID is still the deleted row's, so the path
-		// matches what was indexed; a missing page yields an empty notebook id
-		// and a harmless no-op delete.)
-		b.deleteIndex(ctx, pagePK, path)
+		// Deleted/missing page → drop any prior index + embedding so neither search
+		// nor RAG returns it. (notebookID is still the deleted row's, so the path
+		// matches what was indexed; a missing page yields an empty notebook id and
+		// a harmless no-op delete.)
+		b.dropPage(ctx, pagePK, path)
 		return
 	}
 
@@ -140,8 +141,8 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 		return
 	}
 	if len(strokes) == 0 {
-		// All strokes erased → the page is now blank; drop it from the index.
-		b.deleteIndex(ctx, pagePK, path)
+		// All strokes erased → the page is now blank; drop it.
+		b.dropPage(ctx, pagePK, path)
 		return
 	}
 
@@ -186,15 +187,18 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 	}
 }
 
-// deleteIndex drops a page's FTS index entry (best-effort). Embeddings are not
-// removed (the EmbedStore interface has no delete) — a noted follow-up; stale
-// embeddings affect only RAG recall, not keyword search.
-func (b *Bridge) deleteIndex(ctx context.Context, pagePK, path string) {
-	if b.deps.Indexer == nil {
-		return
+// dropPage removes a page from the search index and the embedding store
+// (best-effort) so neither keyword search nor RAG returns deleted content.
+func (b *Bridge) dropPage(ctx context.Context, pagePK, path string) {
+	if b.deps.Indexer != nil {
+		if err := b.deps.Indexer.Delete(ctx, path); err != nil {
+			b.logger.Warn("syncbridge: index delete failed", "page", pagePK, "err", err)
+		}
 	}
-	if err := b.deps.Indexer.Delete(ctx, path); err != nil {
-		b.logger.Warn("syncbridge: index delete failed", "page", pagePK, "err", err)
+	if b.deps.EmbedStore != nil {
+		if err := b.deps.EmbedStore.Delete(ctx, path); err != nil {
+			b.logger.Warn("syncbridge: embedding delete failed", "page", pagePK, "err", err)
+		}
 	}
 }
 

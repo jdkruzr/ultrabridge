@@ -491,7 +491,16 @@ func main() {
 			// opaque forestnote:// paths (no fs writes). Runs off the /sync/v1 path.
 			// Guard concrete-pointer deps so a nil *OCRClient/*Store isn't boxed into
 			// a non-nil interface (would panic on call).
-			bdeps := syncbridge.Deps{Indexer: si, EmbedModel: cfg.OllamaEmbedModel}
+			bdeps := syncbridge.Deps{
+				Indexer:    si,
+				EmbedModel: cfg.OllamaEmbedModel,
+				// Read per page so a Settings change applies without restart (empty
+				// → the bridge's built-in default prompt).
+				OCRPrompt: func() string {
+					v, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyForestNoteOCRPrompt)
+					return v
+				},
+			}
 			if ocrClient != nil {
 				bdeps.OCR = ocrClient
 			}

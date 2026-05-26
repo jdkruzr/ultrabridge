@@ -87,6 +87,7 @@ const (
 	// These are included here for completeness but are accessed via notedb.GetSetting directly.
 	KeySNInjectEnabled     = "sn_inject_enabled"
 	KeySNOCRPrompt         = "sn_ocr_prompt"
+	KeyForestNoteOCRPrompt = "forestnote_ocr_prompt"
 	KeyBooxOCRPrompt       = "boox_ocr_prompt"
 	KeyBooxTodoEnabled     = "boox_todo_enabled"
 	KeyBooxTodoPrompt      = "boox_todo_prompt"

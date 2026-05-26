@@ -554,6 +554,8 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		// current values.
 		data["SNPipelineActive"] = h.notes != nil && h.notes.HasSupernoteSource()
 		data["BooxActive"] = h.notes != nil && h.notes.HasBooxSource()
+		fnOCRPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyForestNoteOCRPrompt)
+		data["ForestNoteOCRPrompt"] = fnOCRPrompt
 		ocrPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxOCRPrompt)
 		todoEnabled, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoEnabled)
 		todoPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoPrompt)
@@ -735,13 +737,18 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			cfg.SPCOssSecret = v
 		}
 	case "sync":
-		// ForestNote device sync. Both keys are restart-required (route + service
-		// are wired once at startup), so UpdateConfig flags the banner.
+		// SyncEnabled + SyncBatchLimit are restart-required (route + service are
+		// wired once at startup), so UpdateConfig flags the banner.
 		cfg.SyncEnabled = r.FormValue("sync_enabled") == "true"
 		if v := strings.TrimSpace(r.FormValue("sync_batch_limit")); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				cfg.SyncBatchLimit = n
 			}
+		}
+		// OCR prompt is a runtime key read per page via closure (no restart);
+		// store it directly like the Boox prompt.
+		if h.noteDB != nil {
+			_ = notedb.SetSetting(r.Context(), h.noteDB, appconfig.KeyForestNoteOCRPrompt, r.FormValue("forestnote_ocr_prompt"))
 		}
 	case "general":
 		cfg.EmbedEnabled = r.FormValue("embed_enabled") == "true"
