@@ -42,6 +42,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/spcserver/fileids"
 	"github.com/sysop/ultrabridge/internal/spcserver/notify"
 	"github.com/sysop/ultrabridge/internal/spcserver/staging"
+	"github.com/sysop/ultrabridge/internal/syncbridge"
 	"github.com/sysop/ultrabridge/internal/synchttp"
 	"github.com/sysop/ultrabridge/internal/syncstore"
 	"github.com/sysop/ultrabridge/internal/syncsvc"
@@ -481,12 +482,30 @@ func main() {
 	// ForestNote device sync (/sync/v1), gated by the SyncEnabled setting. Plain
 	// authenticated REST behind authMW — NOT the SPC Engine.IO/Socket.IO machinery.
 	// Migration is package-local + best-effort (precedent: fileids/staging/digests).
-	// The pipeline bridge (render→OCR→index→embed) is Phase 2; nil bridge = sync-only.
 	if cfg.SyncEnabled {
 		if err := syncstore.Migrate(context.Background(), noteDB); err != nil {
 			logger.Error("syncstore migration failed; device sync disabled", "err", err)
 		} else {
-			syncSvc := syncsvc.New(syncstore.New(noteDB), cfg.SyncBatchLimit, nil, logger)
+			syncStore := syncstore.New(noteDB)
+			// Pipeline bridge: synced strokes → render → OCR → index → embed, on
+			// opaque forestnote:// paths (no fs writes). Runs off the /sync/v1 path.
+			// Guard concrete-pointer deps so a nil *OCRClient/*Store isn't boxed into
+			// a non-nil interface (would panic on call).
+			bdeps := syncbridge.Deps{Indexer: si, EmbedModel: cfg.OllamaEmbedModel}
+			if ocrClient != nil {
+				bdeps.OCR = ocrClient
+			}
+			if embedder != nil {
+				bdeps.Embedder = embedder
+			}
+			if embedStore != nil {
+				bdeps.EmbedStore = embedStore
+			}
+			bridge := syncbridge.New(syncStore, bdeps, logger)
+			bridge.Start(context.Background())
+			defer bridge.Stop()
+
+			syncSvc := syncsvc.New(syncStore, cfg.SyncBatchLimit, bridge, logger)
 			mux.Handle("/sync/v1", authMW.Wrap(synchttp.New(syncSvc, synchttp.DefaultMaxBytes, logger)))
 			logger.Info("ForestNote device sync enabled", "route", "/sync/v1", "batch_limit", cfg.SyncBatchLimit)
 		}
