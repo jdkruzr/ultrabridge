@@ -1,0 +1,69 @@
+{
+  "name": "page-template",
+  "description": "page.template and template_pitch_mm are LWW columns: set then cleared (back to inherit-null) converges to the latest-keyed values.",
+  "ops": [
+    {
+      "table": "page",
+      "pk": "00000000000000000000000PG1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": {
+        "notebook_id": "00000000000000000000000NB1",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "template": null,
+        "template_pitch_mm": null
+      }
+    },
+    {
+      "table": "page",
+      "pk": "00000000000000000000000PG1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 2,
+      "wall_ts": 1010,
+      "cols": {
+        "notebook_id": "00000000000000000000000NB1",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "template": "ruled",
+        "template_pitch_mm": 5
+      }
+    },
+    {
+      "table": "page",
+      "pk": "00000000000000000000000PG1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 3,
+      "wall_ts": 1020,
+      "cols": {
+        "notebook_id": "00000000000000000000000NB1",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "template": null,
+        "template_pitch_mm": null
+      }
+    }
+  ],
+  "expected_state": {
+    "page": [
+      {
+        "pk": "00000000000000000000000PG1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 3,
+        "wall_ts": 1020,
+        "cols": {
+          "notebook_id": "00000000000000000000000NB1",
+          "sort_order": 0,
+          "created_at": 1000,
+          "deleted_at": null,
+          "template": null,
+          "template_pitch_mm": null
+        }
+      }
+    ]
+  }
+}

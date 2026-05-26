@@ -5,7 +5,7 @@ import "testing"
 // schemaHashV1 is the published v1 schema hash (docs/sync/forestnote-sync-protocol.md
 // §6). If this assertion fails, either knownCols changed (a wire-breaking schema
 // change that needs a coordinated bump) or the spec doc is stale.
-const schemaHashV1 = "0df009c588f7d4b663b82861f10565fde7776e50da738bbca2ef174b27b83cd2"
+const schemaHashV1 = "9b807dc88cd0465d171892bb17e65ad94190eda058594e207caad3368eb1f2fe"
 
 func TestSchemaHashMatchesSpec(t *testing.T) {
 	if got := SchemaHash(); got != schemaHashV1 {

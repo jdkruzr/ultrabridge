@@ -18,6 +18,7 @@ This directory is mirrored verbatim into the ForestNote repo. **Edit here; mirro
   "description": "<what property this pins down>",
   "ops": [ Op, ... ],            // fed to the merge function, in the given order
   "expected_state": {            // the materialized mirror after merging ALL ops
+    "folder":   [ Row, ... ],    // a table with no winning rows may be omitted
     "notebook": [ Row, ... ],
     "page":     [ Row, ... ],
     "stroke":   [ Row, ... ]
@@ -96,6 +97,11 @@ Kotlin, not Python.
 | `duplicate-ops` | duplicated ops converge to one state (idempotence) |
 | `unknown-columns-ignored` | unknown `cols` keys dropped on materialize (forward-compat) |
 | `multi-table` | notebook + page + strokes, one erased, full mirror incl. deleted row |
+| `folder-single` | one folder op materializes to one live root-level folder |
+| `folder-delete-restore` | `deleted_at` LWW on a folder (mirror of the notebook case) |
+| `folder-move` | `parent_folder_id` resolves by greatest key (re-parenting) |
+| `notebook-move-folder` | `folder_id` LWW (notebook moved between folders / to root) |
+| `page-template` | `template` + `template_pitch_mm` set then cleared, LWW |
 
 **Out of scope for vectors:** transport/envelope error handling, per-op `rejected` semantics,
 `accepted_through` contiguity, idempotent resend, and cursor reconciliation are *protocol*

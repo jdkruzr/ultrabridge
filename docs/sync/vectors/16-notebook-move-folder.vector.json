@@ -1,21 +1,7 @@
 {
-  "name": "shuffled-order",
-  "description": "The same op set as delete-then-restore, presented out of causal order (restore, create, delete). Convergence: the merge result is independent of arrival order.",
+  "name": "notebook-move-folder",
+  "description": "notebook.folder_id is an LWW column: moving a notebook between folders and then to root (null) converges to the latest-keyed placement.",
   "ops": [
-    {
-      "table": "notebook",
-      "pk": "00000000000000000000000NB1",
-      "site_id": "0000000000000000000000000A",
-      "op_seq": 3,
-      "wall_ts": 3000,
-      "cols": {
-        "name": "Journal",
-        "sort_order": 0,
-        "created_at": 1000,
-        "deleted_at": null,
-        "folder_id": null
-      }
-    },
     {
       "table": "notebook",
       "pk": "00000000000000000000000NB1",
@@ -27,7 +13,7 @@
         "sort_order": 0,
         "created_at": 1000,
         "deleted_at": null,
-        "folder_id": null
+        "folder_id": "0000000000000000000000FDR1"
       }
     },
     {
@@ -35,12 +21,26 @@
       "pk": "00000000000000000000000NB1",
       "site_id": "0000000000000000000000000A",
       "op_seq": 2,
-      "wall_ts": 2000,
+      "wall_ts": 1010,
       "cols": {
         "name": "Journal",
         "sort_order": 0,
         "created_at": 1000,
-        "deleted_at": 2000,
+        "deleted_at": null,
+        "folder_id": "0000000000000000000000FDR2"
+      }
+    },
+    {
+      "table": "notebook",
+      "pk": "00000000000000000000000NB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 3,
+      "wall_ts": 1020,
+      "cols": {
+        "name": "Journal",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
         "folder_id": null
       }
     }
@@ -51,7 +51,7 @@
         "pk": "00000000000000000000000NB1",
         "site_id": "0000000000000000000000000A",
         "op_seq": 3,
-        "wall_ts": 3000,
+        "wall_ts": 1020,
         "cols": {
           "name": "Journal",
           "sort_order": 0,
@@ -60,8 +60,6 @@
           "folder_id": null
         }
       }
-    ],
-    "page": [],
-    "stroke": []
+    ]
   }
 }

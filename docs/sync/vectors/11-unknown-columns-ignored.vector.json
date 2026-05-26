@@ -14,7 +14,8 @@
         "created_at": 1000,
         "deleted_at": null,
         "archived": true,
-        "future_field": "ignored"
+        "future_field": "ignored",
+        "folder_id": null
       }
     }
   ],
@@ -25,7 +26,13 @@
         "site_id": "0000000000000000000000000A",
         "op_seq": 1,
         "wall_ts": 1000,
-        "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+        "cols": {
+          "name": "Journal",
+          "sort_order": 0,
+          "created_at": 1000,
+          "deleted_at": null,
+          "folder_id": null
+        }
       }
     ],
     "page": [],

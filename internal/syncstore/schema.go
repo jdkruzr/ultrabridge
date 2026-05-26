@@ -38,25 +38,46 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			updated_at    INTEGER NOT NULL
 		)`,
 
+		// fn_folder carries the same lww_* provenance triple as the other mirror
+		// tables — uniform LWW rule, no special-casing. parent_folder_id is a plain
+		// LWW column (re-parenting resolves by greatest key); the mirror enforces no
+		// FK, so apply order is irrelevant. (spec §3.1)
+		`CREATE TABLE IF NOT EXISTS fn_folder (
+			id               TEXT PRIMARY KEY,
+			name             TEXT,
+			sort_order       INTEGER,
+			created_at       INTEGER,
+			deleted_at       INTEGER,
+			parent_folder_id TEXT,
+			lww_wall_ts      INTEGER NOT NULL,
+			lww_op_seq       INTEGER NOT NULL,
+			lww_site_id      TEXT    NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_fn_folder_parent ON fn_folder(parent_folder_id)`,
+		// New-DB column sets include folder_id (notebook) and template/
+		// template_pitch_mm (page); existing DBs get them via ensureColumn below.
 		`CREATE TABLE IF NOT EXISTS fn_notebook (
 			id          TEXT PRIMARY KEY,
 			name        TEXT,
 			sort_order  INTEGER,
 			created_at  INTEGER,
 			deleted_at  INTEGER,
+			folder_id   TEXT,
 			lww_wall_ts INTEGER NOT NULL,
 			lww_op_seq  INTEGER NOT NULL,
 			lww_site_id TEXT    NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS fn_page (
-			id          TEXT PRIMARY KEY,
-			notebook_id TEXT,
-			sort_order  INTEGER,
-			created_at  INTEGER,
-			deleted_at  INTEGER,
-			lww_wall_ts INTEGER NOT NULL,
-			lww_op_seq  INTEGER NOT NULL,
-			lww_site_id TEXT    NOT NULL
+			id                TEXT PRIMARY KEY,
+			notebook_id       TEXT,
+			sort_order        INTEGER,
+			created_at        INTEGER,
+			deleted_at        INTEGER,
+			template          TEXT,
+			template_pitch_mm INTEGER,
+			lww_wall_ts       INTEGER NOT NULL,
+			lww_op_seq        INTEGER NOT NULL,
+			lww_site_id       TEXT    NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS fn_stroke (
 			id            TEXT PRIMARY KEY,
@@ -79,6 +100,46 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		if _, err := db.ExecContext(ctx, s); err != nil {
 			return fmt.Errorf("syncstore migrate: %w", err)
 		}
+	}
+
+	// Additive v1 columns for DBs created before the folder/template amendment.
+	// CREATE TABLE IF NOT EXISTS above is a no-op on an existing table, so the new
+	// columns must be added here. Idempotent: ensureColumn skips if already present.
+	type addCol struct{ table, col, decl string }
+	for _, a := range []addCol{
+		{"fn_notebook", "folder_id", "TEXT"},
+		{"fn_page", "template", "TEXT"},
+		{"fn_page", "template_pitch_mm", "INTEGER"},
+	} {
+		if err := ensureColumn(ctx, db, a.table, a.col, a.decl); err != nil {
+			return fmt.Errorf("syncstore migrate: %w", err)
+		}
+	}
+
+	// Index on the notebook→folder edge; created after the column is guaranteed.
+	if _, err := db.ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS idx_fn_notebook_folder ON fn_notebook(folder_id)`); err != nil {
+		return fmt.Errorf("syncstore migrate: %w", err)
+	}
+	return nil
+}
+
+// ensureColumn adds col to table if it is not already present, guarded by
+// pragma_table_info so it is safe to run on every startup. SQLite has no
+// ADD COLUMN IF NOT EXISTS, hence the explicit existence check.
+func ensureColumn(ctx context.Context, db *sql.DB, table, col, decl string) error {
+	var present int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).
+		Scan(&present); err != nil {
+		return fmt.Errorf("check %s.%s: %w", table, col, err)
+	}
+	if present > 0 {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx,
+		fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, col, decl)); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, col, err)
 	}
 	return nil
 }

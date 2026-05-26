@@ -8,7 +8,13 @@
       "site_id": "0000000000000000000000000B",
       "op_seq": 99,
       "wall_ts": 4000,
-      "cols": { "name": "B high op_seq, early clock", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      "cols": {
+        "name": "B high op_seq, early clock",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "folder_id": null
+      }
     },
     {
       "table": "notebook",
@@ -16,7 +22,13 @@
       "site_id": "0000000000000000000000000A",
       "op_seq": 9,
       "wall_ts": 5000,
-      "cols": { "name": "A low op_seq, late clock", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      "cols": {
+        "name": "A low op_seq, late clock",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "folder_id": null
+      }
     }
   ],
   "expected_state": {
@@ -26,7 +38,13 @@
         "site_id": "0000000000000000000000000A",
         "op_seq": 9,
         "wall_ts": 5000,
-        "cols": { "name": "A low op_seq, late clock", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+        "cols": {
+          "name": "A low op_seq, late clock",
+          "sort_order": 0,
+          "created_at": 1000,
+          "deleted_at": null,
+          "folder_id": null
+        }
       }
     ],
     "page": [],

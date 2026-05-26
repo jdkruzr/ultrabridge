@@ -1,6 +1,6 @@
 {
   "name": "multi-table",
-  "description": "A full mini-notebook: one notebook, one page under it, two strokes — one of which was erased (deleted_at set). The erased stroke remains in the materialized mirror with deleted_at non-null; read layers filter it, the merge does not.",
+  "description": "A full mini-notebook: one notebook, one page under it, two strokes \u2014 one of which was erased (deleted_at set). The erased stroke remains in the materialized mirror with deleted_at non-null; read layers filter it, the merge does not.",
   "ops": [
     {
       "table": "notebook",
@@ -8,7 +8,13 @@
       "site_id": "0000000000000000000000000A",
       "op_seq": 1,
       "wall_ts": 1000,
-      "cols": { "name": "Sketches", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      "cols": {
+        "name": "Sketches",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "folder_id": null
+      }
     },
     {
       "table": "page",
@@ -16,7 +22,14 @@
       "site_id": "0000000000000000000000000A",
       "op_seq": 2,
       "wall_ts": 1010,
-      "cols": { "notebook_id": "00000000000000000000000NB1", "sort_order": 0, "created_at": 1010, "deleted_at": null }
+      "cols": {
+        "notebook_id": "00000000000000000000000NB1",
+        "sort_order": 0,
+        "created_at": 1010,
+        "deleted_at": null,
+        "template": null,
+        "template_pitch_mm": null
+      }
     },
     {
       "table": "stroke",
@@ -77,7 +90,13 @@
         "site_id": "0000000000000000000000000A",
         "op_seq": 1,
         "wall_ts": 1000,
-        "cols": { "name": "Sketches", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+        "cols": {
+          "name": "Sketches",
+          "sort_order": 0,
+          "created_at": 1000,
+          "deleted_at": null,
+          "folder_id": null
+        }
       }
     ],
     "page": [
@@ -86,7 +105,14 @@
         "site_id": "0000000000000000000000000A",
         "op_seq": 2,
         "wall_ts": 1010,
-        "cols": { "notebook_id": "00000000000000000000000NB1", "sort_order": 0, "created_at": 1010, "deleted_at": null }
+        "cols": {
+          "notebook_id": "00000000000000000000000NB1",
+          "sort_order": 0,
+          "created_at": 1010,
+          "deleted_at": null,
+          "template": null,
+          "template_pitch_mm": null
+        }
       }
     ],
     "stroke": [

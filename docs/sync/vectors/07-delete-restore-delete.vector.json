@@ -8,7 +8,13 @@
       "site_id": "0000000000000000000000000A",
       "op_seq": 1,
       "wall_ts": 1000,
-      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      "cols": {
+        "name": "Journal",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "folder_id": null
+      }
     },
     {
       "table": "notebook",
@@ -16,7 +22,13 @@
       "site_id": "0000000000000000000000000A",
       "op_seq": 2,
       "wall_ts": 2000,
-      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": 2000 }
+      "cols": {
+        "name": "Journal",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": 2000,
+        "folder_id": null
+      }
     },
     {
       "table": "notebook",
@@ -24,7 +36,13 @@
       "site_id": "0000000000000000000000000A",
       "op_seq": 3,
       "wall_ts": 3000,
-      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": null }
+      "cols": {
+        "name": "Journal",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "folder_id": null
+      }
     },
     {
       "table": "notebook",
@@ -32,7 +50,13 @@
       "site_id": "0000000000000000000000000A",
       "op_seq": 4,
       "wall_ts": 4000,
-      "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": 4000 }
+      "cols": {
+        "name": "Journal",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": 4000,
+        "folder_id": null
+      }
     }
   ],
   "expected_state": {
@@ -42,7 +66,13 @@
         "site_id": "0000000000000000000000000A",
         "op_seq": 4,
         "wall_ts": 4000,
-        "cols": { "name": "Journal", "sort_order": 0, "created_at": 1000, "deleted_at": 4000 }
+        "cols": {
+          "name": "Journal",
+          "sort_order": 0,
+          "created_at": 1000,
+          "deleted_at": 4000,
+          "folder_id": null
+        }
       }
     ],
     "page": [],

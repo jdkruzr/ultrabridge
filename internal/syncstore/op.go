@@ -25,13 +25,14 @@ type Op struct {
 // basis for the schema_hash (§6) — see SchemaHash. Keep alphabetical within a
 // table to match the canonical schema string.
 var knownCols = map[string][]string{
-	"notebook": {"created_at", "deleted_at", "name", "sort_order"},
-	"page":     {"created_at", "deleted_at", "notebook_id", "sort_order"},
+	"folder":   {"created_at", "deleted_at", "name", "parent_folder_id", "sort_order"},
+	"notebook": {"created_at", "deleted_at", "folder_id", "name", "sort_order"},
+	"page":     {"created_at", "deleted_at", "notebook_id", "sort_order", "template", "template_pitch_mm"},
 	"stroke":   {"color", "created_at", "deleted_at", "page_id", "pen_width_max", "pen_width_min", "points", "z"},
 }
 
 // tableOrder is the fixed table order for the canonical schema string (§6).
-var tableOrder = []string{"notebook", "page", "stroke"}
+var tableOrder = []string{"folder", "notebook", "page", "stroke"}
 
 // canonicalSchema builds the deterministic schema string (spec §6): tables in
 // fixed order, columns alphabetical within each table, `table:col,col;table:...`,

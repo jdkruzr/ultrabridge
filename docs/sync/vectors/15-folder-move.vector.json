@@ -1,53 +1,51 @@
 {
-  "name": "lww-op-seq",
-  "description": "Equal wall_ts on the same device; the greater op_seq breaks the tie.",
+  "name": "folder-move",
+  "description": "parent_folder_id is a plain LWW column: a re-parent (folder move) resolves by greatest key, so the latest parent wins.",
   "ops": [
     {
-      "table": "notebook",
-      "pk": "00000000000000000000000NB1",
+      "table": "folder",
+      "pk": "0000000000000000000000FDR1",
       "site_id": "0000000000000000000000000A",
       "op_seq": 1,
       "wall_ts": 1000,
       "cols": {
-        "name": "First",
+        "name": "Sub",
         "sort_order": 0,
         "created_at": 1000,
         "deleted_at": null,
-        "folder_id": null
+        "parent_folder_id": null
       }
     },
     {
-      "table": "notebook",
-      "pk": "00000000000000000000000NB1",
+      "table": "folder",
+      "pk": "0000000000000000000000FDR1",
       "site_id": "0000000000000000000000000A",
       "op_seq": 2,
-      "wall_ts": 1000,
+      "wall_ts": 1010,
       "cols": {
-        "name": "Second",
+        "name": "Sub",
         "sort_order": 0,
         "created_at": 1000,
         "deleted_at": null,
-        "folder_id": null
+        "parent_folder_id": "0000000000000000000000FDR2"
       }
     }
   ],
   "expected_state": {
-    "notebook": [
+    "folder": [
       {
-        "pk": "00000000000000000000000NB1",
+        "pk": "0000000000000000000000FDR1",
         "site_id": "0000000000000000000000000A",
         "op_seq": 2,
-        "wall_ts": 1000,
+        "wall_ts": 1010,
         "cols": {
-          "name": "Second",
+          "name": "Sub",
           "sort_order": 0,
           "created_at": 1000,
           "deleted_at": null,
-          "folder_id": null
+          "parent_folder_id": "0000000000000000000000FDR2"
         }
       }
-    ],
-    "page": [],
-    "stroke": []
+    ]
   }
 }

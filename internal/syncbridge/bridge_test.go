@@ -56,9 +56,9 @@ func seedPageWithStroke(t *testing.T, s *syncstore.Store) {
 	t.Helper()
 	ops := []syncstore.Op{
 		{Table: "notebook", PK: nb1, SiteID: siteA, OpSeq: 1, WallTS: 1000,
-			Cols: map[string]any{"name": "NB", "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil}},
+			Cols: map[string]any{"name": "NB", "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil, "folder_id": nil}},
 		{Table: "page", PK: pg1, SiteID: siteA, OpSeq: 2, WallTS: 1010,
-			Cols: map[string]any{"notebook_id": nb1, "sort_order": float64(0), "created_at": float64(1010), "deleted_at": nil}},
+			Cols: map[string]any{"notebook_id": nb1, "sort_order": float64(0), "created_at": float64(1010), "deleted_at": nil, "template": nil, "template_pitch_mm": nil}},
 		{Table: "stroke", PK: st1, SiteID: siteA, OpSeq: 3, WallTS: 1020,
 			Cols: map[string]any{"page_id": pg1, "color": float64(4278190080), "pen_width_min": float64(2),
 				"pen_width_max": float64(6), "points": twoPointBlob(), "z": float64(0), "created_at": float64(1020), "deleted_at": nil}},
@@ -155,7 +155,7 @@ func TestProcessPage_DeletedPageSkipped(t *testing.T) {
 	// delete the page (higher op_seq/wall_ts)
 	_, err := s.ApplyBatch(context.Background(), siteA, []syncstore.Op{
 		{Table: "page", PK: pg1, SiteID: siteA, OpSeq: 4, WallTS: 2000,
-			Cols: map[string]any{"notebook_id": nb1, "sort_order": float64(0), "created_at": float64(1010), "deleted_at": float64(2000)}},
+			Cols: map[string]any{"notebook_id": nb1, "sort_order": float64(0), "created_at": float64(1010), "deleted_at": float64(2000), "template": nil, "template_pitch_mm": nil}},
 	})
 	if err != nil {
 		t.Fatalf("delete: %v", err)
@@ -181,7 +181,7 @@ func TestProcessPage_NoStrokesSkipped(t *testing.T) {
 	// page but no strokes
 	_, err := s.ApplyBatch(context.Background(), siteA, []syncstore.Op{
 		{Table: "page", PK: pg1, SiteID: siteA, OpSeq: 1, WallTS: 1000,
-			Cols: map[string]any{"notebook_id": nb1, "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil}},
+			Cols: map[string]any{"notebook_id": nb1, "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil, "template": nil, "template_pitch_mm": nil}},
 	})
 	if err != nil {
 		t.Fatalf("seed: %v", err)

@@ -10,8 +10,10 @@ import sys
 
 # Known column sets per table (spec §3.1). cols keys outside these are dropped (§3.2).
 KNOWN = {
-    "notebook": {"name", "sort_order", "created_at", "deleted_at"},
-    "page": {"notebook_id", "sort_order", "created_at", "deleted_at"},
+    "folder": {"name", "sort_order", "created_at", "deleted_at", "parent_folder_id"},
+    "notebook": {"name", "sort_order", "created_at", "deleted_at", "folder_id"},
+    "page": {"notebook_id", "sort_order", "created_at", "deleted_at",
+             "template", "template_pitch_mm"},
     "stroke": {"page_id", "color", "pen_width_min", "pen_width_max",
                "points", "z", "created_at", "deleted_at"},
 }
@@ -47,7 +49,7 @@ def merge(ops):
         cur = winners.get(k)
         if cur is None or key(op) > key(cur):
             winners[k] = op
-    state = {"notebook": [], "page": [], "stroke": []}
+    state = {"folder": [], "notebook": [], "page": [], "stroke": []}
     for (table, _pk), op in winners.items():
         row = {kk: op[kk] for kk in ("pk", "site_id", "op_seq", "wall_ts", "cols")}
         state[table].append(row)

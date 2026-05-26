@@ -1,0 +1,65 @@
+{
+  "name": "folder-delete-restore",
+  "description": "deleted_at is an LWW column on folder, mirroring the notebook case: delete then a later-keyed restore wins, so the folder is live with the restore's provenance.",
+  "ops": [
+    {
+      "table": "folder",
+      "pk": "0000000000000000000000FDR1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": {
+        "name": "Projects",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "parent_folder_id": null
+      }
+    },
+    {
+      "table": "folder",
+      "pk": "0000000000000000000000FDR1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 2,
+      "wall_ts": 1010,
+      "cols": {
+        "name": "Projects",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": 1010,
+        "parent_folder_id": null
+      }
+    },
+    {
+      "table": "folder",
+      "pk": "0000000000000000000000FDR1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 3,
+      "wall_ts": 1020,
+      "cols": {
+        "name": "Projects",
+        "sort_order": 0,
+        "created_at": 1000,
+        "deleted_at": null,
+        "parent_folder_id": null
+      }
+    }
+  ],
+  "expected_state": {
+    "folder": [
+      {
+        "pk": "0000000000000000000000FDR1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 3,
+        "wall_ts": 1020,
+        "cols": {
+          "name": "Projects",
+          "sort_order": 0,
+          "created_at": 1000,
+          "deleted_at": null,
+          "parent_folder_id": null
+        }
+      }
+    ]
+  }
+}

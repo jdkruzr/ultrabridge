@@ -48,7 +48,7 @@ func newStack(t *testing.T) http.Handler {
 func nbOp(site string, opSeq, wall int64, name string) syncstore.Op {
 	return syncstore.Op{
 		Table: "notebook", PK: nb1, SiteID: site, OpSeq: opSeq, WallTS: wall,
-		Cols: map[string]any{"name": name, "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil},
+		Cols: map[string]any{"name": name, "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil, "folder_id": nil},
 	}
 }
 

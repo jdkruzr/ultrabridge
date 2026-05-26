@@ -209,6 +209,8 @@ func mergeRow(ctx context.Context, tx *sql.Tx, n Op) (changed bool, pagePK strin
 	}
 
 	switch n.Table {
+	case "folder":
+		err = upsertFolder(ctx, tx, n)
 	case "notebook":
 		err = upsertNotebook(ctx, tx, n)
 	case "page":
@@ -242,13 +244,48 @@ func upsertNotebook(ctx context.Context, tx *sql.Tx, n Op) error {
 	if err != nil {
 		return err
 	}
+	folderID, err := colNullString(n, "folder_id") // null = root (no folder)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO fn_notebook (id, name, sort_order, created_at, deleted_at, lww_wall_ts, lww_op_seq, lww_site_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO fn_notebook (id, name, sort_order, created_at, deleted_at, folder_id, lww_wall_ts, lww_op_seq, lww_site_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET name=excluded.name, sort_order=excluded.sort_order,
-		   created_at=excluded.created_at, deleted_at=excluded.deleted_at,
+		   created_at=excluded.created_at, deleted_at=excluded.deleted_at, folder_id=excluded.folder_id,
 		   lww_wall_ts=excluded.lww_wall_ts, lww_op_seq=excluded.lww_op_seq, lww_site_id=excluded.lww_site_id`,
-		n.PK, name, sort, created, del, n.WallTS, n.OpSeq, n.SiteID)
+		n.PK, name, sort, created, del, folderID, n.WallTS, n.OpSeq, n.SiteID)
+	return err
+}
+
+func upsertFolder(ctx context.Context, tx *sql.Tx, n Op) error {
+	name, err := colString(n, "name")
+	if err != nil {
+		return err
+	}
+	sort, err := colInt(n, "sort_order")
+	if err != nil {
+		return err
+	}
+	created, err := colInt(n, "created_at")
+	if err != nil {
+		return err
+	}
+	del, err := colNullInt(n, "deleted_at")
+	if err != nil {
+		return err
+	}
+	parent, err := colNullString(n, "parent_folder_id") // null = root-level folder
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO fn_folder (id, name, sort_order, created_at, deleted_at, parent_folder_id, lww_wall_ts, lww_op_seq, lww_site_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET name=excluded.name, sort_order=excluded.sort_order,
+		   created_at=excluded.created_at, deleted_at=excluded.deleted_at, parent_folder_id=excluded.parent_folder_id,
+		   lww_wall_ts=excluded.lww_wall_ts, lww_op_seq=excluded.lww_op_seq, lww_site_id=excluded.lww_site_id`,
+		n.PK, name, sort, created, del, parent, n.WallTS, n.OpSeq, n.SiteID)
 	return err
 }
 
@@ -269,13 +306,22 @@ func upsertPage(ctx context.Context, tx *sql.Tx, n Op) error {
 	if err != nil {
 		return err
 	}
+	template, err := colNullString(n, "template") // null = inherit Settings.defaultTemplate
+	if err != nil {
+		return err
+	}
+	pitch, err := colNullInt(n, "template_pitch_mm") // null = inherit Settings.defaultPitchMm
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO fn_page (id, notebook_id, sort_order, created_at, deleted_at, lww_wall_ts, lww_op_seq, lww_site_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO fn_page (id, notebook_id, sort_order, created_at, deleted_at, template, template_pitch_mm, lww_wall_ts, lww_op_seq, lww_site_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET notebook_id=excluded.notebook_id, sort_order=excluded.sort_order,
 		   created_at=excluded.created_at, deleted_at=excluded.deleted_at,
+		   template=excluded.template, template_pitch_mm=excluded.template_pitch_mm,
 		   lww_wall_ts=excluded.lww_wall_ts, lww_op_seq=excluded.lww_op_seq, lww_site_id=excluded.lww_site_id`,
-		n.PK, nb, sort, created, del, n.WallTS, n.OpSeq, n.SiteID)
+		n.PK, nb, sort, created, del, template, pitch, n.WallTS, n.OpSeq, n.SiteID)
 	return err
 }
 
@@ -406,6 +452,17 @@ func colString(n Op, key string) (string, error) {
 		return s, nil
 	}
 	return "", fmt.Errorf("column %q must be a string", key)
+}
+
+func colNullString(n Op, key string) (sql.NullString, error) {
+	switch v := n.Cols[key].(type) {
+	case nil:
+		return sql.NullString{}, nil
+	case string:
+		return sql.NullString{String: v, Valid: true}, nil
+	default:
+		return sql.NullString{}, fmt.Errorf("column %q must be a string or null", key)
+	}
 }
 
 func colBytes(n Op, key string) ([]byte, error) {

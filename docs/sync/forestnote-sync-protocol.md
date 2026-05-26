@@ -74,6 +74,21 @@ The identity of an op is `(site_id, op_seq)` — globally unique, the dedup key 
 Column types are fixed. **All numeric columns are `int64`** (no floats on the wire — see
 §9 open item if ForestNote stores pen widths as floats).
 
+**`folder`**
+| col | type | notes |
+|---|---|---|
+| `name` | string | |
+| `sort_order` | int64 | |
+| `created_at` | int64 ms UTC | |
+| `deleted_at` | int64 ms UTC \| null | `null` = live |
+| `parent_folder_id` | string (ULID) \| null | `null` = root-level folder |
+
+Folder hierarchy and notebook placement sync so they survive across devices. `parent_folder_id`
+is a plain LWW column — a re-parent (folder move) resolves by greatest key like any other
+column; the mirror enforces no FK, so apply order is irrelevant. (Not synced — ForestNote-local:
+recycle-bin batch grouping. Per-row `deleted_at` makes delete/restore converge; the *batch
+grouping* is a local UX concern that deliberately does not replicate.)
+
 **`notebook`**
 | col | type | notes |
 |---|---|---|
@@ -81,6 +96,7 @@ Column types are fixed. **All numeric columns are `int64`** (no floats on the wi
 | `sort_order` | int64 | |
 | `created_at` | int64 ms UTC | |
 | `deleted_at` | int64 ms UTC \| null | `null` = live |
+| `folder_id` | string (ULID) \| null | `null` = root (no folder) |
 
 **`page`**
 | col | type | notes |
@@ -89,6 +105,8 @@ Column types are fixed. **All numeric columns are `int64`** (no floats on the wi
 | `sort_order` | int64 | |
 | `created_at` | int64 ms UTC | |
 | `deleted_at` | int64 ms UTC \| null | |
+| `template` | string \| null | PageTemplate name; `null` = inherit `Settings.defaultTemplate` |
+| `template_pitch_mm` | int64 \| null | `null` = inherit `Settings.defaultPitchMm` |
 
 **`stroke`**
 | col | type | notes |
@@ -119,7 +137,7 @@ row and the merge therefore consider only the known column set. (Conformance vec
 // Request
 {
   "protocol_version": 1,
-  "schema_hash": "0df009c588f7d4b663b82861f10565fde7776e50da738bbca2ef174b27b83cd2",
+  "schema_hash": "9b807dc88cd0465d171892bb17e65ad94190eda058594e207caad3368eb1f2fe",
   "site_id": "<ULID>",
   "cursor": <int64>,     // last global seq this device has applied (0 = never synced)
   "ops": [ Op, ... ]     // pending local ops, in op_seq order
@@ -261,19 +279,19 @@ For each incoming op, in order:
 `schema_hash` is the lowercase hex SHA-256 of a canonical schema string. The string is built
 deterministically (no implementation-order dependence):
 
-- Tables in fixed order: `notebook`, `page`, `stroke`.
+- Tables in fixed order: `folder`, `notebook`, `page`, `stroke`.
 - Within each table, column names sorted **ascending ASCII** (alphabetical).
 - Format: `table:col,col,...` per table, tables joined by `;`, no spaces, no trailing newline.
 
 The v1 canonical string is:
 
 ```
-notebook:created_at,deleted_at,name,sort_order;page:created_at,deleted_at,notebook_id,sort_order;stroke:color,created_at,deleted_at,page_id,pen_width_max,pen_width_min,points,z
+folder:created_at,deleted_at,name,parent_folder_id,sort_order;notebook:created_at,deleted_at,folder_id,name,sort_order;page:created_at,deleted_at,notebook_id,sort_order,template,template_pitch_mm;stroke:color,created_at,deleted_at,page_id,pen_width_max,pen_width_min,points,z
 ```
 
 ```
 schema_hash = sha256(utf8(canonical string))
-            = 0df009c588f7d4b663b82861f10565fde7776e50da738bbca2ef174b27b83cd2
+            = 9b807dc88cd0465d171892bb17e65ad94190eda058594e207caad3368eb1f2fe
 ```
 
 The server rejects a request whose `schema_hash` it does not recognize (`409`, §7) so a
