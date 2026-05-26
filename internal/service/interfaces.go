@@ -146,8 +146,9 @@ type NoteService interface {
 	RetryFailed(ctx context.Context) error
 	DeleteNote(ctx context.Context, path string) error
 	BulkDelete(ctx context.Context, paths []string) error
-	// SetEmbedDeleter wires the RAG embedding store so deletes drop embeddings.
-	SetEmbedDeleter(d EmbedDeleter)
+	// SetEmbedIndex wires the RAG embedding store so deletes drop embeddings and
+	// moves repoint them.
+	SetEmbedIndex(d EmbedIndex)
 
 	// Source Presence
 	HasSupernoteSource() bool

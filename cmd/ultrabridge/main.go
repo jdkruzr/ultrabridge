@@ -651,10 +651,11 @@ func main() {
 			booxCachePath = filepath.Join(booxNotesPath, ".cache")
 		}
 		noteSvc := service.NewNoteService(ns, proc, booxStore, booxImporter, booxProc, si, scanner, noteDB, booxCachePath, booxNotesPath, logger)
-		// Wire the embedding store so Boox deletes drop RAG embeddings (not just
-		// FTS content). Only when embedding is enabled — a typed-nil would panic.
+		// Wire the embedding store so Boox deletes drop RAG embeddings and moves
+		// repoint them (not just FTS content). Only when embedding is enabled — a
+		// typed-nil would panic.
 		if embedStore != nil {
-			noteSvc.SetEmbedDeleter(embedStore)
+			noteSvc.SetEmbedIndex(embedStore)
 		}
 
 		// 3. Search Service

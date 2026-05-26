@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sysop/ultrabridge/internal/booxpipeline"
@@ -12,32 +14,37 @@ import (
 	"github.com/sysop/ultrabridge/internal/processor"
 )
 
-type recordingEmbedDeleter struct {
-	paths []string
-	err   error
+type recordingEmbedIndex struct {
+	deleted []string
+	renamed [][2]string
+	err     error
 }
 
-func (r *recordingEmbedDeleter) Delete(_ context.Context, path string) error {
-	r.paths = append(r.paths, path)
+func (r *recordingEmbedIndex) Delete(_ context.Context, path string) error {
+	r.deleted = append(r.deleted, path)
+	return r.err
+}
+func (r *recordingEmbedIndex) Rename(_ context.Context, oldPath, newPath string) error {
+	r.renamed = append(r.renamed, [2]string{oldPath, newPath})
 	return r.err
 }
 
 // Deleting a Boox note also drops its RAG embeddings (booxStore.DeleteNote
-// already clears FTS content). The embed deleter is called with the note path.
+// already clears FTS content). The embed index is called with the note path.
 func TestNoteService_DeleteNote_BooxDeindexesEmbeddings(t *testing.T) {
-	embed := &recordingEmbedDeleter{}
+	embed := &recordingEmbedIndex{}
 	s := &noteService{
 		booxStore:     &mockBooxStore{},
 		booxNotesPath: "/boox",
-		embedDeleter:  embed,
+		embedIndex:    embed,
 		logger:        slog.Default(),
 	}
 	const path = "/boox/notebook.note"
 	if err := s.DeleteNote(context.Background(), path); err != nil {
 		t.Fatalf("DeleteNote: %v", err)
 	}
-	if len(embed.paths) != 1 || embed.paths[0] != path {
-		t.Fatalf("embed deleter paths = %v, want [%q]", embed.paths, path)
+	if len(embed.deleted) != 1 || embed.deleted[0] != path {
+		t.Fatalf("embed deleted = %v, want [%q]", embed.deleted, path)
 	}
 }
 
@@ -46,11 +53,50 @@ func TestNoteService_DeleteNote_BooxEmbedErrorIsBestEffort(t *testing.T) {
 	s := &noteService{
 		booxStore:     &mockBooxStore{},
 		booxNotesPath: "/boox",
-		embedDeleter:  &recordingEmbedDeleter{err: errors.New("boom")},
+		embedIndex:    &recordingEmbedIndex{err: errors.New("boom")},
 		logger:        slog.Default(),
 	}
 	if err := s.DeleteNote(context.Background(), "/boox/notebook.note"); err != nil {
 		t.Fatalf("embed-delete error must not fail the delete: %v", err)
+	}
+}
+
+// Moving a Boox note repoints its RAG embeddings too (booxStore.MoveNote
+// repoints FTS + inventory but not embeddings). The embed index Rename is
+// called with the old and new paths after the move succeeds.
+func TestNoteService_MoveBooxNote_RepointsEmbeddings(t *testing.T) {
+	root := t.TempDir()
+	// computeBooxMoveDestPath expects a {model}/{type}/[folder/]{file} layout.
+	src := filepath.Join(root, "PalmaPro", "Notebooks", "notebook.note")
+	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("note"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	embed := &recordingEmbedIndex{}
+	s := &noteService{
+		booxStore:     &mockBooxStore{},
+		booxNotesPath: root,
+		embedIndex:    embed,
+		logger:        slog.Default(),
+	}
+	if err := s.MoveBooxNote(context.Background(), src, "Archive"); err != nil {
+		t.Fatalf("MoveBooxNote: %v", err)
+	}
+	if len(embed.renamed) != 1 {
+		t.Fatalf("embed renamed = %v, want exactly one rename", embed.renamed)
+	}
+	got := embed.renamed[0]
+	if got[0] != src {
+		t.Errorf("rename old = %q, want %q", got[0], src)
+	}
+	if got[1] == src || filepath.Base(got[1]) != "notebook.note" {
+		t.Errorf("rename new = %q, want a moved notebook.note path", got[1])
+	}
+	// The repoint target matches where the file actually landed.
+	if _, err := os.Stat(got[1]); err != nil {
+		t.Errorf("moved file not at repoint target %q: %v", got[1], err)
 	}
 }
 
