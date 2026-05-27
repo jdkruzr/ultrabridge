@@ -1,0 +1,18 @@
+{{define "_fn_folder_node"}}
+<li class="fn-folder">
+  <span class="fn-folder-label">📁 {{.Name}}</span>
+  {{if or .Notebooks .Children}}
+  <ul class="fn-tree">
+    {{range .Notebooks}}
+    <li class="fn-notebook">
+      <a href="/files/forestnote?notebook={{.NotebookID}}"
+         hx-get="/files/forestnote?notebook={{.NotebookID}}" hx-target="#main-content" hx-push-url="true">
+        📓 {{.Name}}</a>
+      <span class="text-small text-secondary">{{.PageCount}} pages</span>
+    </li>
+    {{end}}
+    {{range .Children}}{{template "_fn_folder_node" .}}{{end}}
+  </ul>
+  {{end}}
+</li>
+{{end}}

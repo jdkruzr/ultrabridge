@@ -1,6 +1,6 @@
 # internal/service
 
-Last verified: 2026-05-26
+Last verified: 2026-05-27
 
 ## Purpose
 
@@ -20,11 +20,18 @@ all implemented by unexported structs and constructed via
 - **`TaskService`** — task CRUD + bulk + completion. Calls
   `SyncNotifier.NotifyChange()` after every mutation so device
   pipelines can push STARTSYNC.
-- **`NoteService`** — file listing (Supernote tree, Boox catalog),
-  content, page rendering, pipeline start/stop, bulk import. Nil-
-  safe: `HasSupernoteSource()` / `HasBooxSource()` let callers
-  render empty-state placeholders instead of panicking when a
-  source isn't configured.
+- **`NoteService`** — file listing (Supernote tree, Boox catalog,
+  ForestNote folder tree), content, page rendering, pipeline
+  start/stop, bulk import. Nil-safe: `HasSupernoteSource()` /
+  `HasBooxSource()` / `HasForestNoteSource()` let callers render
+  empty-state placeholders instead of panicking when a source isn't
+  configured. ForestNote (a synced, filesystem-less source) is wired
+  via `SetForestNoteReader(ForestNoteReader)` — a narrow interface
+  over the `syncstore` mirror (`*syncstore.Store` satisfies it);
+  `ListForestNoteTree` / `ListForestNotePages` derive the inventory
+  live from the `fn_*` tables, and `RenderPage` renders a
+  `forestnote://{nb}/{page}` path on the fly via `forestrender` (no
+  disk cache).
 - **`SearchService`** — FTS5+vector hybrid search, vLLM-streamed
   chat (returns `<-chan ChatResponse` for SSE), embedding
   backfill. `HasEmbeddingPipeline()` gates the chat tab.

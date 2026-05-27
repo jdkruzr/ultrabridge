@@ -1,0 +1,58 @@
+<!-- ForestNote Files Tab -->
+<div id="files" class="tab-content active">
+  {{if .filesError}}
+    <div class="card" style="border-color: var(--status-text-failed);">
+        <p class="text-danger">{{.filesError}}</p>
+    </div>
+  {{else if .fnNotebookID}}
+    {{/* Notebook viewer: page gallery, rendered on the fly. */}}
+    <div class="toolbar">
+      <a href="/files/forestnote" hx-get="/files/forestnote" hx-target="#main-content" hx-push-url="true"
+         class="btn-small">← Notebooks</a>
+      <span class="text-bold" style="margin-left: 0.5rem;">{{.fnNotebookName}}</span>
+      <div class="flex-spacer"></div>
+      <span class="text-small">{{len .fnPages}} pages</span>
+    </div>
+    {{if .fnPages}}
+    <div class="fn-page-grid">
+      {{range .fnPages}}
+      <figure class="fn-page">
+        <img loading="lazy" src="/files/forestnote/render?path={{.Path}}" alt="Page {{add .Ordinal 1}}">
+        <figcaption class="text-small text-secondary">Page {{add .Ordinal 1}}</figcaption>
+      </figure>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="card"><p class="text-secondary">This notebook has no pages yet.</p></div>
+    {{end}}
+  {{else}}
+    {{/* Browse mode: folder tree + unfiled notebooks. */}}
+    {{if or .fnTree .fnUnfiled}}
+    <ul class="fn-tree fn-tree-root">
+      {{range .fnTree}}{{template "_fn_folder_node" .}}{{end}}
+      {{range .fnUnfiled}}
+      <li class="fn-notebook">
+        <a href="/files/forestnote?notebook={{.NotebookID}}"
+           hx-get="/files/forestnote?notebook={{.NotebookID}}" hx-target="#main-content" hx-push-url="true">
+          📓 {{.Name}}</a>
+        <span class="text-small text-secondary">{{.PageCount}} pages</span>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <div class="card"><p class="text-secondary">No ForestNote notebooks synced yet.</p></div>
+    {{end}}
+  {{end}}
+</div>
+
+<style>
+  .fn-tree { list-style: none; margin: 0; padding-left: 1.25rem; }
+  .fn-tree-root { padding-left: 0; }
+  .fn-folder-label { font-weight: 600; }
+  .fn-notebook { padding: 0.2rem 0; }
+  .fn-notebook a { margin-right: 0.5rem; }
+  .fn-page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem; }
+  .fn-page { margin: 0; border: 1px solid var(--border-color, #ccc); border-radius: 4px; padding: 0.5rem; background: var(--card-bg, #fff); }
+  .fn-page img { width: 100%; height: auto; display: block; background: #fff; }
+  .fn-page figcaption { text-align: center; margin-top: 0.25rem; }
+</style>

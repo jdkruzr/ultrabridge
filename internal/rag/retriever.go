@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sysop/ultrabridge/internal/fnpath"
 	"github.com/sysop/ultrabridge/internal/search"
 )
 
@@ -254,7 +255,7 @@ func (r *Retriever) enrichResult(ctx context.Context, notePath string, page int,
 		result.Device = "Supernote"
 		return result, nil
 	}
-	if strings.HasPrefix(notePath, "forestnote://") {
+	if fnpath.Is(notePath) {
 		result.SourceType = SourceForestNote
 		result.Device = "ForestNote"
 		return result, nil

@@ -84,6 +84,34 @@ type BooxNoteSummary struct {
 	JobStatus   string    `json:"job_status"`
 }
 
+// ForestNoteNotebook is one synced ForestNote notebook in the Files tab. Path is
+// the notebook-level URI (forestnote://{notebook_id}); pages are addressed
+// individually via ForestNotePage.Path.
+type ForestNoteNotebook struct {
+	NotebookID string `json:"notebook_id"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	FolderID   string `json:"folder_id"`
+	PageCount  int    `json:"page_count"`
+}
+
+// ForestNoteTreeNode is a folder in the ForestNote browse tree, holding its child
+// folders and the notebooks filed directly under it.
+type ForestNoteTreeNode struct {
+	FolderID  string               `json:"folder_id"`
+	Name      string               `json:"name"`
+	Children  []ForestNoteTreeNode `json:"children,omitempty"`
+	Notebooks []ForestNoteNotebook `json:"notebooks,omitempty"`
+}
+
+// ForestNotePage is one renderable page of a notebook. Path is the render target
+// (forestnote://{notebook_id}/{page_id}); Ordinal is its display position.
+type ForestNotePage struct {
+	PageID  string `json:"page_id"`
+	Path    string `json:"path"`
+	Ordinal int    `json:"ordinal"`
+}
+
 // EmbeddingJobStatus represents the background processing state.
 type EmbeddingJobStatus struct {
 	Running        bool                     `json:"running"`
@@ -149,10 +177,18 @@ type NoteService interface {
 	// SetEmbedIndex wires the RAG embedding store so deletes drop embeddings and
 	// moves repoint them.
 	SetEmbedIndex(d EmbedIndex)
+	// SetForestNoteReader wires the syncstore mirror for browsing/rendering
+	// synced ForestNote notebooks.
+	SetForestNoteReader(r ForestNoteReader)
+
+	// ForestNote (synced device source, no filesystem)
+	ListForestNoteTree(ctx context.Context) (roots []ForestNoteTreeNode, unfiled []ForestNoteNotebook, err error)
+	ListForestNotePages(ctx context.Context, notebookID string) (name string, pages []ForestNotePage, err error)
 
 	// Source Presence
 	HasSupernoteSource() bool
 	HasBooxSource() bool
+	HasForestNoteSource() bool
 	ListVersions(ctx context.Context, path string) (interface{}, error)
 	
 	// Pipeline Control (Supernote)

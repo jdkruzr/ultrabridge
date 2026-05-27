@@ -493,7 +493,14 @@
                    href="/files/boox" hx-get="/files/boox" hx-target="#main-content" hx-push-url="true">Files</a>
                 {{end}}
 
-                {{if and (not .HasSupernoteSource) (not .HasBooxSource) (not .HasDigests)}}
+                {{/* ForestNote group: Files. */}}
+                {{if .HasForestNote}}
+                <div class="nav-group-label">ForestNote</div>
+                <a class="nav-item nav-sub {{if eq .activeTab "files-forestnote"}}active{{end}}"
+                   href="/files/forestnote" hx-get="/files/forestnote" hx-target="#main-content" hx-push-url="true">Files</a>
+                {{end}}
+
+                {{if and (not .HasSupernoteSource) (not .HasBooxSource) (not .HasDigests) (not .HasForestNote)}}
                 <a class="nav-item {{if eq .activeTab "files"}}active{{end}}"
                    href="/files" hx-get="/files" hx-target="#main-content" hx-push-url="true">Files</a>
                 {{end}}

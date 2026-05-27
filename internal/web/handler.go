@@ -25,6 +25,7 @@ import (
 
 	"github.com/sysop/ultrabridge/internal/appconfig"
 	"github.com/sysop/ultrabridge/internal/digeststore"
+	"github.com/sysop/ultrabridge/internal/fnpath"
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/mcpauth"
 	"github.com/sysop/ultrabridge/internal/notedb"
@@ -256,6 +257,8 @@ func NewHandler(
 	h.mux.HandleFunc("GET /files", h.handleFiles)
 	h.mux.HandleFunc("GET /files/supernote", h.handleFilesSupernote)
 	h.mux.HandleFunc("GET /files/boox", h.handleFilesBoox)
+	h.mux.HandleFunc("GET /files/forestnote", h.handleFilesForestNote)
+	h.mux.HandleFunc("GET /files/forestnote/render", h.handleForestNoteRender)
 	h.mux.HandleFunc("GET /digests", h.handleDigests)
 	h.mux.HandleFunc("DELETE /digests/{id}", h.handleDeleteDigest)
 	h.mux.HandleFunc("GET /search", h.handleSearch)
@@ -529,6 +532,60 @@ func (h *Handler) handleFilesBoox(w http.ResponseWriter, r *http.Request) {
 		data["filesTotalPages"] = 1
 	}
 	h.renderTemplate(w, r, "files_boox", data)
+}
+
+// handleFilesForestNote renders the ForestNote Files tab: the folder tree of
+// synced notebooks, or — when ?notebook= is set — that notebook's page gallery.
+// ForestNote has no filesystem; the inventory is a live projection of the
+// syncstore mirror, and page images render on the fly (see handleForestNoteRender).
+func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	data := map[string]interface{}{"activeTab": "files-forestnote"}
+	if !h.notes.HasForestNoteSource() {
+		data["filesError"] = "No ForestNote source configured. Enable device sync in Settings."
+		h.renderTemplate(w, r, "files_forestnote", data)
+		return
+	}
+
+	if nb := r.URL.Query().Get("notebook"); nb != "" {
+		name, pages, err := h.notes.ListForestNotePages(ctx, nb)
+		if err != nil {
+			http.Error(w, "notebook not found", http.StatusNotFound)
+			return
+		}
+		data["fnNotebookID"], data["fnNotebookName"], data["fnPages"] = nb, name, pages
+		h.renderTemplate(w, r, "files_forestnote", data)
+		return
+	}
+
+	roots, unfiled, err := h.notes.ListForestNoteTree(ctx)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	data["fnTree"], data["fnUnfiled"] = roots, unfiled
+	h.renderTemplate(w, r, "files_forestnote", data)
+}
+
+// handleForestNoteRender streams a ForestNote page as JPEG, rendered on the fly
+// from the syncstore mirror. Path is forestnote://{notebook_id}/{page_id}; the
+// page index is carried in the path, so no page query param is needed.
+func (h *Handler) handleForestNoteRender(w http.ResponseWriter, r *http.Request) {
+	notePath := r.URL.Query().Get("path")
+	if !fnpath.Is(notePath) {
+		http.Error(w, "bad path", http.StatusBadRequest)
+		return
+	}
+	stream, ct, err := h.notes.RenderPage(r.Context(), notePath, 0)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	defer stream.Close()
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	io.Copy(w, stream)
 }
 
 // handleDigests renders the Digests tab: the Supernote "summary" excerpts
@@ -1411,15 +1468,20 @@ func (h *Handler) baseTemplateData(ctx context.Context) map[string]interface{} {
 		data["RestartRequired"] = h.config.IsRestartRequired()
 	}
 	data["chatEnabled"] = h.search != nil
+	fnSourceWired := false
 	if h.notes != nil {
 		data["HasSupernoteSource"] = h.notes.HasSupernoteSource()
 		data["HasBooxSource"] = h.notes.HasBooxSource()
+		fnSourceWired = h.notes.HasForestNoteSource()
 	}
 	// Source-type flags for the search facet and the device-grouped nav.
-	// Digests are available whenever the digest store is wired (server mode);
-	// ForestNote when device sync is enabled (error-tolerant on an unset key).
+	// Digests are available whenever the digest store is wired (server mode).
 	data["HasDigests"] = h.digests != nil
-	if h.noteDB != nil {
+	// ForestNote is present when a source is wired (the new first-class path);
+	// fall back to the legacy sync_enabled setting for older deployments.
+	if fnSourceWired {
+		data["HasForestNote"] = true
+	} else if h.noteDB != nil {
 		if v, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeySyncEnabled); strings.EqualFold(v, "true") || v == "1" {
 			data["HasForestNote"] = true
 		}
@@ -1446,6 +1508,12 @@ func safeRelPath(p string) (string, bool) {
 // validNotePath returns true if path falls under one of the configured notes
 // directories. Prevents arbitrary filesystem reads through path query params.
 func (h *Handler) validNotePath(path string) bool {
+	// ForestNote is an opaque URI scheme, not a filesystem path (and filepath.Clean
+	// would mangle the "//"). The note service resolves it against the syncstore
+	// mirror, so there is no directory to escape. Check the raw path first.
+	if fnpath.Is(path) {
+		return true
+	}
 	cleaned := filepath.Clean(path)
 	if h.notesPathPrefix != "" && strings.HasPrefix(cleaned, h.notesPathPrefix) {
 		return true

@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/sysop/ultrabridge/internal/fnpath"
 	"github.com/sysop/ultrabridge/internal/forestrender"
 	"github.com/sysop/ultrabridge/internal/rag"
 	"github.com/sysop/ultrabridge/internal/syncstore"
@@ -126,7 +127,7 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 		b.logger.Error("syncbridge: live-page lookup failed", "page", pagePK, "err", err)
 		return
 	}
-	path := "forestnote://" + notebookID + "/" + pagePK
+	path := fnpath.Page(notebookID, pagePK)
 
 	if !live {
 		// Deleted/missing page → drop any prior index + embedding so neither search
@@ -148,7 +149,7 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 		return
 	}
 
-	img, err := forestrender.RenderPage(mapStrokes(strokes))
+	img, err := forestrender.RenderPage(MapStrokes(strokes))
 	if err != nil {
 		b.logger.Error("syncbridge: render failed", "page", pagePK, "err", err)
 		return
@@ -200,7 +201,10 @@ func (b *Bridge) dropPage(ctx context.Context, pagePK, path string) {
 	}
 }
 
-func mapStrokes(sd []syncstore.StrokeData) []forestrender.Stroke {
+// MapStrokes maps stored mirror strokes onto forestrender's input. Exported so
+// the note service's on-the-fly page renderer shares this exact mapping instead
+// of duplicating it (the two would otherwise drift if a stroke field is added).
+func MapStrokes(sd []syncstore.StrokeData) []forestrender.Stroke {
 	out := make([]forestrender.Stroke, len(sd))
 	for i, s := range sd {
 		out[i] = forestrender.Stroke{

@@ -1,6 +1,6 @@
 # Source Abstraction Package
 
-Last verified: 2026-04-10
+Last verified: 2026-05-27
 
 ## Purpose
 
@@ -22,7 +22,7 @@ type Source interface {
 ### SourceRow
 
 Database model for the `sources` table:
-- `ID`, `Type` ("supernote" | "boox"), `Name`, `Enabled`, `ConfigJSON`, `CreatedAt`, `UpdatedAt`
+- `ID`, `Type` ("supernote" | "boox" | "forestnote"), `Name`, `Enabled`, `ConfigJSON`, `CreatedAt`, `UpdatedAt`
 
 ### Registry
 
@@ -60,6 +60,9 @@ Supernote source adapter. Parses `Config` from `config_json` (NotesPath, BackupP
 
 ### boox/
 Boox source adapter. Parses `Config` from `config_json` (NotesPath, ImportPath). Creates booxpipeline.Processor internally on `Start()`. Accepts Boox-specific deps (ContentDeleter, OnTodosFound) beyond SharedDeps.
+
+### forestnote/
+ForestNote source adapter — UB's own roll-our-own device sync (no vendor protocol). A *virtual* source: no filesystem root. `Config` from `config_json` is just `{batch_limit}`. On `Start()` it migrates the syncstore mirror and constructs the `syncstore` mirror + `syncbridge` (render→OCR→index→embed) + `syncsvc` relay; `main.go` mounts the device endpoint `/sync/v1` against `Source.SyncService()` and wires `Source.Store()` into the note service for the Files tab + on-the-fly page rendering (accessor pattern mirrors `boox.Source.Processor()`). FN-specific deps (`Indexer`, `EmbedStore` — the Delete-capable concretes the bridge needs but `SharedDeps` omits) are captured in the factory closure. Legacy back-compat: `main.go` auto-seeds a `forestnote` source row once from the old global `sync_enabled` setting.
 
 ## Key Decisions
 

@@ -17,10 +17,14 @@ import (
 	gosnote "github.com/jdkruzr/go-sn/note"
 	"github.com/sysop/ultrabridge/internal/appconfig"
 	"github.com/sysop/ultrabridge/internal/booxpipeline"
+	"github.com/sysop/ultrabridge/internal/fnpath"
+	"github.com/sysop/ultrabridge/internal/forestrender"
 	"github.com/sysop/ultrabridge/internal/notedb"
 	"github.com/sysop/ultrabridge/internal/notestore"
 	"github.com/sysop/ultrabridge/internal/processor"
 	"github.com/sysop/ultrabridge/internal/search"
+	"github.com/sysop/ultrabridge/internal/syncbridge"
+	"github.com/sysop/ultrabridge/internal/syncstore"
 )
 
 // BooxStore is the interface required by the NoteService for Boox notes.
@@ -72,6 +76,19 @@ type EmbedIndex interface {
 	Rename(ctx context.Context, oldPath, newPath string) error
 }
 
+// ForestNoteReader is the narrow surface the note service needs from the
+// syncstore mirror to browse ForestNote notebooks and render their pages on the
+// fly. *syncstore.Store satisfies it. Set via SetForestNoteReader only when a
+// ForestNote source is active (nil → the FN Files tab is empty / render fails).
+type ForestNoteReader interface {
+	ListFolders(ctx context.Context) ([]syncstore.FolderRow, error)
+	ListNotebooks(ctx context.Context) ([]syncstore.NotebookRow, error)
+	NotebookPages(ctx context.Context, notebookID string) ([]syncstore.PageRef, error)
+	NotebookMeta(ctx context.Context, notebookID string) (syncstore.NotebookRow, error)
+	LivePage(ctx context.Context, pagePK string) (notebookID string, live bool, err error)
+	LivePageStrokes(ctx context.Context, pagePK string) ([]syncstore.StrokeData, error)
+}
+
 type noteService struct {
 	noteStore     notestore.NoteStore
 	proc          processor.Processor
@@ -79,7 +96,8 @@ type noteService struct {
 	booxImporter  BooxImporter
 	booxProc      BooxProcessor
 	searchIndex   search.SearchIndex
-	embedIndex    EmbedIndex // optional; set via SetEmbedIndex
+	embedIndex    EmbedIndex       // optional; set via SetEmbedIndex
+	fnReader      ForestNoteReader // optional; set via SetForestNoteReader
 	scanner       FileScanner
 	noteDB        *sql.DB // for settings
 	booxCachePath string
@@ -121,6 +139,15 @@ func NewNoteService(
 // the SetDigestService pattern — keeps NewNoteService's signature (and all its
 // callers) untouched.
 func (s *noteService) SetEmbedIndex(d EmbedIndex) { s.embedIndex = d }
+
+// SetForestNoteReader wires the syncstore mirror so the Files tab can browse
+// synced ForestNote notebooks and render pages on the fly. Nil-safe in the same
+// way as SetEmbedIndex; keeps NewNoteService's signature untouched.
+func (s *noteService) SetForestNoteReader(r ForestNoteReader) { s.fnReader = r }
+
+// HasForestNoteSource reports whether a ForestNote source is active (a reader is
+// wired). Lets the web layer render an empty state instead of failing.
+func (s *noteService) HasForestNoteSource() bool { return s.fnReader != nil }
 
 func (s *noteService) ListFiles(ctx context.Context, path string, sortField, order string, page, perPage int) ([]NoteFile, int, error) {
 	var files []NoteFile
@@ -449,10 +476,149 @@ func (s *noteService) GetContent(ctx context.Context, path string) (interface{},
 }
 
 func (s *noteService) RenderPage(ctx context.Context, path string, pageIdx int) (io.ReadCloser, string, error) {
+	// ForestNote paths are an opaque scheme (never a filesystem path), so branch
+	// on them first. The page ULID is in the path; pageIdx is ignored.
+	if fnpath.Is(path) {
+		return s.renderForestNotePage(ctx, path)
+	}
 	if s.isBooxPath(path) {
 		return s.renderBooxPage(ctx, path, pageIdx)
 	}
 	return s.renderSupernotePage(ctx, path, pageIdx)
+}
+
+// renderForestNotePage renders a single ForestNote page to JPEG on the fly from
+// its live strokes in the syncstore mirror — no disk cache. The path is
+// forestnote://{notebook_id}/{page_id}; the trailing segment is the page ULID.
+func (s *noteService) renderForestNotePage(ctx context.Context, path string) (io.ReadCloser, string, error) {
+	if s.fnReader == nil {
+		return nil, "", fmt.Errorf("forestnote source not available")
+	}
+	pageID := fnpath.PageID(path)
+	if pageID == "" {
+		return nil, "", fmt.Errorf("forestnote path missing page id: %s", path)
+	}
+	// Liveness gate: LivePageStrokes returns an empty slice for BOTH a live-but-
+	// blank page and a missing/soft-deleted one. Without this check the latter
+	// would render a blank 200 (reachable via a stale tab or a search deep-link to
+	// a since-deleted page). A live page with zero strokes still renders blank.
+	_, live, err := s.fnReader.LivePage(ctx, pageID)
+	if err != nil {
+		return nil, "", fmt.Errorf("page liveness: %w", err)
+	}
+	if !live {
+		return nil, "", fmt.Errorf("forestnote page not found: %s", pageID)
+	}
+	strokes, err := s.fnReader.LivePageStrokes(ctx, pageID)
+	if err != nil {
+		return nil, "", fmt.Errorf("load page strokes: %w", err)
+	}
+	img, err := forestrender.RenderPage(syncbridge.MapStrokes(strokes))
+	if err != nil {
+		return nil, "", fmt.Errorf("render forestnote page: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+		return nil, "", err
+	}
+	return io.NopCloser(&buf), "image/jpeg", nil
+}
+
+// ListForestNoteTree returns the live folder tree (roots) plus notebooks that
+// sit at the root with no folder (unfiled). The tree is assembled purely from
+// the two flat reads.
+func (s *noteService) ListForestNoteTree(ctx context.Context) ([]ForestNoteTreeNode, []ForestNoteNotebook, error) {
+	if s.fnReader == nil {
+		return nil, nil, nil
+	}
+	folders, err := s.fnReader.ListFolders(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list folders: %w", err)
+	}
+	notebooks, err := s.fnReader.ListNotebooks(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list notebooks: %w", err)
+	}
+	roots, unfiled := buildForestNoteTree(folders, notebooks)
+	return roots, unfiled, nil
+}
+
+// ListForestNotePages returns a notebook's display name and its live pages in
+// order, each carrying the forestnote://{nb}/{page} render path.
+func (s *noteService) ListForestNotePages(ctx context.Context, notebookID string) (string, []ForestNotePage, error) {
+	if s.fnReader == nil {
+		return "", nil, fmt.Errorf("forestnote source not available")
+	}
+	meta, err := s.fnReader.NotebookMeta(ctx, notebookID)
+	if err != nil {
+		return "", nil, err
+	}
+	refs, err := s.fnReader.NotebookPages(ctx, notebookID)
+	if err != nil {
+		return "", nil, fmt.Errorf("notebook pages: %w", err)
+	}
+	pages := make([]ForestNotePage, len(refs))
+	for i, r := range refs {
+		pages[i] = ForestNotePage{
+			PageID:  r.ID,
+			Path:    fnpath.Page(notebookID, r.ID),
+			Ordinal: i,
+		}
+	}
+	return meta.Name, pages, nil
+}
+
+// buildForestNoteTree assembles the folder tree (pure). Notebooks whose folder_id
+// is empty or references a missing/deleted folder are returned as "unfiled".
+func buildForestNoteTree(folders []syncstore.FolderRow, notebooks []syncstore.NotebookRow) ([]ForestNoteTreeNode, []ForestNoteNotebook) {
+	live := make(map[string]bool, len(folders))
+	for _, f := range folders {
+		live[f.ID] = true
+	}
+	nbByFolder := make(map[string][]ForestNoteNotebook)
+	var unfiled []ForestNoteNotebook
+	for _, n := range notebooks {
+		nb := ForestNoteNotebook{
+			NotebookID: n.ID,
+			Name:       n.Name,
+			Path:       fnpath.Notebook(n.ID),
+			FolderID:   n.FolderID,
+			PageCount:  n.PageCount,
+		}
+		if n.FolderID == "" || !live[n.FolderID] {
+			unfiled = append(unfiled, nb)
+			continue
+		}
+		nbByFolder[n.FolderID] = append(nbByFolder[n.FolderID], nb)
+	}
+
+	childFolders := make(map[string][]syncstore.FolderRow)
+	var rootFolders []syncstore.FolderRow
+	for _, f := range folders {
+		if f.ParentFolderID == "" || !live[f.ParentFolderID] {
+			rootFolders = append(rootFolders, f)
+			continue
+		}
+		childFolders[f.ParentFolderID] = append(childFolders[f.ParentFolderID], f)
+	}
+
+	var build func(f syncstore.FolderRow) ForestNoteTreeNode
+	build = func(f syncstore.FolderRow) ForestNoteTreeNode {
+		node := ForestNoteTreeNode{
+			FolderID:  f.ID,
+			Name:      f.Name,
+			Notebooks: nbByFolder[f.ID],
+		}
+		for _, c := range childFolders[f.ID] {
+			node.Children = append(node.Children, build(c))
+		}
+		return node
+	}
+	roots := make([]ForestNoteTreeNode, 0, len(rootFolders))
+	for _, f := range rootFolders {
+		roots = append(roots, build(f))
+	}
+	return roots, unfiled
 }
 
 func (s *noteService) renderBooxPage(ctx context.Context, path string, pageIdx int) (io.ReadCloser, string, error) {

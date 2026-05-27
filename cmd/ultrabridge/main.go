@@ -38,6 +38,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/service"
 	"github.com/sysop/ultrabridge/internal/source"
 	"github.com/sysop/ultrabridge/internal/source/boox"
+	"github.com/sysop/ultrabridge/internal/source/forestnote"
 	"github.com/sysop/ultrabridge/internal/source/supernote"
 	"github.com/sysop/ultrabridge/internal/spcserver"
 	spcauth "github.com/sysop/ultrabridge/internal/spcserver/auth"
@@ -45,10 +46,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/spcserver/fileids"
 	"github.com/sysop/ultrabridge/internal/spcserver/notify"
 	"github.com/sysop/ultrabridge/internal/spcserver/staging"
-	"github.com/sysop/ultrabridge/internal/syncbridge"
 	"github.com/sysop/ultrabridge/internal/synchttp"
-	"github.com/sysop/ultrabridge/internal/syncstore"
-	"github.com/sysop/ultrabridge/internal/syncsvc"
 	"github.com/sysop/ultrabridge/internal/taskdb"
 	"github.com/sysop/ultrabridge/internal/web"
 	ubwebdav "github.com/sysop/ultrabridge/internal/webdav"
@@ -254,6 +252,56 @@ func main() {
 		OCRClient:    ocrClient,
 		OCRMaxFileMB: cfg.OCRMaxFileMB,
 		Logger:       logger,
+	}
+
+	// ForestNote factory (registered here, after the Delete-capable concretes si/
+	// embedStore exist, since the bridge's Indexer/EmbedStore interfaces need
+	// Delete which the narrow SharedDeps types omit — captured like boox's deps).
+	registry.Register("forestnote", func(db *sql.DB, row source.SourceRow, sharedDeps source.SharedDeps) (source.Source, error) {
+		fnDeps := forestnote.ForestNoteDeps{
+			Indexer: si,
+			OCRPrompt: func() string {
+				v, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyForestNoteOCRPrompt)
+				return v
+			},
+		}
+		if embedStore != nil {
+			fnDeps.EmbedStore = embedStore
+		}
+		return forestnote.NewSource(db, row, sharedDeps, fnDeps)
+	})
+
+	// Back-compat: promote the legacy global sync_enabled flag into a managed
+	// forestnote source row, exactly once. Non-destructive and idempotent — an
+	// existing deployment with sync_enabled=true keeps syncing after upgrade, now
+	// via the source row (authoritative going forward; the legacy setting stays).
+	if cfg.SyncEnabled {
+		existing, err := source.ListSources(context.Background(), noteDB)
+		if err != nil {
+			// Couldn't confirm whether a forestnote row already exists; seeding now
+			// could insert a duplicate (the sources table has no unique-on-type
+			// constraint, so two rows would start two bridges on the same notedb).
+			// Skip — the enabled-source loop below still starts any existing row.
+			logger.Warn("forestnote auto-seed skipped: list sources failed", "err", err)
+			existing = nil
+		}
+		hasFN := false
+		for _, r := range existing {
+			if r.Type == "forestnote" {
+				hasFN = true
+				break
+			}
+		}
+		if err == nil && !hasFN {
+			cfgJSON := fmt.Sprintf(`{"batch_limit":%d}`, cfg.SyncBatchLimit)
+			if _, err := source.AddSource(context.Background(), noteDB, source.SourceRow{
+				Type: "forestnote", Name: "ForestNote", Enabled: true, ConfigJSON: cfgJSON,
+			}); err != nil {
+				logger.Warn("forestnote auto-seed failed", "err", err)
+			} else {
+				logger.Info("migrated legacy sync_enabled → forestnote source row")
+			}
+		}
 	}
 
 	// List enabled sources from DB
@@ -556,45 +604,22 @@ func main() {
 	mux.Handle("/.well-known/caldav", wellKnownCalDAV)
 	mux.Handle("/.well-known/caldav/", wellKnownCalDAV)
 
-	// ForestNote device sync (/sync/v1), gated by the SyncEnabled setting. Plain
+	// ForestNote device sync (/sync/v1). ForestNote is now a first-class registry
+	// Source (internal/source/forestnote) that owns the syncstore mirror + the
+	// render→OCR→index→embed bridge + the relay service; it was started in the
+	// source loop above. The device endpoint itself is mounted here (consistent
+	// with how Boox's WebDAV endpoint is wired in the web block below). Plain
 	// authenticated REST behind authMW — NOT the SPC Engine.IO/Socket.IO machinery.
-	// Migration is package-local + best-effort (precedent: fileids/staging/digests).
-	if cfg.SyncEnabled {
-		if err := syncstore.Migrate(context.Background(), noteDB); err != nil {
-			logger.Error("syncstore migration failed; device sync disabled", "err", err)
-		} else {
-			syncStore := syncstore.New(noteDB)
-			// Pipeline bridge: synced strokes → render → OCR → index → embed, on
-			// opaque forestnote:// paths (no fs writes). Runs off the /sync/v1 path.
-			// Guard concrete-pointer deps so a nil *OCRClient/*Store isn't boxed into
-			// a non-nil interface (would panic on call).
-			bdeps := syncbridge.Deps{
-				Indexer:    si,
-				EmbedModel: cfg.OllamaEmbedModel,
-				// Read per page so a Settings change applies without restart (empty
-				// → the bridge's built-in default prompt).
-				OCRPrompt: func() string {
-					v, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyForestNoteOCRPrompt)
-					return v
-				},
-			}
-			if ocrClient != nil {
-				bdeps.OCR = ocrClient
-			}
-			if embedder != nil {
-				bdeps.Embedder = embedder
-			}
-			if embedStore != nil {
-				bdeps.EmbedStore = embedStore
-			}
-			bridge := syncbridge.New(syncStore, bdeps, logger)
-			bridge.Start(context.Background())
-			defer bridge.Stop()
-
-			syncSvc := syncsvc.New(syncStore, cfg.SyncBatchLimit, bridge, logger)
-			mux.Handle("/sync/v1", authMW.Wrap(synchttp.New(syncSvc, synchttp.DefaultMaxBytes, logger)))
-			logger.Info("ForestNote device sync enabled", "route", "/sync/v1", "batch_limit", cfg.SyncBatchLimit)
+	var fnSource *forestnote.Source
+	for _, s := range sources {
+		if fn, ok := s.(*forestnote.Source); ok {
+			fnSource = fn
+			break
 		}
+	}
+	if fnSource != nil {
+		mux.Handle("/sync/v1", authMW.Wrap(synchttp.New(fnSource.SyncService(), synchttp.DefaultMaxBytes, logger)))
+		logger.Info("ForestNote device sync enabled", "route", "/sync/v1")
 	}
 
 	// MCP discovery for Claude/OAuth clients
@@ -687,6 +712,11 @@ func main() {
 		// typed-nil would panic.
 		if embedStore != nil {
 			noteSvc.SetEmbedIndex(embedStore)
+		}
+		// Wire the ForestNote reader so the Files tab can browse synced notebooks
+		// and render pages on the fly from the syncstore mirror.
+		if fnSource != nil {
+			noteSvc.SetForestNoteReader(fnSource.Store())
 		}
 
 		// 3. Search Service

@@ -1,16 +1,19 @@
 # internal/web
 
-Last verified: 2026-05-26 (Digests tab + device-grouped sidebar nav + source-faceted search added; UB-as-SPC server settings card; routes, fragment rendering, source-split Files tabs, Boox processor controls)
+Last verified: 2026-05-27 (ForestNote Files tab — folder tree + on-the-fly page viewer — and nav group added; Digests tab + device-grouped sidebar nav + source-faceted search; UB-as-SPC server settings card; routes, fragment rendering, source-split Files tabs, Boox processor controls)
 
 ## Sidebar nav (device-grouped)
 
 The left nav (`layout.html`) groups source-specific tabs under static
 device headers: **Supernote** → Files (`HasSupernoteSource`) + Digests
-(`HasDigests`); **Boox** → Files (`HasBooxSource`). Globals (Tasks, Search,
-Chat, Logs, Settings) sit outside the groups. `baseTemplateData` sets
-`HasDigests` (= digest service wired) and `HasForestNote` (= `sync_enabled`);
-these also drive the search facet checkboxes. When no Supernote/Boox/digest
-source exists, a single flat "Files" link is shown (legacy fallback).
+(`HasDigests`); **Boox** → Files (`HasBooxSource`); **ForestNote** → Files
+(`HasForestNote`). Globals (Tasks, Search, Chat, Logs, Settings) sit outside
+the groups. `baseTemplateData` sets `HasDigests` (= digest service wired) and
+`HasForestNote` (= a `forestnote` source is wired via
+`NoteService.HasForestNoteSource()`, falling back to the legacy `sync_enabled`
+setting); these also drive the search facet checkboxes. When no
+Supernote/Boox/digest/ForestNote source exists, a single flat "Files" link is
+shown (legacy fallback).
 
 HTTP handler and HTML templates for the UltraBridge web UI.
 
@@ -49,6 +52,8 @@ For tests, `LegacyNewHandler` in `handler_test.go` bridges the old 22-argument s
 | GET | `/files` | `handleFiles` | Legacy entry point; 303-redirects to `/files/supernote` or `/files/boox` based on configured sources. Renders an empty-state placeholder when neither is configured. |
 | GET | `/files/supernote` | `handleFilesSupernote` | Supernote file browser (directory tree, breadcrumbs, sort, pagination). Path traversal guarded. |
 | GET | `/files/boox` | `handleFilesBoox` | Boox catalog listing (flat, Title/Folder/Device/NoteType/Pages columns, sort, pagination). |
+| GET | `/files/forestnote` | `handleFilesForestNote` | ForestNote browser: folder tree of synced notebooks; `?notebook=` switches to that notebook's page gallery. Inventory is a live projection of the `fn_*` mirror (no filesystem). |
+| GET | `/files/forestnote/render` | `handleForestNoteRender` | JPEG for a `forestnote://{nb}/{page}` path, rendered on the fly from strokes (no cache). `Cache-Control: public, max-age=300`. |
 | GET | `/digests` | `handleDigests` | Digests tab (Phase D2): Supernote "summary" excerpts synced from the device. Flat list + group/tag filter pills. Requires a `DigestService` (set via `SetDigestService`, SPC server mode only); otherwise renders a disabled notice. |
 | POST | `/files/queue` | `handleFilesQueue` | Enqueue file for OCR. Row fragment dispatches by path prefix. |
 | POST | `/files/skip` | `handleFilesSkip` | Mark skipped (manual). |

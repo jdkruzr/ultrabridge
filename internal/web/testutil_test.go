@@ -15,17 +15,17 @@ import (
 func newTestHandler() *Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := &mockTaskService{}
 	notes := &mockNoteService{
-		docs: make(map[string][]service.SearchResult),
-		contents: make(map[string]interface{}),
+		docs:               make(map[string][]service.SearchResult),
+		contents:           make(map[string]interface{}),
 		pipelineConfigured: true,
-		booxEnabled: true,
+		booxEnabled:        true,
 	}
 	search := &mockSearchService{
 		embeddingPipelineConfigured: true,
-		chatEnabled: true,
+		chatEnabled:                 true,
 	}
 	config := &mockConfigService{}
 
@@ -77,7 +77,7 @@ func (m *mockTaskService) Update(ctx context.Context, id string, patch service.T
 }
 func (m *mockTaskService) Complete(ctx context.Context, id string) error { return nil }
 func (m *mockTaskService) Delete(ctx context.Context, id string) error   { return nil }
-func (m *mockTaskService) PurgeCompleted(ctx context.Context) error     {
+func (m *mockTaskService) PurgeCompleted(ctx context.Context) error {
 	var active []service.Task
 	for _, t := range m.tasks {
 		if t.Status != service.StatusCompleted {
@@ -92,23 +92,30 @@ func (m *mockTaskService) BulkDelete(ctx context.Context, ids []string) error   
 
 // mockNoteService implements NoteService for testing
 type mockNoteService struct {
-	files []service.NoteFile
-	docs  map[string][]service.SearchResult
+	files    []service.NoteFile
+	docs     map[string][]service.SearchResult
 	contents map[string]interface{}
 	renders  map[string]io.ReadCloser
-	
+
 	processorStarted     bool
 	booxProcessorStarted bool
 	importTriggered      bool
 	migrateTriggered     bool
 	deletedPaths         []string
-	
+
 	// Settings for section visibility
 	pipelineConfigured bool
-	booxEnabled bool
+	booxEnabled        bool
 
 	// Boox-tab list
 	booxNotes []service.BooxNoteSummary
+
+	// ForestNote-tab fixtures
+	forestNoteEnabled bool
+	fnTree            []service.ForestNoteTreeNode
+	fnUnfiled         []service.ForestNoteNotebook
+	fnNotebookName    string
+	fnPages           []service.ForestNotePage
 }
 
 func (m *mockNoteService) ListFiles(ctx context.Context, path, sort, order string, page, perPage int) ([]service.NoteFile, int, error) {
@@ -223,7 +230,15 @@ func (m *mockNoteService) BulkDelete(ctx context.Context, paths []string) error 
 	m.deletedPaths = append(m.deletedPaths, paths...)
 	return nil
 }
-func (m *mockNoteService) SetEmbedIndex(d service.EmbedIndex) {}
+func (m *mockNoteService) SetEmbedIndex(d service.EmbedIndex)             {}
+func (m *mockNoteService) SetForestNoteReader(r service.ForestNoteReader) {}
+func (m *mockNoteService) HasForestNoteSource() bool                      { return m.forestNoteEnabled }
+func (m *mockNoteService) ListForestNoteTree(ctx context.Context) ([]service.ForestNoteTreeNode, []service.ForestNoteNotebook, error) {
+	return m.fnTree, m.fnUnfiled, nil
+}
+func (m *mockNoteService) ListForestNotePages(ctx context.Context, notebookID string) (string, []service.ForestNotePage, error) {
+	return m.fnNotebookName, m.fnPages, nil
+}
 func (m *mockNoteService) StartProcessor(ctx context.Context) error {
 	m.processorStarted = true
 	return nil
@@ -252,8 +267,10 @@ func (m *mockNoteService) MigrateImports(ctx context.Context) error {
 	return nil
 }
 func (m *mockNoteService) HasSupernoteSource() bool { return m.pipelineConfigured }
-func (m *mockNoteService) HasBooxSource() bool { return m.booxEnabled }
-func (m *mockNoteService) ListVersions(ctx context.Context, path string) (interface{}, error) { return nil, nil }
+func (m *mockNoteService) HasBooxSource() bool      { return m.booxEnabled }
+func (m *mockNoteService) ListVersions(ctx context.Context, path string) (interface{}, error) {
+	return nil, nil
+}
 func (m *mockNoteService) ReconcileBooxCreatedAt(ctx context.Context) (int64, error) { return 0, nil }
 func (m *mockNoteService) DeleteAutoNamedNotebooks(ctx context.Context) (int64, int64, int64, error) {
 	return 0, 0, 0, nil
@@ -261,19 +278,21 @@ func (m *mockNoteService) DeleteAutoNamedNotebooks(ctx context.Context) (int64, 
 func (m *mockNoteService) ScanAndEnqueueUntracked(ctx context.Context) (int, int, error) {
 	return 0, 0, nil
 }
-func (m *mockNoteService) MoveBooxNote(ctx context.Context, path, destFolder string) error { return nil }
+func (m *mockNoteService) MoveBooxNote(ctx context.Context, path, destFolder string) error {
+	return nil
+}
 func (m *mockNoteService) BulkMoveBooxNotes(ctx context.Context, paths []string, destFolder string) (int, int, error) {
 	return 0, 0, nil
 }
 
 // mockSearchService implements SearchService for testing
 type mockSearchService struct {
-	results []service.SearchResult
+	results  []service.SearchResult
 	sessions interface{}
 	messages interface{}
-	
+
 	embeddingPipelineConfigured bool
-	chatEnabled bool
+	chatEnabled                 bool
 }
 
 func (m *mockSearchService) Search(ctx context.Context, query, folder string, sources []string) ([]service.SearchResult, error) {
@@ -290,19 +309,23 @@ func (m *mockSearchService) GetMessages(ctx context.Context, sessionID int) (int
 }
 func (m *mockSearchService) TriggerBackfill(ctx context.Context) error { return nil }
 func (m *mockSearchService) GetEmbeddingCount(ctx context.Context) int { return 0 }
-func (m *mockSearchService) HasEmbeddingPipeline() bool { return m.embeddingPipelineConfigured }
+func (m *mockSearchService) HasEmbeddingPipeline() bool                { return m.embeddingPipelineConfigured }
 
 // mockConfigService implements ConfigService for testing
 type mockConfigService struct {
-	config interface{}
-	sources interface{}
+	config          interface{}
+	sources         interface{}
 	restartRequired bool
 }
 
-func (m *mockConfigService) GetConfig(ctx context.Context) (interface{}, error) { return m.config, nil }
+func (m *mockConfigService) GetConfig(ctx context.Context) (interface{}, error)         { return m.config, nil }
 func (m *mockConfigService) UpdateConfig(ctx context.Context, config interface{}) error { return nil }
-func (m *mockConfigService) IsRestartRequired() bool { return m.restartRequired }
-func (m *mockConfigService) ListSources(ctx context.Context) (interface{}, error) { return m.sources, nil }
+func (m *mockConfigService) IsRestartRequired() bool                                    { return m.restartRequired }
+func (m *mockConfigService) ListSources(ctx context.Context) (interface{}, error) {
+	return m.sources, nil
+}
 func (m *mockConfigService) AddSource(ctx context.Context, source interface{}) error { return nil }
-func (m *mockConfigService) UpdateSource(ctx context.Context, id string, source interface{}) error { return nil }
+func (m *mockConfigService) UpdateSource(ctx context.Context, id string, source interface{}) error {
+	return nil
+}
 func (m *mockConfigService) DeleteSource(ctx context.Context, id string) error { return nil }
