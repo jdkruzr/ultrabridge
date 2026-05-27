@@ -339,6 +339,10 @@ func mergeRow(ctx context.Context, tx *sql.Tx, n Op) (changed bool, pagePK strin
 		var pid string
 		pid, err = upsertStroke(ctx, tx, n)
 		pagePK = pid
+	case "text_box":
+		var pid string
+		pid, err = upsertTextBox(ctx, tx, n)
+		pagePK = pid
 	}
 	if err != nil {
 		return false, "", err
@@ -485,6 +489,81 @@ func upsertStroke(ctx context.Context, tx *sql.Tx, n Op) (pageID string, err err
 		   points=excluded.points, z=excluded.z, created_at=excluded.created_at, deleted_at=excluded.deleted_at,
 		   lww_wall_ts=excluded.lww_wall_ts, lww_op_seq=excluded.lww_op_seq, lww_site_id=excluded.lww_site_id`,
 		n.PK, pageID, color, wmin, wmax, pts, z, created, del, n.WallTS, n.OpSeq, n.SiteID)
+	return pageID, err
+}
+
+// upsertTextBox materializes a text_box op into fn_text_box, modeled on
+// upsertStroke. Returns the row's page_id as the affected page pk (drives
+// re-render/re-index). color is read with colInt exactly like stroke.color — it
+// arrives as an unsigned ARGB int64 on the wire and is stored verbatim; the
+// renderer reinterprets it, the same path strokes use today. text/font_name are
+// strings; deleted_at is the nullable tombstone column.
+func upsertTextBox(ctx context.Context, tx *sql.Tx, n Op) (pageID string, err error) {
+	pageID, err = colString(n, "page_id")
+	if err != nil {
+		return "", err
+	}
+	x, err := colInt(n, "x")
+	if err != nil {
+		return "", err
+	}
+	y, err := colInt(n, "y")
+	if err != nil {
+		return "", err
+	}
+	width, err := colInt(n, "width")
+	if err != nil {
+		return "", err
+	}
+	height, err := colInt(n, "height")
+	if err != nil {
+		return "", err
+	}
+	text, err := colString(n, "text")
+	if err != nil {
+		return "", err
+	}
+	fontName, err := colString(n, "font_name")
+	if err != nil {
+		return "", err
+	}
+	fontSize, err := colInt(n, "font_size")
+	if err != nil {
+		return "", err
+	}
+	color, err := colInt(n, "color")
+	if err != nil {
+		return "", err
+	}
+	weight, err := colInt(n, "weight")
+	if err != nil {
+		return "", err
+	}
+	borderWidth, err := colInt(n, "border_width")
+	if err != nil {
+		return "", err
+	}
+	z, err := colInt(n, "z")
+	if err != nil {
+		return "", err
+	}
+	created, err := colInt(n, "created_at")
+	if err != nil {
+		return "", err
+	}
+	del, err := colNullInt(n, "deleted_at")
+	if err != nil {
+		return "", err
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO fn_text_box (id, page_id, x, y, width, height, text, font_name, font_size, color, weight, border_width, z, created_at, deleted_at, lww_wall_ts, lww_op_seq, lww_site_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET page_id=excluded.page_id, x=excluded.x, y=excluded.y,
+		   width=excluded.width, height=excluded.height, text=excluded.text, font_name=excluded.font_name,
+		   font_size=excluded.font_size, color=excluded.color, weight=excluded.weight,
+		   border_width=excluded.border_width, z=excluded.z, created_at=excluded.created_at, deleted_at=excluded.deleted_at,
+		   lww_wall_ts=excluded.lww_wall_ts, lww_op_seq=excluded.lww_op_seq, lww_site_id=excluded.lww_site_id`,
+		n.PK, pageID, x, y, width, height, text, fontName, fontSize, color, weight, borderWidth, z, created, del, n.WallTS, n.OpSeq, n.SiteID)
 	return pageID, err
 }
 

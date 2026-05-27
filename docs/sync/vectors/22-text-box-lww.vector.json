@@ -1,0 +1,49 @@
+{
+  "name": "text-box-lww",
+  "description": "Two ops on the same text_box pk converge to the one with the greater (wall_ts, op_seq, site_id) key. Here a later edit changes the text and tombstones the box; the higher wall_ts wins, and the deleted row IS part of the materialized state (deleted rows are listed in expected_state — a read concern, not a merge concern, §5.3).",
+  "ops": [
+    {
+      "table": "text_box",
+      "pk": "00000000000000000000000TB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": {
+        "border_width": 2, "color": 4278190080, "created_at": 1000, "deleted_at": null,
+        "font_name": "Roboto-Regular.ttf", "font_size": 320, "height": 1500,
+        "page_id": "00000000000000000000000PG1", "text": "draft", "weight": 400,
+        "width": 3000, "x": 100, "y": 200, "z": 1
+      }
+    },
+    {
+      "table": "text_box",
+      "pk": "00000000000000000000000TB1",
+      "site_id": "0000000000000000000000000B",
+      "op_seq": 1,
+      "wall_ts": 2000,
+      "cols": {
+        "border_width": 2, "color": 4294901760, "created_at": 1000, "deleted_at": 2000,
+        "font_name": "Roboto-Regular.ttf", "font_size": 320, "height": 1500,
+        "page_id": "00000000000000000000000PG1", "text": "final", "weight": 700,
+        "width": 3000, "x": 100, "y": 200, "z": 1
+      }
+    }
+  ],
+  "expected_state": {
+    "folder": [], "notebook": [], "page": [], "stroke": [],
+    "text_box": [
+      {
+        "pk": "00000000000000000000000TB1",
+        "site_id": "0000000000000000000000000B",
+        "op_seq": 1,
+        "wall_ts": 2000,
+        "cols": {
+          "border_width": 2, "color": 4294901760, "created_at": 1000, "deleted_at": 2000,
+          "font_name": "Roboto-Regular.ttf", "font_size": 320, "height": 1500,
+          "page_id": "00000000000000000000000PG1", "text": "final", "weight": 700,
+          "width": 3000, "x": 100, "y": 200, "z": 1
+        }
+      }
+    ]
+  }
+}

@@ -147,6 +147,72 @@ func TestApplyBatch_ChangedPagesFromStroke(t *testing.T) {
 	}
 }
 
+func TestApplyBatch_TextBoxMaterializes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const tb1 = "00000000000000000000000TB1"
+	box := Op{
+		Table: "text_box", PK: tb1, SiteID: siteA, OpSeq: 1, WallTS: 1000,
+		Cols: map[string]any{
+			"page_id": pg1, "x": float64(100), "y": float64(200), "width": float64(3000),
+			"height": float64(1500), "text": "hello world", "font_name": "Roboto-Regular.ttf",
+			"font_size": float64(320), "color": float64(4278190080), // unsigned ARGB black, like stroke
+			"weight": float64(400), "border_width": float64(2), "z": float64(1),
+			"created_at": float64(1000), "deleted_at": nil,
+		},
+	}
+	res, err := s.ApplyBatch(ctx, siteA, []Op{box})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	// The text box's page is reported as changed (drives re-render/re-index).
+	if len(res.ChangedPages) != 1 || res.ChangedPages[0].PK != pg1 {
+		t.Errorf("ChangedPages = %+v, want [page %s]", res.ChangedPages, pg1)
+	}
+	// Row materialized with the right values, color stored verbatim (unsigned).
+	var text, font string
+	var x, color, z int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT text, font_name, x, color, z FROM fn_text_box WHERE id = ?`, tb1).
+		Scan(&text, &font, &x, &color, &z); err != nil {
+		t.Fatalf("query text_box: %v", err)
+	}
+	if text != "hello world" || font != "Roboto-Regular.ttf" || x != 100 || color != 4278190080 || z != 1 {
+		t.Errorf("got text=%q font=%q x=%d color=%d z=%d", text, font, x, color, z)
+	}
+}
+
+func TestApplyBatch_TextBoxTombstoneLWW(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const tb1 = "00000000000000000000000TB1"
+	mk := func(opSeq, wall int64, text string, deletedAt any) Op {
+		return Op{
+			Table: "text_box", PK: tb1, SiteID: siteA, OpSeq: opSeq, WallTS: wall,
+			Cols: map[string]any{
+				"page_id": pg1, "x": float64(0), "y": float64(0), "width": float64(10),
+				"height": float64(10), "text": text, "font_name": "", "font_size": float64(100),
+				"color": float64(4278190080), "weight": float64(400), "border_width": float64(0),
+				"z": float64(0), "created_at": float64(1000), "deleted_at": deletedAt,
+			},
+		}
+	}
+	if _, err := s.ApplyBatch(ctx, siteA, []Op{
+		mk(1, 1000, "live", nil),
+		mk(2, 2000, "live", float64(2000)), // tombstone wins (newer)
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	var del sql.NullInt64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT deleted_at FROM fn_text_box WHERE id = ?`, tb1).Scan(&del); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !del.Valid || del.Int64 != 2000 {
+		t.Errorf("deleted_at = %+v, want 2000 (newer tombstone wins LWW)", del)
+	}
+}
+
 func TestOpsSince_ExcludesSelfAndPages(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

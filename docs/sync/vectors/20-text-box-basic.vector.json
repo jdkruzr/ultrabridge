@@ -1,0 +1,59 @@
+{
+  "name": "text-box-basic",
+  "description": "One text_box op materializes to one live row, carrying all 14 synced columns and provenance. color is the unsigned ARGB int64 (4278190080 = opaque black), same convention as stroke.color.",
+  "ops": [
+    {
+      "table": "text_box",
+      "pk": "00000000000000000000000TB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": {
+        "border_width": 2,
+        "color": 4278190080,
+        "created_at": 1000,
+        "deleted_at": null,
+        "font_name": "Roboto-Regular.ttf",
+        "font_size": 320,
+        "height": 1500,
+        "page_id": "00000000000000000000000PG1",
+        "text": "hello",
+        "weight": 400,
+        "width": 3000,
+        "x": 100,
+        "y": 200,
+        "z": 1
+      }
+    }
+  ],
+  "expected_state": {
+    "folder": [],
+    "notebook": [],
+    "page": [],
+    "stroke": [],
+    "text_box": [
+      {
+        "pk": "00000000000000000000000TB1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 1,
+        "wall_ts": 1000,
+        "cols": {
+          "border_width": 2,
+          "color": 4278190080,
+          "created_at": 1000,
+          "deleted_at": null,
+          "font_name": "Roboto-Regular.ttf",
+          "font_size": 320,
+          "height": 1500,
+          "page_id": "00000000000000000000000PG1",
+          "text": "hello",
+          "weight": 400,
+          "width": 3000,
+          "x": 100,
+          "y": 200,
+          "z": 1
+        }
+      }
+    ]
+  }
+}

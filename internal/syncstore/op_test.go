@@ -2,15 +2,31 @@ package syncstore
 
 import "testing"
 
-// schemaHashV1 is the published v1 schema hash (docs/sync/forestnote-sync-protocol.md
-// §6). If this assertion fails, either knownCols changed (a wire-breaking schema
-// change that needs a coordinated bump) or the spec doc is stale.
-const schemaHashV1 = "9b807dc88cd0465d171892bb17e65ad94190eda058594e207caad3368eb1f2fe"
+// schemaHashV2 is the published CURRENT schema hash (docs/sync/forestnote-sync-protocol.md
+// §6) — folder/notebook/page/stroke/text_box. If this assertion fails, either
+// knownCols changed (a wire-breaking schema change that needs a coordinated bump +
+// a new vN constant) or the spec doc is stale. schemaHashV1 (the frozen prior
+// value) lives in op.go and is asserted via AcceptsSchemaHash below.
+const schemaHashV2 = "bc1953e2b85e766a572329e7023b4582b768094b4d27e28a632e21bedb776874"
 
 func TestSchemaHashMatchesSpec(t *testing.T) {
-	if got := SchemaHash(); got != schemaHashV1 {
+	if got := SchemaHash(); got != schemaHashV2 {
 		t.Errorf("schema hash drift:\n got: %s\nwant: %s\ncanonical: %s",
-			got, schemaHashV1, canonicalSchema())
+			got, schemaHashV2, canonicalSchema())
+	}
+}
+
+// AcceptsSchemaHash is the rollout grace window: it must admit BOTH the current
+// schema (v2) and the frozen prior schema (v1), and reject anything else.
+func TestAcceptsSchemaHash_GraceWindow(t *testing.T) {
+	if !AcceptsSchemaHash(SchemaHash()) {
+		t.Error("current schema hash must be accepted")
+	}
+	if !AcceptsSchemaHash(schemaHashV1) {
+		t.Error("frozen v1 schema hash must still be accepted during the grace window")
+	}
+	if AcceptsSchemaHash("0000000000000000000000000000000000000000000000000000000000000000") {
+		t.Error("an unknown schema hash must be rejected")
 	}
 }
 

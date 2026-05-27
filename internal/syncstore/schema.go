@@ -103,8 +103,35 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			lww_op_seq    INTEGER NOT NULL,
 			lww_site_id   TEXT    NOT NULL
 		)`,
+		// fn_text_box mirrors a z-ordered text element on a page (schema v2). Same
+		// shape discipline as fn_stroke: all 14 synced value columns + the provenance
+		// trio. Geometry/font_size are virtual units (page short axis = 10,000), color
+		// is the unsigned ARGB int64 stored verbatim (identical to stroke.color), z is
+		// the paint band (0 = below ink, 1 = above). No FK on page_id — the wire is
+		// row-level LWW (the client's local ON DELETE CASCADE does not replicate).
+		`CREATE TABLE IF NOT EXISTS fn_text_box (
+			id           TEXT PRIMARY KEY,
+			page_id      TEXT,
+			x            INTEGER,
+			y            INTEGER,
+			width        INTEGER,
+			height       INTEGER,
+			text         TEXT,
+			font_name    TEXT,
+			font_size    INTEGER,
+			color        INTEGER,
+			weight       INTEGER,
+			border_width INTEGER,
+			z            INTEGER,
+			created_at   INTEGER,
+			deleted_at   INTEGER,
+			lww_wall_ts  INTEGER NOT NULL,
+			lww_op_seq   INTEGER NOT NULL,
+			lww_site_id  TEXT    NOT NULL
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_fn_page_nb ON fn_page(notebook_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_fn_stroke_pg ON fn_stroke(page_id, z)`,
+		`CREATE INDEX IF NOT EXISTS idx_fn_text_box_page ON fn_text_box(page_id, z)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.ExecContext(ctx, s); err != nil {

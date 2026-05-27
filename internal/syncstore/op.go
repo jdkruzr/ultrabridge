@@ -31,10 +31,11 @@ var knownCols = map[string][]string{
 	"notebook": {"created_at", "deleted_at", "folder_id", "name", "sort_order"},
 	"page":     {"created_at", "deleted_at", "notebook_id", "sort_order", "template", "template_pitch_mm"},
 	"stroke":   {"color", "created_at", "deleted_at", "page_id", "pen_width_max", "pen_width_min", "points", "z"},
+	"text_box": {"border_width", "color", "created_at", "deleted_at", "font_name", "font_size", "height", "page_id", "text", "weight", "width", "x", "y", "z"},
 }
 
 // tableOrder is the fixed table order for the canonical schema string (§6).
-var tableOrder = []string{"folder", "notebook", "page", "stroke"}
+var tableOrder = []string{"folder", "notebook", "page", "stroke", "text_box"}
 
 // canonicalSchema builds the deterministic schema string (spec §6): tables in
 // fixed order, columns alphabetical within each table, `table:col,col;table:...`,
@@ -47,12 +48,31 @@ func canonicalSchema() string {
 	return strings.Join(parts, ";")
 }
 
-// SchemaHash is the lowercase hex SHA-256 of the canonical schema string (§6).
-// A client whose hash the server does not recognize is rejected (409) so it
-// cannot corrupt the mirror. The published v1 value is asserted in the tests.
+// SchemaHash is the lowercase hex SHA-256 of the canonical schema string (§6),
+// i.e. the CURRENT schema the server advertises. A client whose hash the server
+// does not accept is rejected (409) so it cannot corrupt the mirror. The value is
+// asserted in the tests (schemaHashV2).
 func SchemaHash() string {
 	sum := sha256.Sum256([]byte(canonicalSchema()))
 	return hex.EncodeToString(sum[:])
+}
+
+// schemaHashV1 is the FROZEN historical schema hash (folder/notebook/page/stroke,
+// no text_box). It is hardcoded — not derived — because once knownCols gains a
+// table the derivation yields v2; we must still recognize a v1 client during the
+// rollout grace window (see AcceptsSchemaHash). Keep this literal forever.
+const schemaHashV1 = "9b807dc88cd0465d171892bb17e65ad94190eda058594e207caad3368eb1f2fe"
+
+// AcceptsSchemaHash reports whether the server will sync with a client advertising
+// hash h. It accepts the current schema (SchemaHash) AND the frozen prior schema
+// (schemaHashV1), so a not-yet-updated v1 client keeps syncing while the matching
+// client release rolls out — instead of a hard cutover that 409s every old client
+// the instant the server adds text_box. A v1 client never sends text_box ops, so
+// admitting it is safe; once all clients update, drop schemaHashV1 from this set.
+// Generalizes to every future schema bump: add the new hash, keep the prior one
+// for one release, then retire it.
+func AcceptsSchemaHash(h string) bool {
+	return h == SchemaHash() || h == schemaHashV1
 }
 
 const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ" // Crockford base32, uppercase (§2.1)

@@ -1,0 +1,58 @@
+{
+  "name": "text-box-delete",
+  "description": "deleted_at is an ordinary LWW column on text_box: create, delete (tombstone), then un-delete. The newest op (restore) wins, so the box converges to LIVE (deleted_at null) — the recycle/erase-then-undo path for text boxes.",
+  "ops": [
+    {
+      "table": "text_box",
+      "pk": "00000000000000000000000TB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 1,
+      "wall_ts": 1000,
+      "cols": {
+        "border_width": 0, "color": 4278190080, "created_at": 1000, "deleted_at": null,
+        "font_name": "", "font_size": 200, "height": 500, "page_id": "00000000000000000000000PG1",
+        "text": "note", "weight": 400, "width": 800, "x": 10, "y": 20, "z": 0
+      }
+    },
+    {
+      "table": "text_box",
+      "pk": "00000000000000000000000TB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 2,
+      "wall_ts": 2000,
+      "cols": {
+        "border_width": 0, "color": 4278190080, "created_at": 1000, "deleted_at": 2000,
+        "font_name": "", "font_size": 200, "height": 500, "page_id": "00000000000000000000000PG1",
+        "text": "note", "weight": 400, "width": 800, "x": 10, "y": 20, "z": 0
+      }
+    },
+    {
+      "table": "text_box",
+      "pk": "00000000000000000000000TB1",
+      "site_id": "0000000000000000000000000A",
+      "op_seq": 3,
+      "wall_ts": 3000,
+      "cols": {
+        "border_width": 0, "color": 4278190080, "created_at": 1000, "deleted_at": null,
+        "font_name": "", "font_size": 200, "height": 500, "page_id": "00000000000000000000000PG1",
+        "text": "note", "weight": 400, "width": 800, "x": 10, "y": 20, "z": 0
+      }
+    }
+  ],
+  "expected_state": {
+    "folder": [], "notebook": [], "page": [], "stroke": [],
+    "text_box": [
+      {
+        "pk": "00000000000000000000000TB1",
+        "site_id": "0000000000000000000000000A",
+        "op_seq": 3,
+        "wall_ts": 3000,
+        "cols": {
+          "border_width": 0, "color": 4278190080, "created_at": 1000, "deleted_at": null,
+          "font_name": "", "font_size": 200, "height": 500, "page_id": "00000000000000000000000PG1",
+          "text": "note", "weight": 400, "width": 800, "x": 10, "y": 20, "z": 0
+        }
+      }
+    ]
+  }
+}

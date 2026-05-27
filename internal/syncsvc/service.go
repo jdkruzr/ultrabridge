@@ -79,7 +79,7 @@ func (s *Service) Sync(ctx context.Context, req Request) (Response, error) {
 	if req.ProtocolVersion != ProtocolVersion {
 		return Response{}, fmt.Errorf("%w: got %d, want %d", ErrUnsupportedVersion, req.ProtocolVersion, ProtocolVersion)
 	}
-	if req.SchemaHash != syncstore.SchemaHash() {
+	if !syncstore.AcceptsSchemaHash(req.SchemaHash) {
 		return Response{}, fmt.Errorf("%w", ErrSchemaMismatch)
 	}
 	if !syncstore.IsULID(req.SiteID) {

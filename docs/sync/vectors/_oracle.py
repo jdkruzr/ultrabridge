@@ -16,6 +16,9 @@ KNOWN = {
              "template", "template_pitch_mm"},
     "stroke": {"page_id", "color", "pen_width_min", "pen_width_max",
                "points", "z", "created_at", "deleted_at"},
+    "text_box": {"page_id", "x", "y", "width", "height", "text", "font_name",
+                 "font_size", "color", "weight", "border_width", "z",
+                 "created_at", "deleted_at"},
 }
 ULID_ALPHABET = set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
 
@@ -49,7 +52,7 @@ def merge(ops):
         cur = winners.get(k)
         if cur is None or key(op) > key(cur):
             winners[k] = op
-    state = {"folder": [], "notebook": [], "page": [], "stroke": []}
+    state = {t: [] for t in KNOWN}
     for (table, _pk), op in winners.items():
         row = {kk: op[kk] for kk in ("pk", "site_id", "op_seq", "wall_ts", "cols")}
         state[table].append(row)

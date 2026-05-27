@@ -104,6 +104,9 @@ Kotlin, not Python.
 | `page-template` | `template` + `template_pitch_mm` set then cleared, LWW |
 | `ub-delete-beats-older` | server-authored delete beats an older device op (UB as an authoring site) |
 | `ub-delete-then-device-edit` | a newer device edit beats a UB delete → row resurrects (the LWW ceiling) |
+| `text-box-basic` | one `text_box` op materializes to a live row (all 14 cols + provenance) |
+| `text-box-delete` | `deleted_at` LWW on a text box: create → delete → restore converges to live |
+| `text-box-lww` | two ops on one `text_box` pk converge to the greater key; deleted winner stays in state |
 
 **Out of scope for vectors:** transport/envelope error handling, per-op `rejected` semantics,
 `accepted_through` contiguity, idempotent resend, and cursor reconciliation are *protocol*
