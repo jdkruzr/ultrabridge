@@ -18,6 +18,16 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		)`,
 		`INSERT OR IGNORE INTO sync_seq (id, last_seq) VALUES (1, 0)`,
 
+		// sync_site holds UB's OWN authoring identity: a persistent ULID site_id
+		// (so server-authored ops are wire-legal — see newULID/AuthorOps) and a
+		// monotonic per-site op_seq counter. Seeded once below; the ULID survives
+		// restarts so the device sees a stable origin for UB's ops.
+		`CREATE TABLE IF NOT EXISTS sync_site (
+			id          INTEGER PRIMARY KEY CHECK (id = 1),
+			site_id     TEXT    NOT NULL,
+			last_op_seq INTEGER NOT NULL DEFAULT 0
+		)`,
+
 		`CREATE TABLE IF NOT EXISTS sync_ops (
 			seq        INTEGER PRIMARY KEY,
 			site_id    TEXT    NOT NULL,
@@ -100,6 +110,15 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		if _, err := db.ExecContext(ctx, s); err != nil {
 			return fmt.Errorf("syncstore migrate: %w", err)
 		}
+	}
+
+	// Mint UB's authoring ULID exactly once. INSERT OR IGNORE keeps the first
+	// value forever, so a fresh ULID is generated per startup but only the
+	// initial one persists — UB's site_id is stable across restarts.
+	if _, err := db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO sync_site (id, site_id, last_op_seq) VALUES (1, ?, 0)`,
+		newULID()); err != nil {
+		return fmt.Errorf("syncstore migrate: seed site: %w", err)
 	}
 
 	// Additive v1 columns for DBs created before the folder/template amendment.

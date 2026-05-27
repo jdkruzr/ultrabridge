@@ -108,21 +108,8 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 
 		// Assign the next global seq and append the op verbatim (relay payload).
 		// A losing op (mirror unchanged) is still recorded for relay completeness.
-		var seq int64
-		if err := tx.QueryRowContext(ctx,
-			`UPDATE sync_seq SET last_seq = last_seq + 1 WHERE id = 1 RETURNING last_seq`).
-			Scan(&seq); err != nil {
-			return res, fmt.Errorf("bump seq: %w", err)
-		}
-		payload, err := json.Marshal(op) // original op (preserves any forward-compat cols)
-		if err != nil {
-			return res, fmt.Errorf("marshal payload: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO sync_ops (seq, site_id, op_seq, table_name, pk, wall_ts, payload, applied_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			seq, op.SiteID, op.OpSeq, op.Table, op.PK, op.WallTS, string(payload), now); err != nil {
-			return res, fmt.Errorf("insert sync_ops: %w", err)
+		if err := appendOp(ctx, tx, op, now); err != nil {
+			return res, err
 		}
 
 		if changed && pagePK != "" {
@@ -140,6 +127,108 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 		return res, fmt.Errorf("commit: %w", err)
 	}
 	return res, nil
+}
+
+// appendOp assigns the next global seq and appends op verbatim to the changelog,
+// stamping applied_at = now. It is the changelog half shared by ApplyBatch
+// (device-pushed ops) and AuthorOps (server-authored ops): identical relay
+// payload and seq allocation, so both kinds of op flow through OpsSince the same
+// way. The op is marshaled as-is to preserve any forward-compat columns.
+func appendOp(ctx context.Context, tx *sql.Tx, op Op, now int64) error {
+	var seq int64
+	if err := tx.QueryRowContext(ctx,
+		`UPDATE sync_seq SET last_seq = last_seq + 1 WHERE id = 1 RETURNING last_seq`).
+		Scan(&seq); err != nil {
+		return fmt.Errorf("bump seq: %w", err)
+	}
+	payload, err := json.Marshal(op)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO sync_ops (seq, site_id, op_seq, table_name, pk, wall_ts, payload, applied_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		seq, op.SiteID, op.OpSeq, op.Table, op.PK, op.WallTS, string(payload), now); err != nil {
+		return fmt.Errorf("insert sync_ops: %w", err)
+	}
+	return nil
+}
+
+// SiteID returns UB's own authoring ULID (seeded at Migrate, stable across
+// restarts). Server-originated ops carry this as their site_id.
+func (s *Store) SiteID(ctx context.Context) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT site_id FROM sync_site WHERE id = 1`).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("read site_id: %w", err)
+	}
+	return id, nil
+}
+
+// AuthorOps makes UB a first-class authoring site: it stamps each op with UB's
+// site_id, the next monotonic op_seq, and a single batch wall_ts (server clock —
+// UB is the sync server, so its clock is authoritative and these ops are not
+// subject to any incoming-op skew guard), then merges each into the mirror and
+// appends it to the changelog in ONE transaction. Because they land in sync_ops
+// with UB's site_id, the existing relay (OpsSince excludes only the requesting
+// site) carries them to every device on its next pull — the wire needs no change.
+//
+// Callers pass full-row upserts (Table, PK, Cols); SiteID/OpSeq/WallTS are filled
+// here and must not be pre-set. Each op is validated to the same bar as a device
+// op (ULID pk, known table, all known columns present) so a programming error
+// surfaces loudly rather than emitting a malformed op onto the wire. The op_seq
+// counter is persisted in the same tx as the inserts, so a crash can neither
+// double-allocate nor skip a sequence number. Returns the live pages whose render
+// input changed (for the caller to re-render / re-index).
+func (s *Store) AuthorOps(ctx context.Context, ops []Op) ([]TablePK, error) {
+	if len(ops) == 0 {
+		return nil, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	var siteID string
+	var lastOpSeq int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT site_id, last_op_seq FROM sync_site WHERE id = 1`).Scan(&siteID, &lastOpSeq); err != nil {
+		return nil, fmt.Errorf("load authoring site: %w", err)
+	}
+
+	now := time.Now().UnixMilli()
+	seq := lastOpSeq
+	var changedPages []TablePK
+	for _, op := range ops {
+		seq++
+		op.SiteID = siteID
+		op.OpSeq = seq
+		op.WallTS = now
+		if reason := validateOp(op); reason != "" {
+			return nil, fmt.Errorf("author op %s/%s invalid: %s", op.Table, op.PK, reason)
+		}
+		n := Normalize(op)
+		changed, pagePK, mErr := mergeRow(ctx, tx, n)
+		if mErr != nil {
+			return nil, fmt.Errorf("author merge %s/%s: %w", op.Table, op.PK, mErr)
+		}
+		if err := appendOp(ctx, tx, op, now); err != nil {
+			return nil, err
+		}
+		if changed && pagePK != "" {
+			changedPages = append(changedPages, TablePK{Table: "page", PK: pagePK})
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE sync_site SET last_op_seq = ? WHERE id = 1`, seq); err != nil {
+		return nil, fmt.Errorf("persist op_seq: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+	return changedPages, nil
 }
 
 // advanceAccepted computes and persists siteID's contiguous accepted_through
