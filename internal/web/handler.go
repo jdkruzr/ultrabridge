@@ -25,6 +25,7 @@ import (
 
 	"github.com/sysop/ultrabridge/internal/appconfig"
 	"github.com/sysop/ultrabridge/internal/digeststore"
+	"github.com/sysop/ultrabridge/internal/fnpath"
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/mcpauth"
 	"github.com/sysop/ultrabridge/internal/notedb"
@@ -572,7 +573,7 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 // page index is carried in the path, so no page query param is needed.
 func (h *Handler) handleForestNoteRender(w http.ResponseWriter, r *http.Request) {
 	notePath := r.URL.Query().Get("path")
-	if !strings.HasPrefix(notePath, "forestnote://") {
+	if !fnpath.Is(notePath) {
 		http.Error(w, "bad path", http.StatusBadRequest)
 		return
 	}
@@ -1510,7 +1511,7 @@ func (h *Handler) validNotePath(path string) bool {
 	// ForestNote is an opaque URI scheme, not a filesystem path (and filepath.Clean
 	// would mangle the "//"). The note service resolves it against the syncstore
 	// mirror, so there is no directory to escape. Check the raw path first.
-	if strings.HasPrefix(path, "forestnote://") {
+	if fnpath.Is(path) {
 		return true
 	}
 	cleaned := filepath.Clean(path)

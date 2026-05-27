@@ -17,11 +17,13 @@ import (
 	gosnote "github.com/jdkruzr/go-sn/note"
 	"github.com/sysop/ultrabridge/internal/appconfig"
 	"github.com/sysop/ultrabridge/internal/booxpipeline"
+	"github.com/sysop/ultrabridge/internal/fnpath"
 	"github.com/sysop/ultrabridge/internal/forestrender"
 	"github.com/sysop/ultrabridge/internal/notedb"
 	"github.com/sysop/ultrabridge/internal/notestore"
 	"github.com/sysop/ultrabridge/internal/processor"
 	"github.com/sysop/ultrabridge/internal/search"
+	"github.com/sysop/ultrabridge/internal/syncbridge"
 	"github.com/sysop/ultrabridge/internal/syncstore"
 )
 
@@ -83,6 +85,7 @@ type ForestNoteReader interface {
 	ListNotebooks(ctx context.Context) ([]syncstore.NotebookRow, error)
 	NotebookPages(ctx context.Context, notebookID string) ([]syncstore.PageRef, error)
 	NotebookMeta(ctx context.Context, notebookID string) (syncstore.NotebookRow, error)
+	LivePage(ctx context.Context, pagePK string) (notebookID string, live bool, err error)
 	LivePageStrokes(ctx context.Context, pagePK string) ([]syncstore.StrokeData, error)
 }
 
@@ -475,7 +478,7 @@ func (s *noteService) GetContent(ctx context.Context, path string) (interface{},
 func (s *noteService) RenderPage(ctx context.Context, path string, pageIdx int) (io.ReadCloser, string, error) {
 	// ForestNote paths are an opaque scheme (never a filesystem path), so branch
 	// on them first. The page ULID is in the path; pageIdx is ignored.
-	if isForestNotePath(path) {
+	if fnpath.Is(path) {
 		return s.renderForestNotePage(ctx, path)
 	}
 	if s.isBooxPath(path) {
@@ -484,10 +487,6 @@ func (s *noteService) RenderPage(ctx context.Context, path string, pageIdx int) 
 	return s.renderSupernotePage(ctx, path, pageIdx)
 }
 
-// isForestNotePath reports whether path is a ForestNote page/notebook URI
-// (forestnote://{notebook_id}[/{page_id}]).
-func isForestNotePath(path string) bool { return strings.HasPrefix(path, "forestnote://") }
-
 // renderForestNotePage renders a single ForestNote page to JPEG on the fly from
 // its live strokes in the syncstore mirror — no disk cache. The path is
 // forestnote://{notebook_id}/{page_id}; the trailing segment is the page ULID.
@@ -495,15 +494,26 @@ func (s *noteService) renderForestNotePage(ctx context.Context, path string) (io
 	if s.fnReader == nil {
 		return nil, "", fmt.Errorf("forestnote source not available")
 	}
-	pageID := path[strings.LastIndex(path, "/")+1:]
+	pageID := fnpath.PageID(path)
 	if pageID == "" {
 		return nil, "", fmt.Errorf("forestnote path missing page id: %s", path)
+	}
+	// Liveness gate: LivePageStrokes returns an empty slice for BOTH a live-but-
+	// blank page and a missing/soft-deleted one. Without this check the latter
+	// would render a blank 200 (reachable via a stale tab or a search deep-link to
+	// a since-deleted page). A live page with zero strokes still renders blank.
+	_, live, err := s.fnReader.LivePage(ctx, pageID)
+	if err != nil {
+		return nil, "", fmt.Errorf("page liveness: %w", err)
+	}
+	if !live {
+		return nil, "", fmt.Errorf("forestnote page not found: %s", pageID)
 	}
 	strokes, err := s.fnReader.LivePageStrokes(ctx, pageID)
 	if err != nil {
 		return nil, "", fmt.Errorf("load page strokes: %w", err)
 	}
-	img, err := forestrender.RenderPage(fnStrokesToRender(strokes))
+	img, err := forestrender.RenderPage(syncbridge.MapStrokes(strokes))
 	if err != nil {
 		return nil, "", fmt.Errorf("render forestnote page: %w", err)
 	}
@@ -512,19 +522,6 @@ func (s *noteService) renderForestNotePage(ctx context.Context, path string) (io
 		return nil, "", err
 	}
 	return io.NopCloser(&buf), "image/jpeg", nil
-}
-
-// fnStrokesToRender maps mirror strokes onto forestrender's input. Mirrors
-// syncbridge.mapStrokes; kept local so forestrender stays sync-agnostic.
-func fnStrokesToRender(sd []syncstore.StrokeData) []forestrender.Stroke {
-	out := make([]forestrender.Stroke, len(sd))
-	for i, st := range sd {
-		out[i] = forestrender.Stroke{
-			Color: st.Color, PenWidthMin: st.PenWidthMin, PenWidthMax: st.PenWidthMax,
-			Points: st.Points, Z: st.Z,
-		}
-	}
-	return out
 }
 
 // ListForestNoteTree returns the live folder tree (roots) plus notebooks that
@@ -564,7 +561,7 @@ func (s *noteService) ListForestNotePages(ctx context.Context, notebookID string
 	for i, r := range refs {
 		pages[i] = ForestNotePage{
 			PageID:  r.ID,
-			Path:    "forestnote://" + notebookID + "/" + r.ID,
+			Path:    fnpath.Page(notebookID, r.ID),
 			Ordinal: i,
 		}
 	}
@@ -584,7 +581,7 @@ func buildForestNoteTree(folders []syncstore.FolderRow, notebooks []syncstore.No
 		nb := ForestNoteNotebook{
 			NotebookID: n.ID,
 			Name:       n.Name,
-			Path:       "forestnote://" + n.ID,
+			Path:       fnpath.Notebook(n.ID),
 			FolderID:   n.FolderID,
 			PageCount:  n.PageCount,
 		}

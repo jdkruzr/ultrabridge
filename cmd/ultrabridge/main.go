@@ -276,7 +276,15 @@ func main() {
 	// existing deployment with sync_enabled=true keeps syncing after upgrade, now
 	// via the source row (authoritative going forward; the legacy setting stays).
 	if cfg.SyncEnabled {
-		existing, _ := source.ListSources(context.Background(), noteDB)
+		existing, err := source.ListSources(context.Background(), noteDB)
+		if err != nil {
+			// Couldn't confirm whether a forestnote row already exists; seeding now
+			// could insert a duplicate (the sources table has no unique-on-type
+			// constraint, so two rows would start two bridges on the same notedb).
+			// Skip — the enabled-source loop below still starts any existing row.
+			logger.Warn("forestnote auto-seed skipped: list sources failed", "err", err)
+			existing = nil
+		}
 		hasFN := false
 		for _, r := range existing {
 			if r.Type == "forestnote" {
@@ -284,7 +292,7 @@ func main() {
 				break
 			}
 		}
-		if !hasFN {
+		if err == nil && !hasFN {
 			cfgJSON := fmt.Sprintf(`{"batch_limit":%d}`, cfg.SyncBatchLimit)
 			if _, err := source.AddSource(context.Background(), noteDB, source.SourceRow{
 				Type: "forestnote", Name: "ForestNote", Enabled: true, ConfigJSON: cfgJSON,

@@ -17,6 +17,7 @@ type fakeFNReader struct {
 	pages     map[string][]syncstore.PageRef
 	strokes   map[string][]syncstore.StrokeData
 	meta      map[string]syncstore.NotebookRow
+	live      map[string]bool // page id → live; absent ⇒ not live (missing/deleted)
 }
 
 func (f *fakeFNReader) ListFolders(context.Context) ([]syncstore.FolderRow, error) {
@@ -30,6 +31,9 @@ func (f *fakeFNReader) NotebookPages(_ context.Context, nb string) ([]syncstore.
 }
 func (f *fakeFNReader) NotebookMeta(_ context.Context, nb string) (syncstore.NotebookRow, error) {
 	return f.meta[nb], nil
+}
+func (f *fakeFNReader) LivePage(_ context.Context, pg string) (string, bool, error) {
+	return "", f.live[pg], nil
 }
 func (f *fakeFNReader) LivePageStrokes(_ context.Context, pg string) ([]syncstore.StrokeData, error) {
 	return f.strokes[pg], nil
@@ -46,9 +50,12 @@ func twoPointStroke() syncstore.StrokeData {
 }
 
 func TestRenderForestNotePage_ReturnsJPEG(t *testing.T) {
-	r := &fakeFNReader{strokes: map[string][]syncstore.StrokeData{
-		"00000000000000000000000PGA": {twoPointStroke()},
-	}}
+	r := &fakeFNReader{
+		strokes: map[string][]syncstore.StrokeData{
+			"00000000000000000000000PGA": {twoPointStroke()},
+		},
+		live: map[string]bool{"00000000000000000000000PGA": true},
+	}
 	s := &noteService{fnReader: r}
 	rc, ct, err := s.RenderPage(context.Background(), "forestnote://00000000000000000000000NBA/00000000000000000000000PGA", 0)
 	if err != nil {
@@ -61,6 +68,31 @@ func TestRenderForestNotePage_ReturnsJPEG(t *testing.T) {
 	body, _ := io.ReadAll(rc)
 	if len(body) == 0 {
 		t.Error("empty image body")
+	}
+}
+
+// A live page with zero strokes still renders (a blank page), so liveness — not
+// stroke count — is what distinguishes "blank" from "gone".
+func TestRenderForestNotePage_LiveBlankPageRenders(t *testing.T) {
+	r := &fakeFNReader{live: map[string]bool{"pgBlank": true}}
+	s := &noteService{fnReader: r}
+	rc, ct, err := s.RenderPage(context.Background(), "forestnote://nb/pgBlank", 0)
+	if err != nil {
+		t.Fatalf("render blank: %v", err)
+	}
+	defer rc.Close()
+	if ct != "image/jpeg" {
+		t.Errorf("content-type = %q, want image/jpeg", ct)
+	}
+}
+
+// A missing/soft-deleted page must error (→ 404 at the handler) rather than
+// serve a blank 200 that a stale tab or search deep-link would cache.
+func TestRenderForestNotePage_MissingPageErrors(t *testing.T) {
+	r := &fakeFNReader{} // no live pages
+	s := &noteService{fnReader: r}
+	if _, _, err := s.RenderPage(context.Background(), "forestnote://nb/gonePage", 0); err == nil {
+		t.Error("want error for missing/deleted page, got nil")
 	}
 }
 
