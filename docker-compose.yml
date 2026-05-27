@@ -31,6 +31,13 @@ services:
     restart: unless-stopped
   ub-mcp:
     image: ub-mcp:latest
+    # Opt-in sidecar: only started when the "mcp" profile is active (rebuild.sh
+    # enables it automatically when UB_MCP_API_TOKEN is set). Kept out of the
+    # default set so the main service rebuilds without an .env. The token is
+    # soft-defaulted (:-) rather than guarded (:?) because Compose interpolates
+    # the whole file before filtering profiles — a hard guard here would block
+    # every compose command, even ones that never touch this service.
+    profiles: ["mcp"]
     build:
       context: .
       dockerfile: Dockerfile
@@ -42,7 +49,7 @@ services:
       - UB_MCP_API_URL=http://ultrabridge:8443
       # Bearer auth: token from .env (gitignored). Create via Settings → MCP Tokens.
       # Replaces UB_MCP_API_USER/PASS basic auth — no plaintext secret in this file.
-      - UB_MCP_API_TOKEN=${UB_MCP_API_TOKEN:?set UB_MCP_API_TOKEN in .env}
+      - UB_MCP_API_TOKEN=${UB_MCP_API_TOKEN:-}
       - UB_DB_PATH=/data/ultrabridge.db
     volumes:
       - ./ultrabridge-data:/data

@@ -84,11 +84,22 @@ fi
 
 info "Building and restarting UltraBridge..."
 SERVICES="ultrabridge"
-# Include ub-mcp if it's defined in the compose file
-if grep -q 'ub-mcp:' "$SCRIPT_DIR/docker-compose.yml" 2>/dev/null; then
-    SERVICES="ultrabridge ub-mcp"
+PROFILE_ARGS=()
+# ub-mcp is an opt-in sidecar (compose profile "mcp"). Include it only when a
+# bearer token is available — from the environment or .env — so a missing token
+# never blocks rebuilding the main service. Mint one in Settings → MCP Tokens.
+MCP_TOKEN="${UB_MCP_API_TOKEN:-}"
+if [[ -z "$MCP_TOKEN" && -f "$SCRIPT_DIR/.env" ]]; then
+    MCP_TOKEN="$(grep -E '^UB_MCP_API_TOKEN=' "$SCRIPT_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"
 fi
-docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build --force-recreate $SERVICES || fail "Build/restart failed"
+if [[ -n "$MCP_TOKEN" ]]; then
+    SERVICES="ultrabridge ub-mcp"
+    PROFILE_ARGS=(--profile mcp)
+    info "MCP token found — including ub-mcp sidecar."
+else
+    warn "No UB_MCP_API_TOKEN — skipping ub-mcp sidecar (set it in .env to enable)."
+fi
+docker compose "${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"}" -f "$SCRIPT_DIR/docker-compose.yml" up -d --build --force-recreate $SERVICES || fail "Build/restart failed"
 ok "Container(s) running"
 
 PORT=$(grep -oP '"\K[0-9]+(?=:8443")' "$SCRIPT_DIR/docker-compose.yml" 2>/dev/null || echo "8443")
