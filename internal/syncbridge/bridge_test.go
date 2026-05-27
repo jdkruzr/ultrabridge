@@ -194,6 +194,78 @@ func TestProcessPage_NoStrokesSkipped(t *testing.T) {
 	}
 }
 
+// seedPageWithTextBox adds a live page (no strokes) plus one text box carrying
+// `text`, so a text-only page can be exercised.
+func seedPageWithTextBox(t *testing.T, s *syncstore.Store, text string) {
+	t.Helper()
+	const tb1 = "00000000000000000000000TB1"
+	_, err := s.ApplyBatch(context.Background(), siteA, []syncstore.Op{
+		{Table: "page", PK: pg1, SiteID: siteA, OpSeq: 1, WallTS: 1000,
+			Cols: map[string]any{"notebook_id": nb1, "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil, "template": nil, "template_pitch_mm": nil}},
+		{Table: "text_box", PK: tb1, SiteID: siteA, OpSeq: 2, WallTS: 1010,
+			Cols: map[string]any{
+				"page_id": pg1, "x": float64(0), "y": float64(0), "width": float64(1000), "height": float64(500),
+				"text": text, "font_name": "", "font_size": float64(200), "color": float64(4278190080),
+				"weight": float64(400), "border_width": float64(0), "z": float64(0),
+				"created_at": float64(1000), "deleted_at": nil,
+			}},
+	})
+	if err != nil {
+		t.Fatalf("seed text box: %v", err)
+	}
+}
+
+// seedTextBoxOnExistingPage adds a text box to a page already seeded (e.g. by
+// seedPageWithStroke, which uses op_seq 1..3 — so this uses 10).
+func seedTextBoxOnExistingPage(t *testing.T, s *syncstore.Store, text string) {
+	t.Helper()
+	const tb1 = "00000000000000000000000TB1"
+	_, err := s.ApplyBatch(context.Background(), siteA, []syncstore.Op{
+		{Table: "text_box", PK: tb1, SiteID: siteA, OpSeq: 10, WallTS: 1100,
+			Cols: map[string]any{
+				"page_id": pg1, "x": float64(0), "y": float64(0), "width": float64(1000), "height": float64(500),
+				"text": text, "font_name": "", "font_size": float64(200), "color": float64(4278190080),
+				"weight": float64(400), "border_width": float64(0), "z": float64(0),
+				"created_at": float64(1000), "deleted_at": nil,
+			}},
+	})
+	if err != nil {
+		t.Fatalf("seed text box: %v", err)
+	}
+}
+
+// A page with no strokes but a text box must still render + index (the native box
+// text becomes the body), not be dropped as "blank".
+func TestProcessPage_TextBoxOnlyIndexed(t *testing.T) {
+	s := newStore(t)
+	seedPageWithTextBox(t, s, "typed note")
+	fi := &fakeIndexer{}
+	b := New(s, Deps{Indexer: fi}, nil) // no OCR — body comes purely from the box
+	b.processPage(context.Background(), pg1)
+	if fi.count() != 1 {
+		t.Fatalf("text-box-only page should be indexed once, got %d", fi.count())
+	}
+	if fi.calls[0].body != "typed note" {
+		t.Errorf("body = %q, want %q (native box text)", fi.calls[0].body, "typed note")
+	}
+}
+
+// Native box text is appended to the OCR text in the indexed body.
+func TestProcessPage_BoxTextAppendedToOCR(t *testing.T) {
+	s := newStore(t)
+	seedPageWithStroke(t, s)
+	seedTextBoxOnExistingPage(t, s, "typed note")
+	fi := &fakeIndexer{}
+	b := New(s, Deps{Indexer: fi, OCR: fakeOCR{text: "ink text"}}, nil)
+	b.processPage(context.Background(), pg1)
+	if fi.count() != 1 {
+		t.Fatalf("want 1 index call, got %d", fi.count())
+	}
+	if fi.calls[0].body != "ink text\ntyped note" {
+		t.Errorf("body = %q, want %q", fi.calls[0].body, "ink text\ntyped note")
+	}
+}
+
 func TestProcessPage_NilOCRIndexesEmptyText(t *testing.T) {
 	s := newStore(t)
 	seedPageWithStroke(t, s)

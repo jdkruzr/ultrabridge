@@ -12,6 +12,7 @@ import (
 	"context"
 	"image/jpeg"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/sysop/ultrabridge/internal/fnpath"
@@ -180,15 +181,40 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 		}
 	}
 
+	// Text-box content is native UTF-8 — higher quality than OCR'ing the rendered
+	// glyphs — so append it to the indexed/embedded body. (The boxes are also drawn
+	// into the image, so OCR may pick them up too; the duplication is harmless for
+	// search ranking and is the accepted v1 trade-off.)
+	body := text
+	if bt := joinTextBoxes(boxes); bt != "" {
+		if body != "" {
+			body += "\n"
+		}
+		body += bt
+	}
+
 	if b.deps.Indexer != nil {
-		if err := b.deps.Indexer.IndexPage(ctx, path, 0, "forestnote", text, "", ""); err != nil {
+		if err := b.deps.Indexer.IndexPage(ctx, path, 0, "forestnote", body, "", ""); err != nil {
 			b.logger.Warn("syncbridge: index failed", "page", pagePK, "err", err)
 		}
 	}
 
-	if text != "" && b.deps.Embedder != nil && b.deps.EmbedStore != nil {
-		rag.EmbedAndStorePage(ctx, b.deps.Embedder, b.deps.EmbedStore, path, 0, text, b.deps.EmbedModel, b.logger)
+	if body != "" && b.deps.Embedder != nil && b.deps.EmbedStore != nil {
+		rag.EmbedAndStorePage(ctx, b.deps.Embedder, b.deps.EmbedStore, path, 0, body, b.deps.EmbedModel, b.logger)
 	}
+}
+
+// joinTextBoxes concatenates the non-empty text of a page's boxes, newline-joined,
+// for the search/embedding body. Order follows the z-sorted read (stable enough
+// for a search payload; exact reading order is not required).
+func joinTextBoxes(boxes []syncstore.TextBoxData) string {
+	var parts []string
+	for _, b := range boxes {
+		if b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // dropPage removes a page from the search index and the embedding store
