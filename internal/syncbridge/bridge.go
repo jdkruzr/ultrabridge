@@ -156,7 +156,12 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 		return
 	}
 
-	img, err := forestrender.RenderPage(MapStrokes(strokes), MapTextBoxes(boxes))
+	// Render strokes only for OCR. Text boxes are appended as canonical native UTF-8
+	// further down, so drawing them here too would round-trip them through OCR and
+	// stack each box's text 2-3× in the authored body (which the dialog renders to
+	// the user verbatim). See the body-composition note below. The web-UI render path
+	// in service/note.go keeps drawing text boxes — only the OCR-bound JPEG omits them.
+	img, err := forestrender.RenderPage(MapStrokes(strokes), nil)
 	if err != nil {
 		b.logger.Error("syncbridge: render failed", "page", pagePK, "err", err)
 		return
@@ -183,9 +188,10 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 	}
 
 	// Text-box content is native UTF-8 — higher quality than OCR'ing the rendered
-	// glyphs — so append it to the indexed/embedded body. (The boxes are also drawn
-	// into the image, so OCR may pick them up too; the duplication is harmless for
-	// search ranking and is the accepted v1 trade-off.)
+	// glyphs — so append it to the indexed/embedded body. The OCR-bound JPEG above
+	// is rendered WITHOUT text boxes (boxes=nil) so OCR never sees them; this append
+	// is now the canonical (single) source of text-box content in the body — no
+	// round-trip duplication into the dialog.
 	body := text
 	if bt := joinTextBoxes(boxes); bt != "" {
 		if body != "" {

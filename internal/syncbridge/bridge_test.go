@@ -1,11 +1,13 @@
 package syncbridge
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"image/jpeg"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -98,6 +100,21 @@ func (f *fakeIndexer) delCount() int { f.mu.Lock(); defer f.mu.Unlock(); return 
 type fakeOCR struct{ text string }
 
 func (f fakeOCR) Recognize(context.Context, []byte, string) (string, error) { return f.text, nil }
+
+// recordingOCR captures every JPEG passed to Recognize so a test can assert what
+// pixels the OCR pipeline actually saw (used by TestProcessPage_OCRJPEGOmitsTextBoxes).
+type recordingOCR struct {
+	mu    sync.Mutex
+	text  string
+	jpegs [][]byte
+}
+
+func (r *recordingOCR) Recognize(_ context.Context, j []byte, _ string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.jpegs = append(r.jpegs, append([]byte(nil), j...))
+	return r.text, nil
+}
 
 type fakeEmbedder struct{}
 
@@ -231,6 +248,68 @@ func seedTextBoxOnExistingPage(t *testing.T, s *syncstore.Store, text string) {
 	})
 	if err != nil {
 		t.Fatalf("seed text box: %v", err)
+	}
+}
+
+// seedDistantTextBox seeds a text box positioned far from seedPageWithStroke's
+// strokes (~10..60) so that drawing it into the rendered JPEG would expand the
+// bounding box dramatically. Used by TestProcessPage_OCRJPEGOmitsTextBoxes —
+// distance-from-strokes is what makes the test detectable.
+func seedDistantTextBox(t *testing.T, s *syncstore.Store, text string) {
+	t.Helper()
+	const tb1 = "00000000000000000000000TB1"
+	_, err := s.ApplyBatch(context.Background(), siteA, []syncstore.Op{
+		{Table: "text_box", PK: tb1, SiteID: siteA, OpSeq: 11, WallTS: 1110,
+			Cols: map[string]any{
+				"page_id": pg1, "x": float64(5000), "y": float64(5000), "width": float64(1000), "height": float64(500),
+				"text": text, "font_name": "", "font_size": float64(200), "color": float64(4278190080),
+				"weight": float64(400), "border_width": float64(0), "z": float64(0),
+				"created_at": float64(1000), "deleted_at": nil,
+			}},
+	})
+	if err != nil {
+		t.Fatalf("seed distant text box: %v", err)
+	}
+}
+
+// Regression: the OCR-bound JPEG must NOT include text boxes. If it did, the
+// recognizer would transcribe their glyphs AND joinTextBoxes would append the
+// text again, stacking each box's content 2-3× in the body the dialog renders
+// verbatim to the user. (See ocr-staleness-followup memory + commit history.)
+//
+// We assert by byte-equality between two captured JPEGs: strokes-only vs same
+// strokes plus a text box positioned far from the strokes. If text boxes were
+// drawn, the bounding box would grow to include (5000,5000) and the JPEG would
+// differ. Identical bytes ⇒ text boxes were skipped in the OCR-bound render.
+func TestProcessPage_OCRJPEGOmitsTextBoxes(t *testing.T) {
+	s1 := newStore(t)
+	seedPageWithStroke(t, s1)
+	rec1 := &recordingOCR{text: "ink text"}
+	b1 := New(s1, Deps{OCR: rec1}, nil)
+	b1.processPage(context.Background(), pg1)
+
+	s2 := newStore(t)
+	seedPageWithStroke(t, s2)
+	seedDistantTextBox(t, s2, "should not appear in jpeg")
+	rec2 := &recordingOCR{text: "ink text"}
+	b2 := New(s2, Deps{OCR: rec2}, nil)
+	b2.processPage(context.Background(), pg1)
+
+	if len(rec1.jpegs) != 1 || len(rec2.jpegs) != 1 {
+		t.Fatalf("want 1 OCR call each, got %d and %d", len(rec1.jpegs), len(rec2.jpegs))
+	}
+	if !bytes.Equal(rec1.jpegs[0], rec2.jpegs[0]) {
+		d1, _ := jpeg.Decode(bytes.NewReader(rec1.jpegs[0]))
+		d2, _ := jpeg.Decode(bytes.NewReader(rec2.jpegs[0]))
+		var b1Bounds, b2Bounds string
+		if d1 != nil {
+			b1Bounds = d1.Bounds().String()
+		}
+		if d2 != nil {
+			b2Bounds = d2.Bounds().String()
+		}
+		t.Errorf("OCR JPEG differs when a text box is present (strokes-only bounds=%s vs strokes+box bounds=%s) — text box leaked into the OCR-bound render",
+			b1Bounds, b2Bounds)
 	}
 }
 
