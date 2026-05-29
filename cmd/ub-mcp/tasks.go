@@ -28,17 +28,34 @@ type taskLink struct {
 	Page     int    `json:"page"`
 }
 
+// taskForestNote mirrors service.TaskForestNote — provenance for tasks
+// auto-extracted from a ForestNote notebook page (via the lasso → to-do
+// gesture or future paths). All fields optional.
+type taskForestNote struct {
+	NotebookID   string `json:"notebook_id,omitempty"`
+	PageID       string `json:"page_id,omitempty"`
+	NotebookName string `json:"notebook_name,omitempty"`
+	Source       string `json:"source,omitempty"`
+	NativeURL    string `json:"native_url,omitempty"`
+}
+
 // task mirrors service.Task's JSON shape. Kept local so changes to the
 // internal type don't break ub-mcp's compilation.
 type task struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	DueAt       *time.Time `json:"due_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	Detail      *string    `json:"detail,omitempty"`
-	Links       *taskLink  `json:"links,omitempty"`
+	ID          string          `json:"id"`
+	Title       string          `json:"title"`
+	Status      string          `json:"status"`
+	CreatedAt   time.Time       `json:"created_at"`
+	DueAt       *time.Time      `json:"due_at,omitempty"`
+	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	Detail      *string         `json:"detail,omitempty"`
+	Links       *taskLink       `json:"links,omitempty"`
+	URL         *string         `json:"url,omitempty"`
+	Priority    *string         `json:"priority,omitempty"`
+	Categories  []string        `json:"categories,omitempty"`
+	ForestNote  *taskForestNote `json:"forestnote,omitempty"`
+	Comment     string          `json:"comment,omitempty"`
+	Deleted     bool            `json:"deleted,omitempty"`
 }
 
 // formatTask renders a single task as readable text for the agent.
@@ -47,14 +64,46 @@ func formatTask(t task) string {
 	sb.WriteString(fmt.Sprintf("Task: %s\n", t.Title))
 	sb.WriteString(fmt.Sprintf("ID: %s\n", t.ID))
 	sb.WriteString(fmt.Sprintf("Status: %s\n", t.Status))
+	if t.Deleted {
+		sb.WriteString("(deleted — soft-tombstoned, hidden from default views)\n")
+	}
 	if t.DueAt != nil {
 		sb.WriteString(fmt.Sprintf("Due: %s\n", t.DueAt.Format(time.RFC3339)))
 	}
 	if t.CompletedAt != nil && t.Status == "completed" {
 		sb.WriteString(fmt.Sprintf("Completed: %s\n", t.CompletedAt.Format(time.RFC3339)))
 	}
+	if t.Priority != nil && *t.Priority != "" {
+		sb.WriteString(fmt.Sprintf("Priority: %s\n", *t.Priority))
+	}
+	if t.URL != nil && *t.URL != "" {
+		sb.WriteString(fmt.Sprintf("URL: %s\n", *t.URL))
+	}
+	if len(t.Categories) > 0 {
+		sb.WriteString(fmt.Sprintf("Categories: %s\n", strings.Join(t.Categories, ", ")))
+	}
 	if t.Detail != nil && *t.Detail != "" {
 		sb.WriteString(fmt.Sprintf("Detail: %s\n", *t.Detail))
+	}
+	if t.Comment != "" {
+		sb.WriteString(fmt.Sprintf("Comment: %s\n", t.Comment))
+	}
+	if t.ForestNote != nil {
+		if t.ForestNote.NotebookName != "" {
+			sb.WriteString(fmt.Sprintf("From ForestNote notebook: %s (id %s)\n",
+				t.ForestNote.NotebookName, t.ForestNote.NotebookID))
+		} else if t.ForestNote.NotebookID != "" {
+			sb.WriteString(fmt.Sprintf("From ForestNote notebook id: %s\n", t.ForestNote.NotebookID))
+		}
+		if t.ForestNote.PageID != "" {
+			sb.WriteString(fmt.Sprintf("ForestNote page id: %s\n", t.ForestNote.PageID))
+		}
+		if t.ForestNote.Source != "" {
+			sb.WriteString(fmt.Sprintf("ForestNote source: %s\n", t.ForestNote.Source))
+		}
+		if t.ForestNote.NativeURL != "" {
+			sb.WriteString(fmt.Sprintf("ForestNote native URL: %s\n", t.ForestNote.NativeURL))
+		}
 	}
 	if t.Links != nil && t.Links.FilePath != "" {
 		sb.WriteString(fmt.Sprintf("From note: %s (page %d)\n", t.Links.FilePath, t.Links.Page))
@@ -81,12 +130,33 @@ type ListTasksInput struct {
 	Status    string `json:"status,omitempty"`     // needs_action | completed | all
 	DueBefore string `json:"due_before,omitempty"` // RFC3339
 	DueAfter  string `json:"due_after,omitempty"`  // RFC3339
+	// ForestNote provenance filters — match tasks that came from a specific
+	// notebook (by ULID or human name), or any task created by a specific
+	// source (e.g. "lasso").
+	NotebookID   string `json:"notebook_id,omitempty"`
+	NotebookName string `json:"notebook_name,omitempty"`
+	Source       string `json:"source,omitempty"`
+	// Category matches a single VTODO CATEGORIES entry (case-sensitive).
+	Category string `json:"category,omitempty"`
+	// Priority matches the VTODO PRIORITY value verbatim ("1".."9").
+	Priority string `json:"priority,omitempty"`
+	// IncludeDeleted surfaces soft-tombstoned rows alongside live ones.
+	// Useful for "what's in the trash" queries and pre-flighting the
+	// purge_deleted_tasks tool. Defaults to false.
+	IncludeDeleted bool `json:"include_deleted,omitempty"`
 }
 
 func registerListTasks(server *mcp.Server, client *apiClient) {
 	mcp.AddTool[ListTasksInput, any](server, &mcp.Tool{
-		Name:        "list_tasks",
-		Description: "List tasks from UltraBridge. Optional filters: status (needs_action / completed / all, default all); due_before and due_after as RFC3339 timestamps. Tasks with no due date are excluded when either due filter is set.",
+		Name: "list_tasks",
+		Description: "List tasks from UltraBridge. Optional filters: " +
+			"status (needs_action / completed / all, default all); " +
+			"due_before / due_after as RFC3339 (tasks with no due date excluded when either is set); " +
+			"notebook_id / notebook_name / source (ForestNote provenance — match tasks created from a specific notebook or input source); " +
+			"category (single VTODO CATEGORIES entry, case-sensitive); " +
+			"priority (VTODO PRIORITY value 1-9); " +
+			"include_deleted=true to surface soft-tombstoned rows (default false). " +
+			"Returns title, status, due/completed times, URL, priority, categories, ForestNote provenance, and detail when present.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListTasksInput) (*mcp.CallToolResult, any, error) {
 		params := url.Values{}
 		if input.Status != "" {
@@ -97,6 +167,24 @@ func registerListTasks(server *mcp.Server, client *apiClient) {
 		}
 		if input.DueAfter != "" {
 			params.Set("due_after", input.DueAfter)
+		}
+		if input.NotebookID != "" {
+			params.Set("notebook_id", input.NotebookID)
+		}
+		if input.NotebookName != "" {
+			params.Set("notebook_name", input.NotebookName)
+		}
+		if input.Source != "" {
+			params.Set("source", input.Source)
+		}
+		if input.Category != "" {
+			params.Set("category", input.Category)
+		}
+		if input.Priority != "" {
+			params.Set("priority", input.Priority)
+		}
+		if input.IncludeDeleted {
+			params.Set("include_deleted", "true")
 		}
 
 		path := "/api/v1/tasks"
@@ -147,7 +235,7 @@ type GetTaskInput struct {
 func registerGetTask(server *mcp.Server, client *apiClient) {
 	mcp.AddTool[GetTaskInput, any](server, &mcp.Tool{
 		Name:        "get_task",
-		Description: "Fetch a single task by id. Returns the task detail including title, status, due date, detail notes, and any back-reference to the note it was auto-extracted from.",
+		Description: "Fetch a single task by id. Returns the full task surface: title, status, due/completed times, URL, priority, categories, detail, comment, and any ForestNote provenance (notebook id+name, page id, source, native URL) when the task came from a notebook page.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetTaskInput) (*mcp.CallToolResult, any, error) {
 		if input.ID == "" {
 			return nil, nil, fmt.Errorf("id is required")
