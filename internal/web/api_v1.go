@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sysop/ultrabridge/internal/auth"
@@ -80,15 +81,19 @@ func (h *Handler) RegisterAPIv1() {
 // is supplied — a "when's this due" filter can't meaningfully match a task
 // without a due date.
 func (h *Handler) handleV1ListTasks(w http.ResponseWriter, r *http.Request) {
-	tasks, err := h.tasks.List(r.Context())
-	if err != nil {
-		apiError(w, http.StatusInternalServerError, "failed to list tasks")
+	q := r.URL.Query()
+
+	// Pre-parse query params so a 400 doesn't burn a list query first.
+	status := q.Get("status")
+	switch status {
+	case "", "all", "needs_action", "completed":
+		// ok
+	default:
+		apiError(w, http.StatusBadRequest, "status must be needs_action, completed, or all")
 		return
 	}
-
-	status := r.URL.Query().Get("status")
 	var dueBefore, dueAfter *time.Time
-	if s := r.URL.Query().Get("due_before"); s != "" {
+	if s := q.Get("due_before"); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
 			apiError(w, http.StatusBadRequest, "due_before must be RFC3339")
@@ -96,13 +101,35 @@ func (h *Handler) handleV1ListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		dueBefore = &t
 	}
-	if s := r.URL.Query().Get("due_after"); s != "" {
+	if s := q.Get("due_after"); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
 			apiError(w, http.StatusBadRequest, "due_after must be RFC3339")
 			return
 		}
 		dueAfter = &t
+	}
+	includeDeleted := parseBoolQuery(q.Get("include_deleted"))
+	notebookID := q.Get("notebook_id")
+	notebookName := q.Get("notebook_name")
+	source := q.Get("source")
+	category := q.Get("category")
+	priority := q.Get("priority")
+
+	// Soft-deleted rows live below the default visibility waterline; only the
+	// caller who asked for them gets them.
+	var (
+		tasks []service.Task
+		err   error
+	)
+	if includeDeleted {
+		tasks, err = h.tasks.ListIncludingDeleted(r.Context())
+	} else {
+		tasks, err = h.tasks.List(r.Context())
+	}
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "failed to list tasks")
+		return
 	}
 
 	filtered := make([]service.Task, 0, len(tasks))
@@ -116,11 +143,6 @@ func (h *Handler) handleV1ListTasks(w http.ResponseWriter, r *http.Request) {
 			if t.Status != service.StatusCompleted {
 				continue
 			}
-		case "", "all":
-			// no status filter
-		default:
-			apiError(w, http.StatusBadRequest, "status must be needs_action, completed, or all")
-			return
 		}
 		if dueBefore != nil || dueAfter != nil {
 			if t.DueAt == nil {
@@ -133,6 +155,31 @@ func (h *Handler) handleV1ListTasks(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		if notebookID != "" {
+			if t.ForestNote == nil || t.ForestNote.NotebookID != notebookID {
+				continue
+			}
+		}
+		if notebookName != "" {
+			if t.ForestNote == nil || t.ForestNote.NotebookName != notebookName {
+				continue
+			}
+		}
+		if source != "" {
+			if t.ForestNote == nil || t.ForestNote.Source != source {
+				continue
+			}
+		}
+		if category != "" {
+			if !containsCategory(t.Categories, category) {
+				continue
+			}
+		}
+		if priority != "" {
+			if t.Priority == nil || *t.Priority != priority {
+				continue
+			}
+		}
 		filtered = append(filtered, t)
 	}
 
@@ -141,6 +188,26 @@ func (h *Handler) handleV1ListTasks(w http.ResponseWriter, r *http.Request) {
 		filtered = []service.Task{}
 	}
 	json.NewEncoder(w).Encode(filtered)
+}
+
+// parseBoolQuery accepts "1"/"true"/"yes" (case-insensitive) as true; anything
+// else is false. Keeps the surface friendly to MCP tools that might send a
+// stringified bool from JSON.
+func parseBoolQuery(s string) bool {
+	switch strings.ToLower(s) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
+}
+
+func containsCategory(cats []string, want string) bool {
+	for _, c := range cats {
+		if c == want {
+			return true
+		}
+	}
+	return false
 }
 
 // handleV1GetTask returns a single task by id. 404 when the id is unknown

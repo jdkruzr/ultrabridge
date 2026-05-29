@@ -232,6 +232,129 @@ func TestAPIv1ListTasksFilters(t *testing.T) {
 	})
 }
 
+// TestAPIv1ListTasksForestNoteFilters exercises the new ?notebook_id /
+// ?notebook_name / ?source / ?category / ?priority / ?include_deleted query
+// params introduced alongside FN-side X-FORESTNOTE-* emission.
+func TestAPIv1ListTasksForestNoteFilters(t *testing.T) {
+	h := newTestHandler()
+	tasks := h.tasks.(*mockTaskService)
+	priHigh := "1"
+	priNorm := "5"
+	tasks.tasks = []service.Task{
+		{
+			ID: "f1", Title: "from notebook A (lasso)", Status: service.StatusNeedsAction,
+			Priority: &priHigh, Categories: []string{"work", "urgent"},
+			ForestNote: &service.TaskForestNote{NotebookID: "A", NotebookName: "Project Notes", Source: "lasso"},
+		},
+		{
+			ID: "f2", Title: "from notebook B (lasso)", Status: service.StatusNeedsAction,
+			Priority: &priNorm, Categories: []string{"personal"},
+			ForestNote: &service.TaskForestNote{NotebookID: "B", NotebookName: "Grocery", Source: "lasso"},
+		},
+		{
+			ID: "f3", Title: "non-FN task", Status: service.StatusNeedsAction,
+		},
+		{
+			ID: "f4", Title: "soft-deleted", Status: service.StatusNeedsAction, Deleted: true,
+		},
+	}
+
+	call := func(path string) []service.Task {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s -> %d body=%s", path, w.Code, w.Body.String())
+		}
+		var got []service.Task
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return got
+	}
+
+	t.Run("notebook_id_filter", func(t *testing.T) {
+		got := call("/api/v1/tasks?notebook_id=A")
+		if len(got) != 1 || got[0].ID != "f1" {
+			t.Errorf("want only f1, got %+v", ids(got))
+		}
+	})
+
+	t.Run("notebook_name_filter", func(t *testing.T) {
+		got := call("/api/v1/tasks?notebook_name=Grocery")
+		if len(got) != 1 || got[0].ID != "f2" {
+			t.Errorf("want only f2, got %+v", ids(got))
+		}
+	})
+
+	t.Run("source_filter", func(t *testing.T) {
+		got := call("/api/v1/tasks?source=lasso")
+		// f1, f2 carry lasso; f3 is non-FN; f4 is hidden.
+		if len(got) != 2 {
+			t.Errorf("want 2 lasso tasks, got %d: %v", len(got), ids(got))
+		}
+	})
+
+	t.Run("category_filter", func(t *testing.T) {
+		got := call("/api/v1/tasks?category=urgent")
+		if len(got) != 1 || got[0].ID != "f1" {
+			t.Errorf("want only f1, got %v", ids(got))
+		}
+	})
+
+	t.Run("priority_filter", func(t *testing.T) {
+		got := call("/api/v1/tasks?priority=1")
+		if len(got) != 1 || got[0].ID != "f1" {
+			t.Errorf("want only f1, got %v", ids(got))
+		}
+	})
+
+	t.Run("include_deleted_surfaces_trash", func(t *testing.T) {
+		got := call("/api/v1/tasks?include_deleted=true")
+		// All four rows visible — f4 included.
+		if len(got) != 4 {
+			t.Errorf("want 4 tasks, got %d: %v", len(got), ids(got))
+		}
+		var sawDeleted bool
+		for _, x := range got {
+			if x.Deleted {
+				sawDeleted = true
+			}
+		}
+		if !sawDeleted {
+			t.Error("expected at least one task with Deleted=true in include_deleted result")
+		}
+	})
+
+	t.Run("default_hides_deleted", func(t *testing.T) {
+		got := call("/api/v1/tasks")
+		if len(got) != 3 {
+			t.Errorf("want 3 (no trash), got %d: %v", len(got), ids(got))
+		}
+		for _, x := range got {
+			if x.Deleted {
+				t.Errorf("default list leaked deleted task %q", x.ID)
+			}
+		}
+	})
+
+	t.Run("filters_compose", func(t *testing.T) {
+		// notebook_id=A + status=needs_action + priority=1 should still be just f1.
+		got := call("/api/v1/tasks?notebook_id=A&status=needs_action&priority=1")
+		if len(got) != 1 || got[0].ID != "f1" {
+			t.Errorf("want only f1, got %v", ids(got))
+		}
+	})
+}
+
+func ids(ts []service.Task) []string {
+	out := make([]string, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, t.ID)
+	}
+	return out
+}
+
 // newHandlerWithLogBuf returns a handler whose logger writes to the returned
 // buffer, so tests can assert on emitted audit lines.
 func newHandlerWithLogBuf() (*Handler, *bytes.Buffer) {

@@ -40,6 +40,15 @@ type mockTaskService struct {
 }
 
 func (m *mockTaskService) List(ctx context.Context) ([]service.Task, error) {
+	out := m.tasks[:0:0]
+	for _, t := range m.tasks {
+		if !t.Deleted {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+func (m *mockTaskService) ListIncludingDeleted(ctx context.Context) ([]service.Task, error) {
 	return m.tasks, nil
 }
 func (m *mockTaskService) Get(ctx context.Context, id string) (service.Task, error) {

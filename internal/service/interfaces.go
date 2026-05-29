@@ -42,6 +42,11 @@ type Task struct {
 	// ForestNote provenance, populated when the task carried X-FORESTNOTE-* properties
 	// on its inbound VTODO. Nil for non-FN clients (Apple Reminders, Tasks.org, etc.).
 	ForestNote *TaskForestNote `json:"forestnote,omitempty"`
+	// Deleted is true for soft-deleted rows (is_deleted='Y'). Default queries hide
+	// these entirely — only surfaced when the caller opts in via ListIncludingDeleted
+	// / ?include_deleted=true / the equivalent MCP flag. Useful for "what's in the
+	// trash" queries and for the hard-purge tool to confirm targets before running.
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 type TaskLink struct {
@@ -207,9 +212,12 @@ type TaskPatch struct {
 	Detail     *string    `json:"detail,omitempty"`
 }
 
-// TaskService manages task-related operations.
+// TaskService is the service-layer task API. List hides soft-deleted rows; use
+// ListIncludingDeleted to include them (e.g. for the trash view or to find
+// purge candidates).
 type TaskService interface {
 	List(ctx context.Context) ([]Task, error)
+	ListIncludingDeleted(ctx context.Context) ([]Task, error)
 	Get(ctx context.Context, id string) (Task, error)
 	Create(ctx context.Context, title string, dueAt *time.Time) (Task, error)
 	Update(ctx context.Context, id string, patch TaskPatch) (Task, error)

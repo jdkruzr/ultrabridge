@@ -14,6 +14,7 @@ import (
 // This matches the interface defined in internal/caldav/backend.go.
 type TaskStore interface {
 	List(ctx context.Context) ([]taskstore.Task, error)
+	ListIncludingDeleted(ctx context.Context) ([]taskstore.Task, error)
 	Get(ctx context.Context, taskID string) (*taskstore.Task, error)
 	Create(ctx context.Context, t *taskstore.Task) error
 	Update(ctx context.Context, t *taskstore.Task) error
@@ -44,6 +45,24 @@ func (s *taskService) List(ctx context.Context) ([]Task, error) {
 		return nil, nil
 	}
 	internalTasks, err := s.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tasks := make([]Task, len(internalTasks))
+	for i, it := range internalTasks {
+		tasks[i] = mapInternalTask(it)
+	}
+	return tasks, nil
+}
+
+// ListIncludingDeleted returns soft-deleted rows alongside the live ones.
+// The Deleted field on each Task tells the caller which is which.
+func (s *taskService) ListIncludingDeleted(ctx context.Context) ([]Task, error) {
+	if s.store == nil {
+		return nil, nil
+	}
+	internalTasks, err := s.store.ListIncludingDeleted(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +219,7 @@ func mapInternalTask(it taskstore.Task) Task {
 		Title:     it.Title.String,
 		Status:    TaskStatus(it.Status.String),
 		CreatedAt: time.UnixMilli(it.CreatedAt), // taskdb.tasks.created_at (was mis-mapped from DueTime)
+		Deleted:   it.IsDeleted == "Y",
 	}
 
 	if it.DueTime > 0 {

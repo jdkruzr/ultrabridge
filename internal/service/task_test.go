@@ -24,6 +24,14 @@ func (m *mockTaskStore) List(ctx context.Context) ([]taskstore.Task, error) {
 	return list, nil
 }
 
+func (m *mockTaskStore) ListIncludingDeleted(ctx context.Context) ([]taskstore.Task, error) {
+	var list []taskstore.Task
+	for _, t := range m.tasks {
+		list = append(list, t)
+	}
+	return list, nil
+}
+
 func (m *mockTaskStore) Get(ctx context.Context, taskID string) (*taskstore.Task, error) {
 	t, ok := m.tasks[taskID]
 	if !ok || t.IsDeleted == "Y" {

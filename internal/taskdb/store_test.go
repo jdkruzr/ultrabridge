@@ -452,6 +452,51 @@ func TestStore_Create_SetDefaults(t *testing.T) {
 	}
 }
 
+// TestStore_ListIncludingDeleted verifies the trash-visible list path returns
+// soft-deleted rows alongside live ones, distinguished by IsDeleted. Plain
+// List remains visibility-filtered (regression).
+func TestStore_ListIncludingDeleted(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	live := &taskstore.Task{Title: sql.NullString{String: "live", Valid: true}, IsDeleted: "N"}
+	if err := store.Create(ctx, live); err != nil {
+		t.Fatalf("Create live: %v", err)
+	}
+	tomb := &taskstore.Task{Title: sql.NullString{String: "tomb", Valid: true}, IsDeleted: "N"}
+	if err := store.Create(ctx, tomb); err != nil {
+		t.Fatalf("Create soon-to-be-deleted: %v", err)
+	}
+	if err := store.Delete(ctx, tomb.TaskID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	gotLive, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(gotLive) != 1 || gotLive[0].TaskID != live.TaskID {
+		t.Errorf("plain List leaked tombstones: %+v", gotLive)
+	}
+
+	gotAll, err := store.ListIncludingDeleted(ctx)
+	if err != nil {
+		t.Fatalf("ListIncludingDeleted: %v", err)
+	}
+	if len(gotAll) != 2 {
+		t.Fatalf("want 2 rows including tombstone, got %d", len(gotAll))
+	}
+	var sawDeleted bool
+	for _, x := range gotAll {
+		if x.IsDeleted == "Y" {
+			sawDeleted = true
+		}
+	}
+	if !sawDeleted {
+		t.Error("ListIncludingDeleted didn't return any IsDeleted='Y' row")
+	}
+}
+
 // TestStore_ForestNoteFieldsRoundTrip verifies the four ForestNote provenance
 // columns Create-then-Get cleanly with the same values, and that an Update
 // preserves them when re-supplied.

@@ -27,8 +27,19 @@ const taskColumns = `task_id, title, detail, status, importance, due_time,
 	forestnote_notebook_name, forestnote_source`
 
 func (s *Store) List(ctx context.Context) ([]taskstore.Task, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT "+taskColumns+" FROM tasks WHERE is_deleted = 'N'")
+	return s.listRows(ctx, "SELECT "+taskColumns+" FROM tasks WHERE is_deleted = 'N'")
+}
+
+// ListIncludingDeleted returns every row — soft-deleted included. Powers
+// MCP "what's in the trash" queries and the hard-purge tool's pre-flight
+// inventory. The Deleted flag on the returned service.Task tells the
+// caller which is which.
+func (s *Store) ListIncludingDeleted(ctx context.Context) ([]taskstore.Task, error) {
+	return s.listRows(ctx, "SELECT "+taskColumns+" FROM tasks")
+}
+
+func (s *Store) listRows(ctx context.Context, query string) ([]taskstore.Task, error) {
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
