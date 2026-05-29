@@ -1319,7 +1319,7 @@ func (s *noteService) StopBooxProcessor(ctx context.Context) error {
 
 func (s *noteService) GetProcessorStatus(ctx context.Context) (EmbeddingJobStatus, error) {
 	status := EmbeddingJobStatus{}
-	
+
 	if s.proc != nil {
 		procStatus := s.proc.Status()
 		status.Running = procStatus.Running
@@ -1328,7 +1328,7 @@ func (s *noteService) GetProcessorStatus(ctx context.Context) (EmbeddingJobStatu
 		status.ProcessedCount = procStatus.Done
 		status.FailedCount = procStatus.Failed
 	}
-	
+
 	if s.booxStore != nil {
 		booxStatus, err := s.booxStore.GetQueueStatus(ctx)
 		if err == nil {
@@ -1337,7 +1337,7 @@ func (s *noteService) GetProcessorStatus(ctx context.Context) (EmbeddingJobStatu
 			s.logger.Error("failed to get boox queue status", "error", err)
 		}
 	}
-	
+
 	return status, nil
 }
 

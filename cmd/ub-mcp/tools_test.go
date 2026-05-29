@@ -103,7 +103,7 @@ func TestSearchNotesEmptyQuery(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty query")
 	}
-	if !strings.Contains(err.Error(),"query is required") {
+	if !strings.Contains(err.Error(), "query is required") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -146,22 +146,22 @@ func TestSearchNotesWithFilters(t *testing.T) {
 	}
 
 	// Verify all parameters are in the query
-	if !strings.Contains(capturedQuery,"q=handwriting") {
+	if !strings.Contains(capturedQuery, "q=handwriting") {
 		t.Errorf("missing query param: %s", capturedQuery)
 	}
-	if !strings.Contains(capturedQuery,"folder=Work") {
+	if !strings.Contains(capturedQuery, "folder=Work") {
 		t.Errorf("missing folder param: %s", capturedQuery)
 	}
-	if !strings.Contains(capturedQuery,"device=Supernote") {
+	if !strings.Contains(capturedQuery, "device=Supernote") {
 		t.Errorf("missing device param: %s", capturedQuery)
 	}
-	if !strings.Contains(capturedQuery,"from=2026-04-01") {
+	if !strings.Contains(capturedQuery, "from=2026-04-01") {
 		t.Errorf("missing from param: %s", capturedQuery)
 	}
-	if !strings.Contains(capturedQuery,"to=2026-04-08") {
+	if !strings.Contains(capturedQuery, "to=2026-04-08") {
 		t.Errorf("missing to param: %s", capturedQuery)
 	}
-	if !strings.Contains(capturedQuery,"limit=20") {
+	if !strings.Contains(capturedQuery, "limit=20") {
 		t.Errorf("missing limit param: %s", capturedQuery)
 	}
 }
@@ -195,7 +195,7 @@ func TestSearchNotesDefaultLimit(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(capturedQuery,"limit=10") {
+	if !strings.Contains(capturedQuery, "limit=10") {
 		t.Errorf("expected default limit=10, got: %s", capturedQuery)
 	}
 }
@@ -252,22 +252,22 @@ func TestGetNotePagesValid(t *testing.T) {
 	text := textContent.Text
 
 	// Verify pages are ordered and contain expected content
-	if !strings.Contains(text,"Page 0") {
+	if !strings.Contains(text, "Page 0") {
 		t.Error("missing Page 0 in response")
 	}
-	if !strings.Contains(text,"Introduction") {
+	if !strings.Contains(text, "Introduction") {
 		t.Error("missing Introduction title")
 	}
-	if !strings.Contains(text,"Page 0 content") {
+	if !strings.Contains(text, "Page 0 content") {
 		t.Error("missing Page 0 content")
 	}
-	if !strings.Contains(text,"Page 1") {
+	if !strings.Contains(text, "Page 1") {
 		t.Error("missing Page 1 in response")
 	}
-	if !strings.Contains(text,"Details") {
+	if !strings.Contains(text, "Details") {
 		t.Error("missing Details title")
 	}
-	if !strings.Contains(text,"Page 1 content") {
+	if !strings.Contains(text, "Page 1 content") {
 		t.Error("missing Page 1 content")
 	}
 }
@@ -293,7 +293,7 @@ func TestGetNotePagesNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nonexistent note")
 	}
-	if !strings.Contains(err.Error(),"note not found") {
+	if !strings.Contains(err.Error(), "note not found") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -319,7 +319,7 @@ func TestGetNotePagesEmptyPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty path")
 	}
-	if !strings.Contains(err.Error(),"note_path is required") {
+	if !strings.Contains(err.Error(), "note_path is required") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -329,10 +329,10 @@ func TestGetNoteImageValid(t *testing.T) {
 	// Create test JPEG data (minimal valid JPEG header)
 	testImageData := []byte{
 		0xFF, 0xD8, 0xFF, 0xE0, // JPEG SOI + APP0
-		0x00, 0x10,             // APP0 length
+		0x00, 0x10, // APP0 length
 		0x4A, 0x46, 0x49, 0x46, // JFIF identifier
-		0x00, 0x01, 0x00,       // JFIF version
-		0xFF, 0xD9,             // EOI marker
+		0x00, 0x01, 0x00, // JFIF version
+		0xFF, 0xD9, // EOI marker
 	}
 
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -401,7 +401,7 @@ func TestGetNoteImageNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nonexistent image")
 	}
-	if !strings.Contains(err.Error(),"page image not found") {
+	if !strings.Contains(err.Error(), "page image not found") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -427,7 +427,7 @@ func TestGetNoteImageEmptyPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty path")
 	}
-	if !strings.Contains(err.Error(),"note_path is required") {
+	if !strings.Contains(err.Error(), "note_path is required") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -455,7 +455,7 @@ func TestAPIClientBasicAuth(t *testing.T) {
 		t.Fatal("expected Authorization header")
 	}
 
-	if !strings.Contains(capturedAuth,"Basic") {
+	if !strings.Contains(capturedAuth, "Basic") {
 		t.Errorf("expected Basic auth, got: %s", capturedAuth)
 	}
 }
@@ -542,7 +542,7 @@ func TestSearchNotesNoResults(t *testing.T) {
 	}
 
 	text := textContent.Text
-	if !strings.Contains(text,"No results found") {
+	if !strings.Contains(text, "No results found") {
 		t.Errorf("expected 'No results found' message, got: %s", text)
 	}
 }
@@ -701,4 +701,3 @@ func testCallGetNoteImageTool(server *mcp.Server, client *apiClient, input GetNo
 
 	return result, nil, nil
 }
-

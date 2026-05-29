@@ -188,7 +188,7 @@ func (h *Handler) streamFromVLLM(ctx context.Context, w http.ResponseWriter, mes
 		"chat_template_kwargs": map[string]interface{}{
 			"enable_thinking": false,
 		},
-		"max_tokens":  2048,
+		"max_tokens": 2048,
 	}
 	body, _ := json.Marshal(reqBody)
 

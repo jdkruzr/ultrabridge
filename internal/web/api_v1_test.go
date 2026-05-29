@@ -322,9 +322,9 @@ func TestAuditLogAnonymousWhenNoIdentity(t *testing.T) {
 // can quietly modify state without a record.
 func TestAuditLogFiresOnAllMutations(t *testing.T) {
 	cases := []struct {
-		name    string
-		req     *http.Request
-		wantOp  string
+		name   string
+		req    *http.Request
+		wantOp string
 	}{
 		{
 			name:   "create",

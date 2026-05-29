@@ -274,4 +274,3 @@ func scanRow(row *sql.Row) (*NoteFile, error) {
 		JobStatus: jobStatus,
 	}, nil
 }
-

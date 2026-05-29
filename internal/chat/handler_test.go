@@ -193,11 +193,11 @@ func TestHandlerBuildPromptIncludesCitations(t *testing.T) {
 	// Build prompt with search results
 	results := []rag.SearchResult{
 		{
-			NotePath:  "/notes/file1.note",
-			Page:      1,
-			BodyText:  "Sample text from note",
-			Device:    "Supernote",
-			Folder:    "folder1",
+			NotePath: "/notes/file1.note",
+			Page:     1,
+			BodyText: "Sample text from note",
+			Device:   "Supernote",
+			Folder:   "folder1",
 		},
 	}
 

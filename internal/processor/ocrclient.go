@@ -72,9 +72,9 @@ func (c *OCRClient) Recognize(ctx context.Context, jpegData []byte, prompt strin
 // ── Anthropic Messages API ────────────────────────────────────────────────────
 
 type anthropicRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	Messages  []anthropicMsg  `json:"messages"`
+	Model     string         `json:"model"`
+	MaxTokens int            `json:"max_tokens"`
+	Messages  []anthropicMsg `json:"messages"`
 }
 
 type anthropicMsg struct {
@@ -83,8 +83,8 @@ type anthropicMsg struct {
 }
 
 type anthropicContent struct {
-	Type   string          `json:"type"`
-	Text   string          `json:"text,omitempty"`
+	Type   string           `json:"type"`
+	Text   string           `json:"text,omitempty"`
 	Source *anthropicSource `json:"source,omitempty"`
 }
 
@@ -155,14 +155,14 @@ func (c *OCRClient) recognizeAnthropic(ctx context.Context, jpegData []byte, pro
 // ── OpenAI Chat Completions API ───────────────────────────────────────────────
 
 type openAIRequest struct {
-	Model     string        `json:"model"`
-	MaxTokens int           `json:"max_tokens"`
-	Messages  []openAIMsg   `json:"messages"`
+	Model     string      `json:"model"`
+	MaxTokens int         `json:"max_tokens"`
+	Messages  []openAIMsg `json:"messages"`
 }
 
 type openAIMsg struct {
-	Role    string           `json:"role"`
-	Content []openAIContent  `json:"content"`
+	Role    string          `json:"role"`
+	Content []openAIContent `json:"content"`
 }
 
 type openAIContent struct {

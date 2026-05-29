@@ -4,9 +4,10 @@ package booxrender
 // matrixValues is a 9-element array: [scaleX, skewX, transX, skewY, scaleY, transY, ...]
 //
 // The affine matrix is:
-//   | scaleX skewX  transX |   x' = scaleX*x + skewX*y + transX
-//   | skewY  scaleY transY |   y' = skewY*x  + scaleY*y + transY
-//   | 0      0      1      |
+//
+//	| scaleX skewX  transX |   x' = scaleX*x + skewX*y + transX
+//	| skewY  scaleY transY |   y' = skewY*x  + scaleY*y + transY
+//	| 0      0      1      |
 type booxMatrix struct {
 	scaleX, skewX, transX float64
 	skewY, scaleY, transY float64

@@ -26,15 +26,15 @@ func TestStore_Create_PersistsTask(t *testing.T) {
 	store := openTestStore(t)
 
 	input := &taskstore.Task{
-		Title:       sql.NullString{String: "Buy groceries", Valid: true},
-		Detail:      sql.NullString{String: "milk, eggs, bread", Valid: true},
-		Status:      sql.NullString{String: "needsAction", Valid: true},
-		Importance:  sql.NullString{String: "1", Valid: true},
-		DueTime:     1672531200000, // 2023-01-01 00:00 UTC
-		Recurrence:  sql.NullString{String: "", Valid: false},
+		Title:        sql.NullString{String: "Buy groceries", Valid: true},
+		Detail:       sql.NullString{String: "milk, eggs, bread", Valid: true},
+		Status:       sql.NullString{String: "needsAction", Valid: true},
+		Importance:   sql.NullString{String: "1", Valid: true},
+		DueTime:      1672531200000, // 2023-01-01 00:00 UTC
+		Recurrence:   sql.NullString{String: "", Valid: false},
 		IsReminderOn: "N",
-		Links:       sql.NullString{String: "", Valid: false},
-		IsDeleted:   "N",
+		Links:        sql.NullString{String: "", Valid: false},
+		IsDeleted:    "N",
 	}
 
 	if err := store.Create(context.Background(), input); err != nil {
@@ -94,10 +94,10 @@ func TestStore_Update_ChangesFieldsAndTimestamp(t *testing.T) {
 	store := openTestStore(t)
 
 	task := &taskstore.Task{
-		Title:       sql.NullString{String: "Task 1", Valid: true},
-		Status:      sql.NullString{String: "needsAction", Valid: true},
-		DueTime:     1000000,
-		IsDeleted:   "N",
+		Title:     sql.NullString{String: "Task 1", Valid: true},
+		Status:    sql.NullString{String: "needsAction", Valid: true},
+		DueTime:   1000000,
+		IsDeleted: "N",
 	}
 
 	if err := store.Create(context.Background(), task); err != nil {

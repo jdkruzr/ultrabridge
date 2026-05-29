@@ -16,9 +16,9 @@ import (
 
 // Note represents a fully parsed Boox .note file.
 type Note struct {
-	NoteID string   // top-level directory name in the ZIP
-	Title  string   // from note_info protobuf
-	Pages  []*Page  // ordered by orderIndex
+	NoteID string  // top-level directory name in the ZIP
+	Title  string  // from note_info protobuf
+	Pages  []*Page // ordered by orderIndex
 }
 
 // Page represents a single page within a note.
@@ -26,7 +26,7 @@ type Page struct {
 	PageID     string
 	Width      float64
 	Height     float64
-	OrderIndex float32 // from VirtualPage protobuf; used for sorting
+	OrderIndex float32  // from VirtualPage protobuf; used for sorting
 	Shapes     []*Shape // ordered by zorder
 }
 
@@ -34,8 +34,8 @@ type Page struct {
 type Shape struct {
 	UniqueID     string
 	ShapeType    int32
-	Color        int32   // ARGB packed
-	FillColor    int32   // ARGB packed
+	Color        int32 // ARGB packed
+	FillColor    int32 // ARGB packed
 	Thickness    float32
 	ZOrder       int32
 	BoundingRect *Rect

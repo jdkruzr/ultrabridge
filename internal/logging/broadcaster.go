@@ -108,9 +108,9 @@ func (lb *LogBroadcaster) Broadcast(entry string) {
 // BroadcastingHandler wraps an slog.Handler to broadcast entries to the
 // broadcaster in addition to the original handler.
 type BroadcastingHandler struct {
-	handler      slog.Handler
-	broadcaster  *LogBroadcaster
-	levelFilter  slog.Level
+	handler     slog.Handler
+	broadcaster *LogBroadcaster
+	levelFilter slog.Level
 }
 
 // NewBroadcastingHandler creates a handler that broadcasts entries to the

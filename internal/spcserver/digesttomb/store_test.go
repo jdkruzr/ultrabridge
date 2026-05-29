@@ -95,7 +95,7 @@ func TestAckLeavesUnsent(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	_ = s.Enqueue(ctx, 3, 1, "2")
-	_, _ = s.Pending(ctx, 3) // marks digest 1 sent
+	_, _ = s.Pending(ctx, 3)      // marks digest 1 sent
 	_ = s.Enqueue(ctx, 3, 2, "2") // new, unsent
 
 	if err := s.Ack(ctx, 3); err != nil {

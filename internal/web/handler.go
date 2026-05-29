@@ -57,11 +57,11 @@ type fnRowCtx struct {
 var staticFS embed.FS
 
 type Handler struct {
-	tasks    service.TaskService
-	notes    service.NoteService
-	search   service.SearchService
-	config   service.ConfigService
-	digests  service.DigestService // optional; nil when no digest store (non-server mode)
+	tasks   service.TaskService
+	notes   service.NoteService
+	search  service.SearchService
+	config  service.ConfigService
+	digests service.DigestService // optional; nil when no digest store (non-server mode)
 
 	noteDB          *sql.DB
 	notesPathPrefix string
@@ -80,13 +80,19 @@ func formatDueTime(val interface{}) string {
 	var t time.Time
 	switch v := val.(type) {
 	case int64:
-		if v == 0 { return "No due date" }
+		if v == 0 {
+			return "No due date"
+		}
 		t = time.UnixMilli(v).UTC()
 	case *time.Time:
-		if v == nil { return "No due date" }
+		if v == nil {
+			return "No due date"
+		}
 		t = *v
 	case time.Time:
-		if v.IsZero() { return "No due date" }
+		if v.IsZero() {
+			return "No due date"
+		}
 		t = v
 	default:
 		return "No due date"
@@ -98,16 +104,24 @@ func formatCreated(val interface{}) string {
 	var t time.Time
 	switch v := val.(type) {
 	case int64:
-		if v == 0 { return "-" }
+		if v == 0 {
+			return "-"
+		}
 		t = time.UnixMilli(v).UTC()
 	case *time.Time:
-		if v == nil { return "-" }
+		if v == nil {
+			return "-"
+		}
 		t = *v
 	case time.Time:
-		if v.IsZero() { return "-" }
+		if v.IsZero() {
+			return "-"
+		}
 		t = v
 	case sql.NullInt64:
-		if !v.Valid || v.Int64 == 0 { return "-" }
+		if !v.Valid || v.Int64 == 0 {
+			return "-"
+		}
 		t = time.UnixMilli(v.Int64).UTC()
 	default:
 		return "-"
@@ -147,7 +161,9 @@ func NewHandler(
 		"formatDueTime": formatDueTime,
 		"formatCreated": formatCreated,
 		"formatTimestamp": func(ms int64) string {
-			if ms == 0 { return "Never" }
+			if ms == 0 {
+				return "Never"
+			}
 			return time.UnixMilli(ms).UTC().Format("2006-01-02 15:04")
 		},
 		"fileTypeStr": func(ft string) string { return ft },
@@ -162,8 +178,12 @@ func NewHandler(
 			return fnRowCtx{Entry: e, FolderID: folderID}
 		},
 		"noteSource": func(path string) string {
-			if h.booxNotesPath != "" && strings.HasPrefix(path, h.booxNotesPath) { return "Boox" }
-			if h.booxImportPath != "" && strings.HasPrefix(path, h.booxImportPath) { return "Boox" }
+			if h.booxNotesPath != "" && strings.HasPrefix(path, h.booxNotesPath) {
+				return "Boox"
+			}
+			if h.booxImportPath != "" && strings.HasPrefix(path, h.booxImportPath) {
+				return "Boox"
+			}
 			return "Supernote"
 		},
 		"hasPrefix":  strings.HasPrefix,
@@ -215,7 +235,9 @@ func NewHandler(
 			return template.HTML(esc(detail))
 		},
 		"taskLink": func(val interface{}) map[string]interface{} {
-			if val == nil { return nil }
+			if val == nil {
+				return nil
+			}
 			var link struct {
 				AppName  string `json:"appName"`
 				FilePath string `json:"filePath"`
@@ -223,18 +245,24 @@ func NewHandler(
 			}
 			switch v := val.(type) {
 			case string:
-				if v == "" { return nil }
+				if v == "" {
+					return nil
+				}
 				data, _ := base64.StdEncoding.DecodeString(v)
 				json.Unmarshal(data, &link)
 			case *service.TaskLink:
-				if v == nil { return nil }
+				if v == nil {
+					return nil
+				}
 				link.AppName, link.FilePath, link.Page = v.AppName, v.FilePath, v.Page
 			case service.TaskLink:
 				link.AppName, link.FilePath, link.Page = v.AppName, v.FilePath, v.Page
 			default:
 				return nil
 			}
-			if link.FilePath == "" { return nil }
+			if link.FilePath == "" {
+				return nil
+			}
 			const devicePrefix = "/storage/emulated/0/Note/"
 			localPath := link.FilePath
 			if h.notesPathPrefix != "" && strings.HasPrefix(link.FilePath, devicePrefix) {
@@ -245,7 +273,9 @@ func NewHandler(
 	}
 
 	tmpl, err := template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html")
-	if err != nil { panic(fmt.Sprintf("failed to parse templates: %v", err)) }
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse templates: %v", err))
+	}
 	h.tmpl = tmpl
 
 	h.mux.HandleFunc("GET /setup", h.handleSetup)
@@ -259,12 +289,12 @@ func NewHandler(
 	h.mux.HandleFunc("GET /settings", h.handleSettings)
 	h.mux.HandleFunc("POST /settings/save", h.handleSettingsSave)
 	h.mux.HandleFunc("POST /settings/backfill-embeddings", h.handleBackfillEmbeddings)
-	
+
 	if h.noteDB != nil {
 		h.mux.HandleFunc("POST /settings/mcp-tokens/create", h.handleMCPTokenCreate)
 		h.mux.HandleFunc("POST /settings/mcp-tokens/revoke", h.handleMCPTokenRevoke)
 	}
-	
+
 	h.mux.HandleFunc("GET /files", h.handleFiles)
 	h.mux.HandleFunc("GET /files/supernote", h.handleFilesSupernote)
 	h.mux.HandleFunc("GET /files/boox", h.handleFilesBoox)
@@ -763,7 +793,9 @@ func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {
 	h.renderTemplate(w, r, "chat", map[string]interface{}{"chatSessions": sessions})
 }
 
-func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) { h.renderTemplate(w, r, "logs", nil) }
+func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
+	h.renderTemplate(w, r, "logs", nil)
+}
 
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -798,7 +830,9 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		data["BooxImportOnyxPaths"] = importOnyx == "true"
 		data["BooxExternalBaseURL"] = extBaseURL
 	}
-	if nt := r.URL.Query().Get("new_token"); nt != "" { data["NewMCPToken"] = nt }
+	if nt := r.URL.Query().Get("new_token"); nt != "" {
+		data["NewMCPToken"] = nt
+	}
 	if mcpCfg, ok := cfg.(*appconfig.Config); ok && mcpCfg != nil && mcpCfg.MCPPort > 0 {
 		host := r.Host
 		if colon := strings.LastIndex(host, ":"); colon >= 0 && !strings.Contains(host[colon:], "]") {
@@ -1283,7 +1317,10 @@ func (h *Handler) handleBooxRender(w http.ResponseWriter, r *http.Request) {
 	}
 	p, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	stream, ct, err := h.notes.RenderPage(r.Context(), notePath, p)
-	if err != nil { http.Error(w, "not found", http.StatusNotFound); return }
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
 	defer stream.Close()
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=300")
@@ -1292,7 +1329,9 @@ func (h *Handler) handleBooxRender(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleBooxVersions(w http.ResponseWriter, r *http.Request) {
 	v, _ := h.notes.ListVersions(r.Context(), r.URL.Query().Get("path"))
-	if v == nil { v = []interface{}{} }
+	if v == nil {
+		v = []interface{}{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
 }
@@ -1318,21 +1357,32 @@ func (h *Handler) handleMCPTokenCreate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleMCPTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	mcpauth.RevokeToken(r.Context(), h.noteDB, r.FormValue("token_hash"))
-	if r.Header.Get("HX-Request") == "true" { h.handleSettings(w, r); return }
+	if r.Header.Get("HX-Request") == "true" {
+		h.handleSettings(w, r)
+		return
+	}
 	http.Redirect(w, r, "/settings#mcp-tokens", http.StatusSeeOther)
 }
 
 func (h *Handler) handleAsk(w http.ResponseWriter, r *http.Request) {
-	var req struct { SessionID int `json:"session_id"`; Question string `json:"question"` }
+	var req struct {
+		SessionID int    `json:"session_id"`
+		Question  string `json:"question"`
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 	responses, err := h.search.Ask(r.Context(), req.Question, req.SessionID)
-	if err != nil { http.Error(w, "chat failed", http.StatusInternalServerError); return }
+	if err != nil {
+		http.Error(w, "chat failed", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	flusher, _ := w.(http.Flusher)
 	for resp := range responses {
 		fmt.Fprintf(w, "data: %s\n\n", mustJSON(resp))
-		if flusher != nil { flusher.Flush() }
+		if flusher != nil {
+			flusher.Flush()
+		}
 	}
 }
 
@@ -1568,19 +1618,28 @@ func (h *Handler) baseTemplateData(ctx context.Context) map[string]interface{} {
 	return data
 }
 
-type breadcrumb struct { Label, RelPath string }
+type breadcrumb struct{ Label, RelPath string }
+
 func buildBreadcrumbs(p string) []breadcrumb {
 	res := []breadcrumb{{Label: "Home", RelPath: ""}}
-	if p == "" { return res }
+	if p == "" {
+		return res
+	}
 	parts := strings.Split(p, "/")
-	for i := range parts { res = append(res, breadcrumb{Label: parts[i], RelPath: strings.Join(parts[:i+1], "/")}) }
+	for i := range parts {
+		res = append(res, breadcrumb{Label: parts[i], RelPath: strings.Join(parts[:i+1], "/")})
+	}
 	return res
 }
 
 func safeRelPath(p string) (string, bool) {
-	if p == "" { return "", true }
+	if p == "" {
+		return "", true
+	}
 	c := filepath.Clean(p)
-	if filepath.IsAbs(c) || strings.HasPrefix(c, "..") { return "", false }
+	if filepath.IsAbs(c) || strings.HasPrefix(c, "..") {
+		return "", false
+	}
 	return c, true
 }
 

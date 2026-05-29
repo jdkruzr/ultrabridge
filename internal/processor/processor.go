@@ -25,12 +25,12 @@ type WorkerConfig struct {
 	OCREnabled    bool
 	BackupPath    string
 	MaxFileMB     int
-	OCRClient     *OCRClient    // nil = OCR disabled
-	OCRPrompt     func() string // returns current OCR prompt; nil = use default
-	InjectEnabled func() bool   // returns whether JIIX injection is enabled; nil = enabled
-	Indexer       Indexer       // nil = indexing disabled
-	Embedder      rag.Embedder  // nil = embedding disabled
-	EmbedModel    string        // model name for note_embeddings.model column
+	OCRClient     *OCRClient     // nil = OCR disabled
+	OCRPrompt     func() string  // returns current OCR prompt; nil = use default
+	InjectEnabled func() bool    // returns whether JIIX injection is enabled; nil = enabled
+	Indexer       Indexer        // nil = indexing disabled
+	Embedder      rag.Embedder   // nil = embedding disabled
+	EmbedModel    string         // model name for note_embeddings.model column
 	EmbedStore    rag.EmbedStore // nil = embedding disabled
 }
 

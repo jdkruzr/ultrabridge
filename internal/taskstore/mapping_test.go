@@ -8,10 +8,10 @@ import (
 
 func TestGenerateTaskID(t *testing.T) {
 	tests := []struct {
-		name     string
-		title    string
+		name      string
+		title     string
 		createdMs int64
-		want     string
+		want      string
 	}{
 		{
 			name:      "simple task",

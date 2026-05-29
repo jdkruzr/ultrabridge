@@ -30,7 +30,7 @@ type Job struct {
 	QueuedAt     time.Time
 	StartedAt    time.Time
 	FinishedAt   time.Time
-	RequeueAfter *time.Time  // nil = no delay
+	RequeueAfter *time.Time // nil = no delay
 }
 
 // ProcessorStatus is a snapshot of queue state.

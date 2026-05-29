@@ -13,9 +13,9 @@ import (
 
 // mockTaskCreator implements TaskCreator for testing.
 type mockTaskCreator struct {
-	tasks   []taskstore.Task
-	created []taskstore.Task
-	listErr error
+	tasks     []taskstore.Task
+	created   []taskstore.Task
+	listErr   error
 	createErr error
 }
 

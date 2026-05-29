@@ -541,12 +541,12 @@ func TestBlobRoundTrip(t *testing.T) {
 		{
 			name: "Basic properties preserved with RRULE",
 			props: map[string]string{
-				"UID":        "test-basic-111",
-				"SUMMARY":    "Task with RRULE",
-				"STATUS":     "COMPLETED",
+				"UID":         "test-basic-111",
+				"SUMMARY":     "Task with RRULE",
+				"STATUS":      "COMPLETED",
 				"DESCRIPTION": "This task repeats",
-				"PRIORITY":   "3",
-				"RRULE":      "FREQ=DAILY;COUNT=5",
+				"PRIORITY":    "3",
+				"RRULE":       "FREQ=DAILY;COUNT=5",
 			},
 			dueTimeMode: "preserve",
 			verify: func(t *testing.T, original *ical.Calendar, roundTrip *ical.Calendar) {
@@ -760,11 +760,11 @@ func TestBlobOverlayCorrectness(t *testing.T) {
 func TestBlobCorruptFallback(t *testing.T) {
 	t.Run("corrupt blob falls back to fields", func(t *testing.T) {
 		task := &taskstore.Task{
-			TaskID:        "test-corrupt",
-			Title:         sql.NullString{String: "Fallback Task", Valid: true},
-			Status:        sql.NullString{String: "needsAction", Valid: true},
-			ICalBlob:      sql.NullString{String: "not valid ical content", Valid: true},
-			LastModified:  sql.NullInt64{Int64: taskstore.TimeToMs(time.Now().UTC()), Valid: true},
+			TaskID:       "test-corrupt",
+			Title:        sql.NullString{String: "Fallback Task", Valid: true},
+			Status:       sql.NullString{String: "needsAction", Valid: true},
+			ICalBlob:     sql.NullString{String: "not valid ical content", Valid: true},
+			LastModified: sql.NullInt64{Int64: taskstore.TimeToMs(time.Now().UTC()), Valid: true},
 		}
 
 		// Should not panic, should fall back to fields
@@ -794,16 +794,16 @@ func TestSupernoteTaskNoBlob(t *testing.T) {
 	t.Run("supernote task without blob builds from fields", func(t *testing.T) {
 		// Simulate a Supernote-originated task (no blob)
 		supernoteTask := &taskstore.Task{
-			TaskID:        "supernote-id-123",
-			Title:         sql.NullString{String: "Supernote Task", Valid: true},
-			Detail:        sql.NullString{String: "Task details from Supernote", Valid: true},
-			Status:        sql.NullString{String: "needsAction", Valid: true},
-			Importance:    sql.NullString{String: "2", Valid: true},
-			DueTime:       taskstore.TimeToMs(time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC)),
-			LastModified:  sql.NullInt64{Int64: taskstore.TimeToMs(time.Date(2025, 3, 17, 10, 0, 0, 0, time.UTC)), Valid: true},
-			IsReminderOn:  "Y",
-			IsDeleted:     "N",
-			ICalBlob:      sql.NullString{}, // NULL blob, no iCal representation
+			TaskID:       "supernote-id-123",
+			Title:        sql.NullString{String: "Supernote Task", Valid: true},
+			Detail:       sql.NullString{String: "Task details from Supernote", Valid: true},
+			Status:       sql.NullString{String: "needsAction", Valid: true},
+			Importance:   sql.NullString{String: "2", Valid: true},
+			DueTime:      taskstore.TimeToMs(time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC)),
+			LastModified: sql.NullInt64{Int64: taskstore.TimeToMs(time.Date(2025, 3, 17, 10, 0, 0, 0, time.UTC)), Valid: true},
+			IsReminderOn: "Y",
+			IsDeleted:    "N",
+			ICalBlob:     sql.NullString{}, // NULL blob, no iCal representation
 		}
 
 		// Convert to VTODO

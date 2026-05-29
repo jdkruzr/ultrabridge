@@ -41,16 +41,16 @@ type TodoItem struct {
 // WorkerConfig configures the Boox processing worker.
 type WorkerConfig struct {
 	Indexer        processor.Indexer
-	ContentDeleter ContentDeleter // for clearing old content on re-process
-	OCR            OCRer          // nil = OCR disabled
-	OCRPrompt      func() string  // returns current OCR prompt; nil = use default
-	TodoEnabled    func() bool    // returns whether red ink to-do extraction is on
-	TodoPrompt     func() string  // returns current to-do extraction prompt
+	ContentDeleter ContentDeleter                                               // for clearing old content on re-process
+	OCR            OCRer                                                        // nil = OCR disabled
+	OCRPrompt      func() string                                                // returns current OCR prompt; nil = use default
+	TodoEnabled    func() bool                                                  // returns whether red ink to-do extraction is on
+	TodoPrompt     func() string                                                // returns current to-do extraction prompt
 	OnTodosFound   func(ctx context.Context, notePath string, todos []TodoItem) // callback for extracted todos
-	CachePath      string         // base dir for rendered page cache
-	Embedder       rag.Embedder   // nil = embedding disabled
-	EmbedModel     string         // model name for note_embeddings.model column
-	EmbedStore     rag.EmbedStore // nil = embedding disabled
+	CachePath      string                                                       // base dir for rendered page cache
+	Embedder       rag.Embedder                                                 // nil = embedding disabled
+	EmbedModel     string                                                       // model name for note_embeddings.model column
+	EmbedStore     rag.EmbedStore                                               // nil = embedding disabled
 }
 
 func (p *Processor) executeJob(ctx context.Context, job *BooxJob) error {

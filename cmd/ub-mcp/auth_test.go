@@ -144,7 +144,7 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	}{
 		{
 			name: "invalid bearer token",
-			req:  func() *http.Request {
+			req: func() *http.Request {
 				r := httptest.NewRequest("GET", "/test", nil)
 				r.Header.Set("Authorization", "Bearer wrong-token")
 				return r
@@ -156,7 +156,7 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 		},
 		{
 			name: "invalid basic auth credentials",
-			req:  func() *http.Request {
+			req: func() *http.Request {
 				r := httptest.NewRequest("GET", "/test", nil)
 				r.SetBasicAuth("wrong-user", "wrong-pass")
 				return r
@@ -281,9 +281,9 @@ func TestAuthMiddleware_BearerAuthFormatVariations(t *testing.T) {
 	}))
 
 	tests := []struct {
-		name        string
-		authHeader  string
-		expectPass  bool
+		name       string
+		authHeader string
+		expectPass bool
 	}{
 		{
 			name:       "correct bearer token",
@@ -335,10 +335,10 @@ func TestAuthMiddleware_BasicAuthEdgeCases(t *testing.T) {
 	}))
 
 	tests := []struct {
-		name        string
-		user        string
-		pass        string
-		expectPass  bool
+		name       string
+		user       string
+		pass       string
+		expectPass bool
 	}{
 		{
 			name:       "correct credentials",

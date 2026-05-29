@@ -14,17 +14,20 @@ import (
 // fakeFNReader is a canned ForestNoteReader for testing the note service's
 // ForestNote surfacing without a real syncstore.
 type fakeFNReader struct {
-	folders     []syncstore.FolderRow
-	notebooks   []syncstore.NotebookRow
-	pages       map[string][]syncstore.PageRef
-	strokes     map[string][]syncstore.StrokeData
-	textBoxes   map[string][]syncstore.TextBoxData
-	meta        map[string]syncstore.NotebookRow
-	live        map[string]bool                       // page id → live; absent ⇒ not live (missing/deleted)
-	contents    map[string]struct{ f []syncstore.FolderRow; n []syncstore.NotebookRow } // folderID → direct children
-	folderPaths map[string][]syncstore.FolderRow      // folderID → ancestor chain
-	deletePages map[string][]string                   // notebookID → page IDs to return from SoftDeleteNotebook
-	deleted     []string                              // notebookIDs passed to SoftDeleteNotebook
+	folders   []syncstore.FolderRow
+	notebooks []syncstore.NotebookRow
+	pages     map[string][]syncstore.PageRef
+	strokes   map[string][]syncstore.StrokeData
+	textBoxes map[string][]syncstore.TextBoxData
+	meta      map[string]syncstore.NotebookRow
+	live      map[string]bool // page id → live; absent ⇒ not live (missing/deleted)
+	contents  map[string]struct {
+		f []syncstore.FolderRow
+		n []syncstore.NotebookRow
+	} // folderID → direct children
+	folderPaths map[string][]syncstore.FolderRow // folderID → ancestor chain
+	deletePages map[string][]string              // notebookID → page IDs to return from SoftDeleteNotebook
+	deleted     []string                         // notebookIDs passed to SoftDeleteNotebook
 }
 
 func (f *fakeFNReader) ListFolderContents(_ context.Context, id string) ([]syncstore.FolderRow, []syncstore.NotebookRow, error) {

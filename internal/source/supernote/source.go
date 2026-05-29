@@ -46,13 +46,13 @@ func (s *Source) Start(ctx context.Context) error {
 	s.ns = notestore.New(s.db, s.cfg.NotesPath)
 
 	workerCfg := processor.WorkerConfig{
-		OCREnabled:  s.deps.OCRClient != nil,
-		BackupPath:  s.cfg.BackupPath,
-		MaxFileMB:   s.deps.OCRMaxFileMB,
-		Indexer:     s.deps.Indexer,
-		Embedder:    s.deps.Embedder,
-		EmbedModel:  s.deps.EmbedModel,
-		EmbedStore:  s.deps.EmbedStore,
+		OCREnabled: s.deps.OCRClient != nil,
+		BackupPath: s.cfg.BackupPath,
+		MaxFileMB:  s.deps.OCRMaxFileMB,
+		Indexer:    s.deps.Indexer,
+		Embedder:   s.deps.Embedder,
+		EmbedModel: s.deps.EmbedModel,
+		EmbedStore: s.deps.EmbedStore,
 		OCRPrompt: func() string {
 			v, _ := notedb.GetSetting(context.Background(), s.db, "sn_ocr_prompt")
 			return v

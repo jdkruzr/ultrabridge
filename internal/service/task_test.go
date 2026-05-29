@@ -127,7 +127,7 @@ func TestTaskService_Complete(t *testing.T) {
 	svc := NewTaskService(store, notifier)
 
 	task, _ := svc.Create(context.Background(), "Task 1", nil)
-	
+
 	err := svc.Complete(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("Complete failed: %v", err)

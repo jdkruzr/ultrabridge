@@ -42,12 +42,12 @@ func TestRoutes(t *testing.T) {
 func TestSectionVisibility(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := &mockTaskService{}
 	notes := &mockNoteService{}
 	search := &mockSearchService{}
 	config := &mockConfigService{}
-	
+
 	handler := NewHandler(tasks, notes, search, config, nil, "", "", logger, broadcaster)
 
 	t.Run("RAG Search not configured", func(t *testing.T) {

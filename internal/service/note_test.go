@@ -107,7 +107,7 @@ type mockNoteStore struct {
 func (m *mockNoteStore) List(ctx context.Context, path string) ([]notestore.NoteFile, error) {
 	return m.files, nil
 }
-func (m *mockNoteStore) Scan(ctx context.Context) ([]string, error)      { return nil, nil }
+func (m *mockNoteStore) Scan(ctx context.Context) ([]string, error) { return nil, nil }
 func (m *mockNoteStore) Get(ctx context.Context, path string) (*notestore.NoteFile, error) {
 	for i := range m.files {
 		if m.files[i].Path == path {
@@ -116,8 +116,8 @@ func (m *mockNoteStore) Get(ctx context.Context, path string) (*notestore.NoteFi
 	}
 	return nil, nil
 }
-func (m *mockNoteStore) UpsertFile(ctx context.Context, path string) error { return nil }
-func (m *mockNoteStore) SetHash(ctx context.Context, path, hash string) error { return nil }
+func (m *mockNoteStore) UpsertFile(ctx context.Context, path string) error        { return nil }
+func (m *mockNoteStore) SetHash(ctx context.Context, path, hash string) error     { return nil }
 func (m *mockNoteStore) GetHash(ctx context.Context, path string) (string, error) { return "", nil }
 func (m *mockNoteStore) LookupByHash(ctx context.Context, hash string) (string, bool, error) {
 	return "", false, nil
@@ -129,15 +129,15 @@ type mockProcessor struct {
 	status   processor.ProcessorStatus
 }
 
-func (m *mockProcessor) Start(ctx context.Context) error { return nil }
-func (m *mockProcessor) Stop() error                    { return nil }
+func (m *mockProcessor) Start(ctx context.Context) error   { return nil }
+func (m *mockProcessor) Stop() error                       { return nil }
 func (m *mockProcessor) Status() processor.ProcessorStatus { return m.status }
 func (m *mockProcessor) Enqueue(ctx context.Context, path string, opts ...processor.EnqueueOption) error {
 	m.enqueued = append(m.enqueued, path)
 	return nil
 }
 func (m *mockProcessor) Skip(ctx context.Context, path, reason string) error { return nil }
-func (m *mockProcessor) Unskip(ctx context.Context, path string) error      { return nil }
+func (m *mockProcessor) Unskip(ctx context.Context, path string) error       { return nil }
 func (m *mockProcessor) GetJob(ctx context.Context, path string) (*processor.Job, error) {
 	return nil, nil
 }
@@ -161,14 +161,22 @@ func (m *mockBooxStore) EnqueueJob(ctx context.Context, path string) error {
 func (m *mockBooxStore) GetLatestJob(ctx context.Context, path string) (*booxpipeline.BooxJob, error) {
 	return nil, nil
 }
-func (m *mockBooxStore) RetryAllFailed(ctx context.Context) (int64, error) { return 0, nil }
-func (m *mockBooxStore) DeleteNote(ctx context.Context, path string) error    { return nil }
+func (m *mockBooxStore) RetryAllFailed(ctx context.Context) (int64, error)       { return 0, nil }
+func (m *mockBooxStore) DeleteNote(ctx context.Context, path string) error       { return nil }
 func (m *mockBooxStore) SkipNote(ctx context.Context, path, reason string) error { return nil }
 func (m *mockBooxStore) UnskipNote(ctx context.Context, path string) error       { return nil }
-func (m *mockBooxStore) GetQueueStatus(ctx context.Context) (booxpipeline.QueueStatus, error) { return booxpipeline.QueueStatus{}, nil }
-func (m *mockBooxStore) ReconcileCreatedAtFromFilename(ctx context.Context) (int64, error) { return 0, nil }
-func (m *mockBooxStore) ListAutoNamedNotebooks(ctx context.Context) ([]booxpipeline.BooxNote, error) { return nil, nil }
-func (m *mockBooxStore) MoveNote(ctx context.Context, oldPath, newPath, newFolder string) error { return nil }
+func (m *mockBooxStore) GetQueueStatus(ctx context.Context) (booxpipeline.QueueStatus, error) {
+	return booxpipeline.QueueStatus{}, nil
+}
+func (m *mockBooxStore) ReconcileCreatedAtFromFilename(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+func (m *mockBooxStore) ListAutoNamedNotebooks(ctx context.Context) ([]booxpipeline.BooxNote, error) {
+	return nil, nil
+}
+func (m *mockBooxStore) MoveNote(ctx context.Context, oldPath, newPath, newFolder string) error {
+	return nil
+}
 func (m *mockBooxStore) ListFolders(ctx context.Context) ([]booxpipeline.FolderCount, error) {
 	counts := map[string]int{}
 	for _, bn := range m.notes {

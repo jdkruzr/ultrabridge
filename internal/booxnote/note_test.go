@@ -102,12 +102,12 @@ func TestOpen_DeserializesShapes(t *testing.T) {
 
 	shapes := []*pb.ShapeInfoProto{
 		{
-			UniqueId:    "shape1",
-			ShapeType:   1,
-			Color:       -16777216,  // 0xFF000000 as signed int32
-			FillColor:   -16776961, // 0xFF0000FF as signed int32
-			Thickness:   2.5,
-			Zorder:      1,
+			UniqueId:     "shape1",
+			ShapeType:    1,
+			Color:        -16777216, // 0xFF000000 as signed int32
+			FillColor:    -16776961, // 0xFF0000FF as signed int32
+			Thickness:    2.5,
+			Zorder:       1,
 			BoundingRect: string(boundingRectJSON),
 			MatrixValues: string(matrixValuesJSON),
 		},

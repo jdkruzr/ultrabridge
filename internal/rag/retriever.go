@@ -20,10 +20,10 @@ import (
 // them. Derived in enrichResult from the note_path namespace and the
 // boox_notes/notes tables — there is no source_type column.
 const (
-	SourceSupernote = "supernote"
-	SourceBoox      = "boox"
+	SourceSupernote  = "supernote"
+	SourceBoox       = "boox"
 	SourceForestNote = "forestnote"
-	SourceDigest    = "digest"
+	SourceDigest     = "digest"
 )
 
 // SearchRequest is the input for hybrid search.

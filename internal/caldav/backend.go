@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	gocaldav "github.com/emersion/go-webdav/caldav"
 	ical "github.com/emersion/go-ical"
+	gocaldav "github.com/emersion/go-webdav/caldav"
 	"github.com/sysop/ultrabridge/internal/taskstore"
 )
 

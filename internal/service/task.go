@@ -200,12 +200,12 @@ func mapInternalTask(it taskstore.Task) Task {
 		Status:    TaskStatus(it.Status.String),
 		CreatedAt: time.UnixMilli(it.DueTime), // This mapping might need verification
 	}
-	
+
 	if it.DueTime > 0 {
 		dt := time.UnixMilli(it.DueTime)
 		t.DueAt = &dt
 	}
-	
+
 	if it.CompletedTime.Valid && it.CompletedTime.Int64 > 0 {
 		ct := time.UnixMilli(it.CompletedTime.Int64)
 		t.CompletedAt = &ct

@@ -454,13 +454,13 @@ func (s *Store) DeleteNote(ctx context.Context, path string) error {
 
 // QueueStatus represents the current state of the processing queue.
 type QueueStatus struct {
-	ActiveTitle    string `json:"active_title,omitempty"` // title of currently processing note
-	ActivePages    int    `json:"active_pages,omitempty"` // page count of active note
-	Pending        int    `json:"pending"`
-	InProgress     int    `json:"in_progress"`
-	Done           int    `json:"done"`
-	Failed         int    `json:"failed"`
-	UnmigratedCount int   `json:"unmigrated_count,omitempty"` // files still at import path
+	ActiveTitle     string `json:"active_title,omitempty"` // title of currently processing note
+	ActivePages     int    `json:"active_pages,omitempty"` // page count of active note
+	Pending         int    `json:"pending"`
+	InProgress      int    `json:"in_progress"`
+	Done            int    `json:"done"`
+	Failed          int    `json:"failed"`
+	UnmigratedCount int    `json:"unmigrated_count,omitempty"` // files still at import path
 }
 
 // GetQueueStatus returns a summary of the processing queue.

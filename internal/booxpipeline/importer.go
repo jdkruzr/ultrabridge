@@ -10,10 +10,10 @@ import (
 
 // ImportConfig holds settings for a bulk import scan.
 type ImportConfig struct {
-	ImportPath    string // filesystem root to scan
-	ImportNotes   bool   // include .note files
-	ImportPDFs    bool   // include .pdf files
-	OnyxPaths     bool   // use {model}/{type}/{folder}/{file} path structure
+	ImportPath  string // filesystem root to scan
+	ImportNotes bool   // include .note files
+	ImportPDFs  bool   // include .pdf files
+	OnyxPaths   bool   // use {model}/{type}/{folder}/{file} path structure
 }
 
 // ImportResult summarizes a completed import scan.
@@ -28,12 +28,14 @@ type ImportResult struct {
 // within the import directory.
 //
 // Onyx mode: expects {model}/{type}/{folder}/{file}
-//   e.g., "Palma2_Pro_C/Notebooks/Moffitt/notes.pdf"
-//   → model="Palma2_Pro_C", noteType="Notebooks", folder="Moffitt"
+//
+//	e.g., "Palma2_Pro_C/Notebooks/Moffitt/notes.pdf"
+//	→ model="Palma2_Pro_C", noteType="Notebooks", folder="Moffitt"
 //
 // Generic mode: uses parent directory as folder, no device model.
-//   e.g., "some/path/Work/notes.pdf"
-//   → model="", noteType="", folder="Work"
+//
+//	e.g., "some/path/Work/notes.pdf"
+//	→ model="", noteType="", folder="Work"
 func ExtractImportMetadata(relPath string, onyxPaths bool) (deviceModel, noteType, folder string) {
 	parts := strings.Split(filepath.ToSlash(relPath), "/")
 

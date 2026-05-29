@@ -27,8 +27,8 @@ func TestRetrieverHybridFusion(t *testing.T) {
 	// Create embeddings for some pages
 	mockEmbedder := &mockRetrieverEmbedder{
 		vectors: map[string][]float32{
-			"machine learning algorithms":          {0.8, 0.2, 0.1},
-			"neural networks":                      {0.75, 0.25, 0.05},
+			"machine learning algorithms":                      {0.8, 0.2, 0.1},
+			"neural networks":                                  {0.75, 0.25, 0.05},
 			"Deep dive into ML algorithms and neural networks": {0.7, 0.3, 0.0},
 			"Understanding neural network architectures":       {0.72, 0.28, 0.0},
 			"deep learning":                                    {0.85, 0.15, 0.0},
@@ -106,11 +106,11 @@ func TestRetrieverFolderFilter(t *testing.T) {
 	// Create a mock embedder for vector search
 	mockEmbedder := &mockRetrieverEmbedder{
 		vectors: map[string][]float32{
-			"project details": {0.9, 0.1, 0.0},
+			"project details":            {0.9, 0.1, 0.0},
 			"Project management details": {0.85, 0.15, 0.0},
-			"Another project details": {0.85, 0.15, 0.0},
-			"personal thoughts": {0.2, 0.8, 0.0},
-			"Personal diary entry": {0.1, 0.9, 0.0},
+			"Another project details":    {0.85, 0.15, 0.0},
+			"personal thoughts":          {0.2, 0.8, 0.0},
+			"Personal diary entry":       {0.1, 0.9, 0.0},
 		},
 	}
 
@@ -575,4 +575,3 @@ func insertSupernoteNote(t *testing.T, db *sql.DB, path, relPath, bodyText strin
 		t.Fatalf("Failed to insert notes: %v", err)
 	}
 }
-

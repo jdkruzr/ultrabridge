@@ -158,4 +158,3 @@ func (p *Pipeline) Enqueue(ctx context.Context, path string) error {
 	p.enqueue(ctx, path)
 	return nil
 }
-

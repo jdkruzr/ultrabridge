@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	gocaldav "github.com/emersion/go-webdav/caldav"
 	ical "github.com/emersion/go-ical"
+	gocaldav "github.com/emersion/go-webdav/caldav"
 	"github.com/sysop/ultrabridge/internal/taskstore"
 )
 
@@ -462,4 +462,3 @@ func TestQueryCalendarObjects(t *testing.T) {
 		t.Errorf("QueryCalendarObjects: got %d objects, want 2", len(objects))
 	}
 }
-

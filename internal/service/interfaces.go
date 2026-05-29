@@ -153,12 +153,12 @@ type ForestNotePage struct {
 
 // EmbeddingJobStatus represents the background processing state.
 type EmbeddingJobStatus struct {
-	Running        bool                     `json:"running"`
-	PendingCount   int                      `json:"pending_count"`
-	InFlightCount  int                      `json:"in_flight_count"`
-	ProcessedCount int                      `json:"processed_count"`
-	FailedCount    int                      `json:"failed_count"`
-	ActiveTask     *ActiveTask              `json:"active_task,omitempty"`
+	Running        bool                      `json:"running"`
+	PendingCount   int                       `json:"pending_count"`
+	InFlightCount  int                       `json:"in_flight_count"`
+	ProcessedCount int                       `json:"processed_count"`
+	FailedCount    int                       `json:"failed_count"`
+	ActiveTask     *ActiveTask               `json:"active_task,omitempty"`
 	Boox           *booxpipeline.QueueStatus `json:"boox,omitempty"`
 }
 
@@ -202,10 +202,10 @@ type NoteService interface {
 	ListBooxDevices(ctx context.Context) ([]BooxDevice, error)
 	GetFile(ctx context.Context, path string) (NoteFile, error)
 	GetBooxNote(ctx context.Context, path string) (BooxNoteSummary, error)
-	GetNoteDetails(ctx context.Context, path string) (interface{}, error) // history/job info
-	GetContent(ctx context.Context, path string) (interface{}, error)     // OCR text and page metadata
+	GetNoteDetails(ctx context.Context, path string) (interface{}, error)                 // history/job info
+	GetContent(ctx context.Context, path string) (interface{}, error)                     // OCR text and page metadata
 	RenderPage(ctx context.Context, path string, page int) (io.ReadCloser, string, error) // image stream, content-type
-	
+
 	ScanFiles(ctx context.Context) error
 	Enqueue(ctx context.Context, path string, force bool) error
 	Skip(ctx context.Context, path, reason string) error
@@ -250,7 +250,7 @@ type NoteService interface {
 	HasBooxSource() bool
 	HasForestNoteSource() bool
 	ListVersions(ctx context.Context, path string) (interface{}, error)
-	
+
 	// Pipeline Control (Supernote)
 	StartProcessor(ctx context.Context) error
 	StopProcessor(ctx context.Context) error
@@ -258,7 +258,7 @@ type NoteService interface {
 	StartBooxProcessor(ctx context.Context) error
 	StopBooxProcessor(ctx context.Context) error
 	GetProcessorStatus(ctx context.Context) (EmbeddingJobStatus, error)
-	
+
 	// Import (Boox specific)
 	ImportFiles(ctx context.Context) error
 	MigrateImports(ctx context.Context) error
@@ -288,7 +288,7 @@ type SearchService interface {
 	// Search runs hybrid (FTS5 + vector) retrieval. sources filters by source
 	// type (empty = all); see rag.Source* constants for the values.
 	Search(ctx context.Context, query, folder string, sources []string) ([]SearchResult, error)
-	
+
 	// Chat (SSE stream)
 	Ask(ctx context.Context, question string, sessionID int) (<-chan ChatResponse, error)
 	ListSessions(ctx context.Context) (interface{}, error)
@@ -344,7 +344,7 @@ type ConfigService interface {
 	GetConfig(ctx context.Context) (interface{}, error)
 	UpdateConfig(ctx context.Context, config interface{}) error
 	IsRestartRequired() bool
-	
+
 	ListSources(ctx context.Context) (interface{}, error)
 	AddSource(ctx context.Context, source interface{}) error
 	UpdateSource(ctx context.Context, id string, source interface{}) error

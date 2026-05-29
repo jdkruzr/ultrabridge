@@ -32,10 +32,10 @@ func (f *fakeIndexer) Delete(_ context.Context, path string) error {
 }
 
 type fakeEmbed struct {
-	mu     sync.Mutex
-	saved  []string // paths
-	deld   []string
-	texts  []string
+	mu    sync.Mutex
+	saved []string // paths
+	deld  []string
+	texts []string
 }
 
 func (f *fakeEmbed) Embed(_ context.Context, text string) ([]float32, error) {

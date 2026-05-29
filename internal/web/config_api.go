@@ -11,32 +11,32 @@ import (
 
 // RedactedConfig is like appconfig.Config but with secrets redacted for API responses.
 type RedactedConfig struct {
-	Username              string `json:"username"`
-	PasswordHash          string `json:"password_hash"` // "[set]" or "[not set]"
-	OCREnabled            bool   `json:"ocr_enabled"`
-	OCRAPIURL             string `json:"ocr_api_url"`
-	OCRAPIKey             string `json:"ocr_api_key"` // "[set]" or "[not set]"
-	OCRModel              string `json:"ocr_model"`
-	OCRConcurrency        int    `json:"ocr_concurrency"`
-	OCRMaxFileMB          int    `json:"ocr_max_file_mb"`
-	OCRFormat             string `json:"ocr_format"`
-	EmbedEnabled          bool   `json:"embed_enabled"`
-	OllamaURL             string `json:"ollama_url"`
-	OllamaEmbedModel      string `json:"ollama_embed_model"`
-	ChatEnabled           bool   `json:"chat_enabled"`
-	ChatAPIURL            string `json:"chat_api_url"`
-	ChatModel             string `json:"chat_model"`
-	LogLevel              string `json:"log_level"`
-	LogFormat             string `json:"log_format"`
-	LogFile               string `json:"log_file"`
-	LogFileMaxMB          int    `json:"log_file_max_mb"`
-	LogFileMaxAge         int    `json:"log_file_max_age"`
-	LogFileMaxBackup      int    `json:"log_file_max_backup"`
-	LogSyslogAddr         string `json:"log_syslog_addr"`
-	CalDAVCollectionName  string `json:"caldav_collection_name"`
-	DueTimeMode           string `json:"due_time_mode"`
-	WebEnabled            bool   `json:"web_enabled"`
-	MCPPort               int    `json:"mcp_port"`
+	Username             string `json:"username"`
+	PasswordHash         string `json:"password_hash"` // "[set]" or "[not set]"
+	OCREnabled           bool   `json:"ocr_enabled"`
+	OCRAPIURL            string `json:"ocr_api_url"`
+	OCRAPIKey            string `json:"ocr_api_key"` // "[set]" or "[not set]"
+	OCRModel             string `json:"ocr_model"`
+	OCRConcurrency       int    `json:"ocr_concurrency"`
+	OCRMaxFileMB         int    `json:"ocr_max_file_mb"`
+	OCRFormat            string `json:"ocr_format"`
+	EmbedEnabled         bool   `json:"embed_enabled"`
+	OllamaURL            string `json:"ollama_url"`
+	OllamaEmbedModel     string `json:"ollama_embed_model"`
+	ChatEnabled          bool   `json:"chat_enabled"`
+	ChatAPIURL           string `json:"chat_api_url"`
+	ChatModel            string `json:"chat_model"`
+	LogLevel             string `json:"log_level"`
+	LogFormat            string `json:"log_format"`
+	LogFile              string `json:"log_file"`
+	LogFileMaxMB         int    `json:"log_file_max_mb"`
+	LogFileMaxAge        int    `json:"log_file_max_age"`
+	LogFileMaxBackup     int    `json:"log_file_max_backup"`
+	LogSyslogAddr        string `json:"log_syslog_addr"`
+	CalDAVCollectionName string `json:"caldav_collection_name"`
+	DueTimeMode          string `json:"due_time_mode"`
+	WebEnabled           bool   `json:"web_enabled"`
+	MCPPort              int    `json:"mcp_port"`
 }
 
 // redactConfig returns a copy of cfg with secrets replaced with "[set]" or "[not set]".
@@ -69,8 +69,8 @@ func redactConfig(cfg *appconfig.Config) *RedactedConfig {
 		LogSyslogAddr:        cfg.LogSyslogAddr,
 		CalDAVCollectionName: cfg.CalDAVCollectionName,
 		DueTimeMode:          cfg.DueTimeMode,
-		WebEnabled:  cfg.WebEnabled,
-		MCPPort:     cfg.MCPPort,
+		WebEnabled:           cfg.WebEnabled,
+		MCPPort:              cfg.MCPPort,
 	}
 }
 
@@ -85,32 +85,32 @@ func redactSecret(s string) string {
 // IncomingConfig is the request body format for PUT /api/config.
 // It mirrors appconfig.Config but adds a "password" field for plaintext input.
 type IncomingConfig struct {
-	Username              string `json:"username"`
-	Password              string `json:"password"` // plaintext; if non-empty, hashed server-side
-	OCREnabled            bool   `json:"ocr_enabled"`
-	OCRAPIURL             string `json:"ocr_api_url"`
-	OCRAPIKey             string `json:"ocr_api_key"`
-	OCRModel              string `json:"ocr_model"`
-	OCRConcurrency        int    `json:"ocr_concurrency"`
-	OCRMaxFileMB          int    `json:"ocr_max_file_mb"`
-	OCRFormat             string `json:"ocr_format"`
-	EmbedEnabled          bool   `json:"embed_enabled"`
-	OllamaURL             string `json:"ollama_url"`
-	OllamaEmbedModel      string `json:"ollama_embed_model"`
-	ChatEnabled           bool   `json:"chat_enabled"`
-	ChatAPIURL            string `json:"chat_api_url"`
-	ChatModel             string `json:"chat_model"`
-	LogLevel              string `json:"log_level"`
-	LogFormat             string `json:"log_format"`
-	LogFile               string `json:"log_file"`
-	LogFileMaxMB          int    `json:"log_file_max_mb"`
-	LogFileMaxAge         int    `json:"log_file_max_age"`
-	LogFileMaxBackup      int    `json:"log_file_max_backup"`
-	LogSyslogAddr         string `json:"log_syslog_addr"`
-	CalDAVCollectionName  string `json:"caldav_collection_name"`
-	DueTimeMode           string `json:"due_time_mode"`
-	WebEnabled            bool   `json:"web_enabled"`
-	MCPPort               int    `json:"mcp_port"`
+	Username             string `json:"username"`
+	Password             string `json:"password"` // plaintext; if non-empty, hashed server-side
+	OCREnabled           bool   `json:"ocr_enabled"`
+	OCRAPIURL            string `json:"ocr_api_url"`
+	OCRAPIKey            string `json:"ocr_api_key"`
+	OCRModel             string `json:"ocr_model"`
+	OCRConcurrency       int    `json:"ocr_concurrency"`
+	OCRMaxFileMB         int    `json:"ocr_max_file_mb"`
+	OCRFormat            string `json:"ocr_format"`
+	EmbedEnabled         bool   `json:"embed_enabled"`
+	OllamaURL            string `json:"ollama_url"`
+	OllamaEmbedModel     string `json:"ollama_embed_model"`
+	ChatEnabled          bool   `json:"chat_enabled"`
+	ChatAPIURL           string `json:"chat_api_url"`
+	ChatModel            string `json:"chat_model"`
+	LogLevel             string `json:"log_level"`
+	LogFormat            string `json:"log_format"`
+	LogFile              string `json:"log_file"`
+	LogFileMaxMB         int    `json:"log_file_max_mb"`
+	LogFileMaxAge        int    `json:"log_file_max_age"`
+	LogFileMaxBackup     int    `json:"log_file_max_backup"`
+	LogSyslogAddr        string `json:"log_syslog_addr"`
+	CalDAVCollectionName string `json:"caldav_collection_name"`
+	DueTimeMode          string `json:"due_time_mode"`
+	WebEnabled           bool   `json:"web_enabled"`
+	MCPPort              int    `json:"mcp_port"`
 }
 
 // handleGetConfig handles GET /api/config — returns current config with secrets redacted.
@@ -153,31 +153,81 @@ func (h *Handler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(rawBytes, &incoming)
 
 	// Overlay fields
-	if _, ok := rawMap["username"]; ok { cfg.Username = incoming.Username }
-	if _, ok := rawMap["ocr_enabled"]; ok { cfg.OCREnabled = incoming.OCREnabled }
-	if _, ok := rawMap["ocr_api_url"]; ok { cfg.OCRAPIURL = incoming.OCRAPIURL }
-	if _, ok := rawMap["ocr_api_key"]; ok { cfg.OCRAPIKey = incoming.OCRAPIKey }
-	if _, ok := rawMap["ocr_model"]; ok { cfg.OCRModel = incoming.OCRModel }
-	if _, ok := rawMap["ocr_concurrency"]; ok { cfg.OCRConcurrency = incoming.OCRConcurrency }
-	if _, ok := rawMap["ocr_max_file_mb"]; ok { cfg.OCRMaxFileMB = incoming.OCRMaxFileMB }
-	if _, ok := rawMap["ocr_format"]; ok { cfg.OCRFormat = incoming.OCRFormat }
-	if _, ok := rawMap["embed_enabled"]; ok { cfg.EmbedEnabled = incoming.EmbedEnabled }
-	if _, ok := rawMap["ollama_url"]; ok { cfg.OllamaURL = incoming.OllamaURL }
-	if _, ok := rawMap["ollama_embed_model"]; ok { cfg.OllamaEmbedModel = incoming.OllamaEmbedModel }
-	if _, ok := rawMap["chat_enabled"]; ok { cfg.ChatEnabled = incoming.ChatEnabled }
-	if _, ok := rawMap["chat_api_url"]; ok { cfg.ChatAPIURL = incoming.ChatAPIURL }
-	if _, ok := rawMap["chat_model"]; ok { cfg.ChatModel = incoming.ChatModel }
-	if _, ok := rawMap["log_level"]; ok { cfg.LogLevel = incoming.LogLevel }
-	if _, ok := rawMap["log_format"]; ok { cfg.LogFormat = incoming.LogFormat }
-	if _, ok := rawMap["log_file"]; ok { cfg.LogFile = incoming.LogFile }
-	if _, ok := rawMap["log_file_max_mb"]; ok { cfg.LogFileMaxMB = incoming.LogFileMaxMB }
-	if _, ok := rawMap["log_file_max_age"]; ok { cfg.LogFileMaxAge = incoming.LogFileMaxAge }
-	if _, ok := rawMap["log_file_max_backup"]; ok { cfg.LogFileMaxBackup = incoming.LogFileMaxBackup }
-	if _, ok := rawMap["log_syslog_addr"]; ok { cfg.LogSyslogAddr = incoming.LogSyslogAddr }
-	if _, ok := rawMap["caldav_collection_name"]; ok { cfg.CalDAVCollectionName = incoming.CalDAVCollectionName }
-	if _, ok := rawMap["due_time_mode"]; ok { cfg.DueTimeMode = incoming.DueTimeMode }
-	if _, ok := rawMap["web_enabled"]; ok { cfg.WebEnabled = incoming.WebEnabled }
-	if _, ok := rawMap["mcp_port"]; ok { cfg.MCPPort = incoming.MCPPort }
+	if _, ok := rawMap["username"]; ok {
+		cfg.Username = incoming.Username
+	}
+	if _, ok := rawMap["ocr_enabled"]; ok {
+		cfg.OCREnabled = incoming.OCREnabled
+	}
+	if _, ok := rawMap["ocr_api_url"]; ok {
+		cfg.OCRAPIURL = incoming.OCRAPIURL
+	}
+	if _, ok := rawMap["ocr_api_key"]; ok {
+		cfg.OCRAPIKey = incoming.OCRAPIKey
+	}
+	if _, ok := rawMap["ocr_model"]; ok {
+		cfg.OCRModel = incoming.OCRModel
+	}
+	if _, ok := rawMap["ocr_concurrency"]; ok {
+		cfg.OCRConcurrency = incoming.OCRConcurrency
+	}
+	if _, ok := rawMap["ocr_max_file_mb"]; ok {
+		cfg.OCRMaxFileMB = incoming.OCRMaxFileMB
+	}
+	if _, ok := rawMap["ocr_format"]; ok {
+		cfg.OCRFormat = incoming.OCRFormat
+	}
+	if _, ok := rawMap["embed_enabled"]; ok {
+		cfg.EmbedEnabled = incoming.EmbedEnabled
+	}
+	if _, ok := rawMap["ollama_url"]; ok {
+		cfg.OllamaURL = incoming.OllamaURL
+	}
+	if _, ok := rawMap["ollama_embed_model"]; ok {
+		cfg.OllamaEmbedModel = incoming.OllamaEmbedModel
+	}
+	if _, ok := rawMap["chat_enabled"]; ok {
+		cfg.ChatEnabled = incoming.ChatEnabled
+	}
+	if _, ok := rawMap["chat_api_url"]; ok {
+		cfg.ChatAPIURL = incoming.ChatAPIURL
+	}
+	if _, ok := rawMap["chat_model"]; ok {
+		cfg.ChatModel = incoming.ChatModel
+	}
+	if _, ok := rawMap["log_level"]; ok {
+		cfg.LogLevel = incoming.LogLevel
+	}
+	if _, ok := rawMap["log_format"]; ok {
+		cfg.LogFormat = incoming.LogFormat
+	}
+	if _, ok := rawMap["log_file"]; ok {
+		cfg.LogFile = incoming.LogFile
+	}
+	if _, ok := rawMap["log_file_max_mb"]; ok {
+		cfg.LogFileMaxMB = incoming.LogFileMaxMB
+	}
+	if _, ok := rawMap["log_file_max_age"]; ok {
+		cfg.LogFileMaxAge = incoming.LogFileMaxAge
+	}
+	if _, ok := rawMap["log_file_max_backup"]; ok {
+		cfg.LogFileMaxBackup = incoming.LogFileMaxBackup
+	}
+	if _, ok := rawMap["log_syslog_addr"]; ok {
+		cfg.LogSyslogAddr = incoming.LogSyslogAddr
+	}
+	if _, ok := rawMap["caldav_collection_name"]; ok {
+		cfg.CalDAVCollectionName = incoming.CalDAVCollectionName
+	}
+	if _, ok := rawMap["due_time_mode"]; ok {
+		cfg.DueTimeMode = incoming.DueTimeMode
+	}
+	if _, ok := rawMap["web_enabled"]; ok {
+		cfg.WebEnabled = incoming.WebEnabled
+	}
+	if _, ok := rawMap["mcp_port"]; ok {
+		cfg.MCPPort = incoming.MCPPort
+	}
 
 	if pw, ok := rawMap["password"]; ok {
 		var password string

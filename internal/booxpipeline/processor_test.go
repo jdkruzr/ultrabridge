@@ -71,7 +71,6 @@ func mockOCRServer(t *testing.T, responseText string) *httptest.Server {
 	}))
 }
 
-
 // openTestProcessor creates a Processor with an in-memory DB and temp directory.
 // It does NOT start the processor - the caller should do that if needed.
 // NOTE: The caller is responsible for calling proc.Stop() and db.Close()
@@ -143,11 +142,11 @@ func TestProcessor_EndToEnd(t *testing.T) {
 				Height: 1872,
 				Shapes: []*pb.ShapeInfoProto{
 					{
-						UniqueId:   "shape-1",
-						ShapeType:  0,
-						Color:      -16777216, // 0xFF000000 as signed int32
-						Thickness:  1.0,
-						Zorder:     0,
+						UniqueId:  "shape-1",
+						ShapeType: 0,
+						Color:     -16777216, // 0xFF000000 as signed int32
+						Thickness: 1.0,
+						Zorder:    0,
 					},
 				},
 				Points: map[string][]booxnote.TinyPoint{
@@ -221,10 +220,10 @@ func TestProcessor_IndexesContent(t *testing.T) {
 				Height: 1872,
 				Shapes: []*pb.ShapeInfoProto{
 					{
-						UniqueId:   "shape-1",
-						ShapeType:  0,
-						Color:      -16777216,
-						Thickness:  1.0,
+						UniqueId:  "shape-1",
+						ShapeType: 0,
+						Color:     -16777216,
+						Thickness: 1.0,
 					},
 				},
 				Points: map[string][]booxnote.TinyPoint{
@@ -293,9 +292,9 @@ func TestProcessor_ReprocessOnReupload(t *testing.T) {
 				Height: 1872,
 				Shapes: []*pb.ShapeInfoProto{
 					{
-						UniqueId:   "shape-1",
-						ShapeType:  0,
-						Thickness:  1.0,
+						UniqueId:  "shape-1",
+						ShapeType: 0,
+						Thickness: 1.0,
 					},
 				},
 				Points: map[string][]booxnote.TinyPoint{
@@ -376,9 +375,9 @@ func TestProcessor_OCRFailure(t *testing.T) {
 				Height: 1872,
 				Shapes: []*pb.ShapeInfoProto{
 					{
-						UniqueId:   "shape-1",
-						ShapeType:  0,
-						Thickness:  1.0,
+						UniqueId:  "shape-1",
+						ShapeType: 0,
+						Thickness: 1.0,
 					},
 				},
 				Points: map[string][]booxnote.TinyPoint{
@@ -488,9 +487,9 @@ func TestProcessor_ManyPages(t *testing.T) {
 			Height: 1872,
 			Shapes: []*pb.ShapeInfoProto{
 				{
-					UniqueId:   fmt.Sprintf("shape-%d", i),
-					ShapeType:  0,
-					Thickness:  1.0,
+					UniqueId:  fmt.Sprintf("shape-%d", i),
+					ShapeType: 0,
+					Thickness: 1.0,
 				},
 			},
 			Points: map[string][]booxnote.TinyPoint{
@@ -632,11 +631,11 @@ func TestEmbed_NoteFileWithEmbedder(t *testing.T) {
 				Height: 1872,
 				Shapes: []*pb.ShapeInfoProto{
 					{
-						UniqueId:   "shape-1",
-						ShapeType:  0,
-						Color:      -16777216,
-						Thickness:  1.0,
-						Zorder:     0,
+						UniqueId:  "shape-1",
+						ShapeType: 0,
+						Color:     -16777216,
+						Thickness: 1.0,
+						Zorder:    0,
 					},
 				},
 				Points: map[string][]booxnote.TinyPoint{
@@ -732,11 +731,11 @@ func TestEmbed_FailureDoesNotFailJob(t *testing.T) {
 				Height: 1872,
 				Shapes: []*pb.ShapeInfoProto{
 					{
-						UniqueId:   "shape-1",
-						ShapeType:  0,
-						Color:      -16777216,
-						Thickness:  1.0,
-						Zorder:     0,
+						UniqueId:  "shape-1",
+						ShapeType: 0,
+						Color:     -16777216,
+						Thickness: 1.0,
+						Zorder:    0,
 					},
 				},
 				Points: map[string][]booxnote.TinyPoint{

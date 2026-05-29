@@ -340,7 +340,7 @@ func TestDeleteSourceNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.handleDeleteSource(w, req)
 
-	// Note: Currently handleDeleteSource returns 200 "ok" even if ID not found 
+	// Note: Currently handleDeleteSource returns 200 "ok" even if ID not found
 	// because config.DeleteSource doesn't check rows affected.
 	// If the test still wants 404, we might need to adjust implementation.
 	// For now, let's see what happens.
@@ -348,4 +348,3 @@ func TestDeleteSourceNotFound(t *testing.T) {
 		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
-

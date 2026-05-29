@@ -21,7 +21,7 @@ func TestRenderPage_Resolution(t *testing.T) {
 		Shapes: []*booxnote.Shape{
 			{
 				UniqueID:  "stroke1",
-				ShapeType: 2, // pencil
+				ShapeType: 2,                // pencil
 				Color:     int32(-16777216), // 0xFF000000 in int32 (black)
 				Thickness: 2,
 				Points: []booxnote.TinyPoint{
@@ -56,7 +56,7 @@ func TestRenderPage_PressureVariation(t *testing.T) {
 		Shapes: []*booxnote.Shape{
 			{
 				UniqueID:  "stroke1",
-				ShapeType: 2, // pencil
+				ShapeType: 2,                // pencil
 				Color:     int32(-16777216), // 0xFF000000 in int32 (black)
 				Thickness: 3,
 				Points: []booxnote.TinyPoint{
@@ -89,7 +89,7 @@ func TestRenderPage_EmptyPoints(t *testing.T) {
 		Shapes: []*booxnote.Shape{
 			{
 				UniqueID:  "empty_stroke",
-				ShapeType: 2, // scribble
+				ShapeType: 2,                // scribble
 				Color:     int32(-16777216), // 0xFF000000 in int32
 				Thickness: 2,
 				Points:    []booxnote.TinyPoint{}, // empty

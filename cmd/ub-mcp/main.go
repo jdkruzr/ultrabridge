@@ -82,11 +82,11 @@ func main() {
 
 // apiClient is an HTTP client for calling UltraBridge API endpoints.
 type apiClient struct {
-	baseURL  string
-	token    string
-	user     string
-	pass     string
-	http     *http.Client
+	baseURL string
+	token   string
+	user    string
+	pass    string
+	http    *http.Client
 }
 
 // newAPIClient creates a new API client. When token is non-empty it is sent as

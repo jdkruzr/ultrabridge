@@ -419,7 +419,7 @@ func TestAuthorPageText_ReportsNoChangedPages(t *testing.T) {
 	ctx := context.Background()
 	changed, err := s.AuthorOps(ctx, []Op{{
 		Table: "page_text_from_server", PK: pgA,
-		Cols:  pageTextCols("hi", 1000, 1000, "m", nil),
+		Cols: pageTextCols("hi", 1000, 1000, "m", nil),
 	}})
 	if err != nil {
 		t.Fatalf("author ops: %v", err)

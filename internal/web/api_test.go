@@ -141,7 +141,7 @@ func TestAPIGetImageMissingPage(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
 	handler := NewHandler(nil, &mockNoteService{
-		docs: make(map[string][]service.SearchResult),
+		docs:     make(map[string][]service.SearchResult),
 		contents: make(map[string]interface{}),
 	}, nil, nil, nil, notesDir, "", logger, broadcaster)
 

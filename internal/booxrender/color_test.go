@@ -10,73 +10,73 @@ import (
 // Verifies: boox-notes-pipeline.AC2.4
 func TestDecodeARGB(t *testing.T) {
 	tests := []struct {
-		name     string
-		argb     int32
+		name                   string
+		argb                   int32
 		expR, expG, expB, expA float64
 	}{
 		{
-			name:        "opaque black",
-			argb:        int32(-16777216), // 0xFF000000
-			expR:        0,
-			expG:        0,
-			expB:        0,
-			expA:        1.0,
+			name: "opaque black",
+			argb: int32(-16777216), // 0xFF000000
+			expR: 0,
+			expG: 0,
+			expB: 0,
+			expA: 1.0,
 		},
 		{
-			name:        "opaque red",
-			argb:        int32(-65536), // 0xFFFF0000
-			expR:        1.0,
-			expG:        0,
-			expB:        0,
-			expA:        1.0,
+			name: "opaque red",
+			argb: int32(-65536), // 0xFFFF0000
+			expR: 1.0,
+			expG: 0,
+			expB: 0,
+			expA: 1.0,
 		},
 		{
-			name:        "opaque green",
-			argb:        int32(-16711936), // 0xFF00FF00
-			expR:        0,
-			expG:        1.0,
-			expB:        0,
-			expA:        1.0,
+			name: "opaque green",
+			argb: int32(-16711936), // 0xFF00FF00
+			expR: 0,
+			expG: 1.0,
+			expB: 0,
+			expA: 1.0,
 		},
 		{
-			name:        "opaque blue",
-			argb:        int32(-16776961), // 0xFF0000FF
-			expR:        0,
-			expG:        0,
-			expB:        1.0,
-			expA:        1.0,
+			name: "opaque blue",
+			argb: int32(-16776961), // 0xFF0000FF
+			expR: 0,
+			expG: 0,
+			expB: 1.0,
+			expA: 1.0,
 		},
 		{
-			name:        "50% transparent green",
-			argb:        int32(-2147418368), // 0x8000FF00
-			expR:        0,
-			expG:        1.0,
-			expB:        0,
-			expA:        0.5,
+			name: "50% transparent green",
+			argb: int32(-2147418368), // 0x8000FF00
+			expR: 0,
+			expG: 1.0,
+			expB: 0,
+			expA: 0.5,
 		},
 		{
-			name:        "fully transparent",
-			argb:        0,
-			expR:        0,
-			expG:        0,
-			expB:        0,
-			expA:        0,
+			name: "fully transparent",
+			argb: 0,
+			expR: 0,
+			expG: 0,
+			expB: 0,
+			expA: 0,
 		},
 		{
-			name:        "opaque white",
-			argb:        int32(-1), // 0xFFFFFFFF
-			expR:        1.0,
-			expG:        1.0,
-			expB:        1.0,
-			expA:        1.0,
+			name: "opaque white",
+			argb: int32(-1), // 0xFFFFFFFF
+			expR: 1.0,
+			expG: 1.0,
+			expB: 1.0,
+			expA: 1.0,
 		},
 		{
-			name:        "transparent white",
-			argb:        0x00FFFFFF,
-			expR:        1.0,
-			expG:        1.0,
-			expB:        1.0,
-			expA:        0,
+			name: "transparent white",
+			argb: 0x00FFFFFF,
+			expR: 1.0,
+			expG: 1.0,
+			expB: 1.0,
+			expA: 0,
 		},
 	}
 
@@ -150,7 +150,7 @@ func TestRenderPage_MarkerTransparency(t *testing.T) {
 		Shapes: []*booxnote.Shape{
 			{
 				UniqueID:  "marker",
-				ShapeType: 15, // marker
+				ShapeType: 15,               // marker
 				Color:     int32(-16777216), // opaque black
 				Thickness: 10,
 				Points: []booxnote.TinyPoint{

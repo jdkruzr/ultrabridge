@@ -67,7 +67,7 @@ func LegacyNewHandler(
 	if booxNotesPath != "" {
 		booxCachePath = filepath.Join(booxNotesPath, ".cache")
 	}
-	
+
 	// Create actual service with mocks
 	noteSvc := service.NewNoteService(noteStore, proc, booxStore, booxImporter, nil, searchIndex, scanner, noteDB, booxCachePath, booxNotesPath, logger)
 	searchSvc := service.NewSearchService(searchIndex, retriever, embedder, embedStore, embedModel, chatStore, ragDisplay.ChatAPIURL, ragDisplay.ChatModel, logger)
@@ -154,7 +154,7 @@ func (m *mockTaskStore) DeleteCompleted(ctx context.Context) (int64, error) {
 
 // mockNotifier implements SyncNotifier for testing
 type mockNotifier struct {
-	called int
+	called  int
 	lastErr error
 }
 
@@ -232,8 +232,8 @@ func newMockProcessor() *mockProcessor {
 	}
 }
 
-func (m *mockProcessor) Start(_ context.Context) error  { m.running = true; return nil }
-func (m *mockProcessor) Stop() error                     { m.running = false; return nil }
+func (m *mockProcessor) Start(_ context.Context) error { m.running = true; return nil }
+func (m *mockProcessor) Stop() error                   { m.running = false; return nil }
 func (m *mockProcessor) Status() processor.ProcessorStatus {
 	return processor.ProcessorStatus{Running: m.running, Pending: len(m.jobs)}
 }
@@ -328,7 +328,7 @@ func TestGetIndexResponseBodyVerifiesAC41(t *testing.T) {
 	store := newMockTaskStore()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := service.NewTaskService(store, nil)
 	handler := NewHandler(tasks, nil, nil, nil, nil, "", "", logger, broadcaster)
 
@@ -380,7 +380,7 @@ func TestGetIndexFiltersDeletedTasks(t *testing.T) {
 	store := newMockTaskStore()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := service.NewTaskService(store, nil)
 	handler := NewHandler(tasks, nil, nil, nil, nil, "", "", logger, broadcaster)
 
@@ -429,7 +429,7 @@ func TestPostCreateTaskMinimal(t *testing.T) {
 	notifier := &mockNotifier{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := service.NewTaskService(store, notifier)
 	handler := NewHandler(tasks, nil, nil, nil, nil, "", "", logger, broadcaster)
 
@@ -545,7 +545,7 @@ func TestPostCreateTaskWithDueDate(t *testing.T) {
 	notifier := &mockNotifier{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := service.NewTaskService(store, notifier)
 	handler := NewHandler(tasks, nil, nil, nil, nil, "", "", logger, broadcaster)
 
@@ -583,7 +583,7 @@ func TestPostCreateTaskNoTitle(t *testing.T) {
 	store := newMockTaskStore()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := service.NewTaskService(store, nil)
 	handler := NewHandler(tasks, nil, nil, nil, nil, "", "", logger, broadcaster)
 
@@ -608,7 +608,7 @@ func TestPostCreateTaskInvalidDueDate(t *testing.T) {
 	store := newMockTaskStore()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := service.NewTaskService(store, nil)
 	handler := NewHandler(tasks, nil, nil, nil, nil, "", "", logger, broadcaster)
 
@@ -631,7 +631,7 @@ func TestPostCompleteTaskUpdatesStatus(t *testing.T) {
 	notifier := &mockNotifier{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	broadcaster := logging.NewLogBroadcaster()
-	
+
 	tasks := service.NewTaskService(store, notifier)
 	handler := NewHandler(tasks, nil, nil, nil, nil, "", "", logger, broadcaster)
 
@@ -1985,8 +1985,8 @@ func TestHandleFilesSingleRowMutations(t *testing.T) {
 // import/migrate/retry → boox, processor start/stop split by source).
 func TestHandleBroadFileMutations(t *testing.T) {
 	endpoints := []struct {
-		path     string
-		wantLoc  string
+		path    string
+		wantLoc string
 	}{
 		{"/files/scan", "/files/supernote"},
 		{"/files/import", "/files/boox"},

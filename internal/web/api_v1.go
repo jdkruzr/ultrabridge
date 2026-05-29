@@ -286,7 +286,7 @@ func (h *Handler) handleV1ListFiles(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	sort := r.URL.Query().Get("sort")
 	order := r.URL.Query().Get("order")
-	
+
 	files, _, err := h.notes.ListFiles(r.Context(), path, sort, order, 0, 0)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "failed to list files")
