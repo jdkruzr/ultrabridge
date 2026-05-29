@@ -47,12 +47,10 @@ func taskToVTODOFromFields(t *taskstore.Task, dueTimeMode string) *ical.Calendar
 	todo.Props.SetText("STATUS", status)
 
 	if t.DueTime != 0 {
-		dueTime := taskstore.MsToTime(t.DueTime)
-		if dueTimeMode == "date_only" {
-			todo.Props.SetDate("DUE", dueTime)
-		} else {
-			todo.Props.SetDateTime("DUE", dueTime)
-		}
+		// Fields-only path: no blob to consult, so "preserve" falls
+		// through to datetime (current behavior). Callers that need
+		// floating-date semantics should round-trip through a blob.
+		setDueOnTodo(todo, taskstore.MsToTime(t.DueTime), dueTimeMode)
 	}
 
 	if t.LastModified.Valid {
@@ -109,12 +107,14 @@ func taskToVTODOFromBlob(t *taskstore.Task, dueTimeMode string) *ical.Calendar {
 	todo.Props.SetText("STATUS", status)
 
 	if t.DueTime != 0 {
-		dueTime := taskstore.MsToTime(t.DueTime)
-		if dueTimeMode == "date_only" {
-			todo.Props.SetDate("DUE", dueTime)
-		} else {
-			todo.Props.SetDateTime("DUE", dueTime)
-		}
+		// "preserve" must honor the original VTODO's DUE form: a client
+		// PUT of DUE;VALUE=DATE:YYYYMMDD (RFC 5545 floating all-day) must
+		// be re-emitted as VALUE=DATE on the way back out. Promoting it
+		// to UTC midnight datetime shifts the task to the previous
+		// evening for clients in non-UTC timezones. The original prop is
+		// still on the decoded blob at this point because we haven't
+		// overlaid yet — read its ValueType before overwriting.
+		setDueOnTodo(todo, taskstore.MsToTime(t.DueTime), dueTimeMode)
 	} else {
 		// Remove DUE if cleared
 		delete(todo.Props, "DUE")
@@ -226,6 +226,35 @@ func VTODOToTask(cal *ical.Calendar, dueTimeMode string) (*taskstore.Task, error
 	}
 
 	return t, nil
+}
+
+// setDueOnTodo writes the DUE property in the form dictated by dueTimeMode:
+//
+//   - "date_only": always emit DUE;VALUE=DATE:YYYYMMDD
+//   - "datetime":  always emit DUE:YYYYMMDDTHHMMSSZ
+//   - "preserve" (and anything else, including the default empty string):
+//     keep whatever VALUE the existing DUE prop on this VTODO carries — DATE
+//     stays DATE, DATE-TIME stays DATE-TIME, and if there is no existing DUE
+//     prop (e.g. fields-only synth) we fall back to DATE-TIME.
+//
+// The caller is responsible for having already merged any blob into todo; we
+// only inspect ValueType, never values, so passing a freshly-built todo with
+// no DUE is safe.
+func setDueOnTodo(todo *ical.Component, due time.Time, dueTimeMode string) {
+	switch dueTimeMode {
+	case "date_only":
+		todo.Props.SetDate("DUE", due)
+		return
+	case "datetime":
+		todo.Props.SetDateTime("DUE", due)
+		return
+	}
+	// preserve (or unset / unknown)
+	if existing := todo.Props.Get("DUE"); existing != nil && existing.ValueType() == ical.ValueDate {
+		todo.Props.SetDate("DUE", due)
+		return
+	}
+	todo.Props.SetDateTime("DUE", due)
 }
 
 // FindVTODO returns the first VTODO component in the calendar, or error.

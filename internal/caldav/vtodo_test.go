@@ -922,3 +922,129 @@ func TestTaskWithoutBlob(t *testing.T) {
 		}
 	})
 }
+
+// TestPreserveValueDateRoundTrip verifies that a VTODO PUT with
+// DUE;VALUE=DATE:YYYYMMDD round-trips back out as DUE;VALUE=DATE in
+// "preserve" mode (the default). Regression: prior behavior re-emitted
+// floating dates as UTC datetimes, shifting all-day tasks to the previous
+// evening for clients in non-UTC timezones.
+func TestPreserveValueDateRoundTrip(t *testing.T) {
+	t.Run("floating VALUE=DATE survives preserve round-trip via blob", func(t *testing.T) {
+		raw := "BEGIN:VCALENDAR\r\n" +
+			"PRODID:-//ForestNote//EN\r\n" +
+			"VERSION:2.0\r\n" +
+			"BEGIN:VTODO\r\n" +
+			"DTSTAMP:20260529T022546Z\r\n" +
+			"DUE;VALUE=DATE:20260529\r\n" +
+			"SUMMARY:test\r\n" +
+			"UID:2e7cffed-ecac-46e8-a648-1ee928c4decd\r\n" +
+			"END:VTODO\r\n" +
+			"END:VCALENDAR\r\n"
+
+		cal, err := ical.NewDecoder(strings.NewReader(raw)).Decode()
+		if err != nil {
+			t.Fatalf("decode raw VCALENDAR: %v", err)
+		}
+		todo, err := FindVTODO(cal)
+		if err != nil {
+			t.Fatalf("find VTODO: %v", err)
+		}
+		if vt := todo.Props.Get("DUE").ValueType(); vt != ical.ValueDate {
+			t.Fatalf("input DUE should already be VALUE=DATE; got %s", vt)
+		}
+
+		task, err := VTODOToTask(cal, "preserve")
+		if err != nil {
+			t.Fatalf("VTODOToTask: %v", err)
+		}
+		if !task.ICalBlob.Valid || task.ICalBlob.String == "" {
+			t.Fatal("expected blob to be captured")
+		}
+
+		out := TaskToVTODO(task, "preserve")
+		outTodo, err := FindVTODO(out)
+		if err != nil {
+			t.Fatalf("find VTODO in output: %v", err)
+		}
+		dueProp := outTodo.Props.Get("DUE")
+		if dueProp == nil {
+			t.Fatal("output VTODO missing DUE")
+		}
+		if vt := dueProp.ValueType(); vt != ical.ValueDate {
+			t.Errorf("preserve mode should re-emit floating DATE; got VALUE=%s value=%q",
+				vt, dueProp.Value)
+		}
+		if dueProp.Value != "20260529" {
+			t.Errorf("DUE value should be raw YYYYMMDD; got %q", dueProp.Value)
+		}
+
+		// Encode the whole calendar and confirm the wire form has no T000000Z.
+		var buf strings.Builder
+		if err := ical.NewEncoder(&buf).Encode(out); err != nil {
+			t.Fatalf("encode output: %v", err)
+		}
+		if strings.Contains(buf.String(), "DUE:20260529T000000Z") {
+			t.Errorf("output should not promote floating date to UTC datetime; got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("datetime DUE stays datetime in preserve mode via blob", func(t *testing.T) {
+		raw := "BEGIN:VCALENDAR\r\n" +
+			"PRODID:-//Test//EN\r\n" +
+			"VERSION:2.0\r\n" +
+			"BEGIN:VTODO\r\n" +
+			"DTSTAMP:20260529T022546Z\r\n" +
+			"DUE:20260529T140000Z\r\n" +
+			"SUMMARY:test\r\n" +
+			"UID:dt-preserve-1\r\n" +
+			"END:VTODO\r\n" +
+			"END:VCALENDAR\r\n"
+
+		cal, err := ical.NewDecoder(strings.NewReader(raw)).Decode()
+		if err != nil {
+			t.Fatalf("decode raw VCALENDAR: %v", err)
+		}
+
+		task, err := VTODOToTask(cal, "preserve")
+		if err != nil {
+			t.Fatalf("VTODOToTask: %v", err)
+		}
+
+		out := TaskToVTODO(task, "preserve")
+		outTodo, _ := FindVTODO(out)
+		dueProp := outTodo.Props.Get("DUE")
+		if dueProp == nil {
+			t.Fatal("output VTODO missing DUE")
+		}
+		if vt := dueProp.ValueType(); vt != ical.ValueDateTime {
+			t.Errorf("preserve mode should keep datetime as datetime; got VALUE=%s", vt)
+		}
+	})
+
+	t.Run("date_only mode forces VALUE=DATE even when blob carries datetime", func(t *testing.T) {
+		raw := "BEGIN:VCALENDAR\r\n" +
+			"PRODID:-//Test//EN\r\n" +
+			"VERSION:2.0\r\n" +
+			"BEGIN:VTODO\r\n" +
+			"DTSTAMP:20260529T022546Z\r\n" +
+			"DUE:20260529T140000Z\r\n" +
+			"SUMMARY:test\r\n" +
+			"UID:dt-force-date\r\n" +
+			"END:VTODO\r\n" +
+			"END:VCALENDAR\r\n"
+
+		cal, err := ical.NewDecoder(strings.NewReader(raw)).Decode()
+		if err != nil {
+			t.Fatalf("decode raw VCALENDAR: %v", err)
+		}
+		task, err := VTODOToTask(cal, "date_only")
+		if err != nil {
+			t.Fatalf("VTODOToTask: %v", err)
+		}
+		out := TaskToVTODO(task, "date_only")
+		outTodo, _ := FindVTODO(out)
+		if vt := outTodo.Props.Get("DUE").ValueType(); vt != ical.ValueDate {
+			t.Errorf("date_only mode should force VALUE=DATE; got %s", vt)
+		}
+	})
+}
