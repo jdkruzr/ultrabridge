@@ -310,15 +310,19 @@ func ParseBlobMetadata(blob string) BlobMetadata {
 		return BlobMetadata{}
 	}
 	out := BlobMetadata{}
-	// CATEGORIES: RFC 5545 §3.8.1.2 — comma-separated TEXT list; may appear
-	// multiple times. We coalesce all occurrences into one slice and trim
-	// per-element whitespace; empty values are dropped.
+	// CATEGORIES: RFC 5545 §3.8.1.2 — multi-valued TEXT list. The COMMA inside
+	// a CATEGORIES value is the list separator (NOT a single-value content
+	// comma; that would be escaped as `\,` per §3.3.11). go-ical's TextList()
+	// does the unescape-and-split correctly; a plain Text() / Value here would
+	// truncate at the first comma. CATEGORIES may also appear multiple times;
+	// we coalesce all occurrences into one slice.
 	for _, p := range todo.Props.Values("CATEGORIES") {
-		raw := p.Value
-		if t, terr := p.Text(); terr == nil && t != "" {
-			raw = t
+		items, terr := p.TextList()
+		if terr != nil {
+			// Fall back to raw .Value for badly-typed properties (rare).
+			items = strings.Split(p.Value, ",")
 		}
-		for _, c := range strings.Split(raw, ",") {
+		for _, c := range items {
 			c = strings.TrimSpace(c)
 			if c != "" {
 				out.Categories = append(out.Categories, c)
