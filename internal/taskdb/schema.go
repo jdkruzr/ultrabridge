@@ -47,9 +47,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			PRIMARY KEY (task_id, adapter_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_sync_map_remote ON task_sync_map(adapter_id, remote_id)`,
-		// Partial index — only rows with a ForestNote origin carry the value, so this stays cheap
-		// even on the SPC-dominated row population. Powers the "list_tasks ?notebook_id=…" filter.
-		`CREATE INDEX IF NOT EXISTS idx_tasks_forestnote_notebook ON tasks(forestnote_notebook_id) WHERE forestnote_notebook_id IS NOT NULL`,
+		// NOTE: The partial index on tasks.forestnote_notebook_id is created AFTER the
+		// idempotent ALTERs below — on a pre-ForestNote DB the column doesn't exist yet
+		// when this slice runs, so an index referencing it would fail.
 	}
 	for i, stmt := range stmts {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
@@ -84,6 +84,15 @@ func migrate(ctx context.Context, db *sql.DB) error {
 				return fmt.Errorf("add %s column: %w", col, err)
 			}
 		}
+	}
+
+	// Partial index on the now-guaranteed-to-exist column. Only rows with a ForestNote origin
+	// carry the value, so this stays cheap even on the SPC-dominated row population. Powers the
+	// "list_tasks ?notebook_id=…" filter. Must run AFTER the ALTERs above (see note in stmts).
+	if _, err := db.ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_forestnote_notebook
+			ON tasks(forestnote_notebook_id) WHERE forestnote_notebook_id IS NOT NULL`); err != nil {
+		return fmt.Errorf("create idx_tasks_forestnote_notebook: %w", err)
 	}
 
 	return nil
