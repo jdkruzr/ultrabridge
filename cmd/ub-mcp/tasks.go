@@ -267,14 +267,23 @@ func registerGetTask(server *mcp.Server, client *apiClient) {
 // --- create_task ---
 
 type CreateTaskInput struct {
-	Title string `json:"title"`
-	DueAt string `json:"due_at,omitempty"` // RFC3339; optional
+	Title      string   `json:"title"`
+	DueAt      string   `json:"due_at,omitempty"` // RFC3339; optional
+	Detail     string   `json:"detail,omitempty"`
+	URL        string   `json:"url,omitempty"`
+	Priority   string   `json:"priority,omitempty"`   // VTODO PRIORITY "1".."9"
+	Categories []string `json:"categories,omitempty"` // VTODO CATEGORIES (list)
+	Comment    string   `json:"comment,omitempty"`    // VTODO COMMENT (free-form)
 }
 
 func registerCreateTask(server *mcp.Server, client *apiClient) {
 	mcp.AddTool[CreateTaskInput, any](server, &mcp.Tool{
-		Name:        "create_task",
-		Description: "Create a new task. Requires a title; due_at is optional and must be RFC3339 when provided. The new task syncs to configured CalDAV devices on the next sync cycle.",
+		Name: "create_task",
+		Description: "Create a new task. Requires a title; everything else is optional. " +
+			"due_at must be RFC3339 when provided. " +
+			"url and priority land in dedicated columns (priority is the VTODO PRIORITY value, \"1\"-\"9\"). " +
+			"categories and comment ride in the iCal blob, so they're readable via get_task right after create. " +
+			"The new task syncs to configured CalDAV devices on the next sync cycle.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateTaskInput) (*mcp.CallToolResult, any, error) {
 		if input.Title == "" {
 			return nil, nil, fmt.Errorf("title is required")
@@ -286,6 +295,21 @@ func registerCreateTask(server *mcp.Server, client *apiClient) {
 				return nil, nil, fmt.Errorf("due_at must be RFC3339: %w", err)
 			}
 			body["due_at"] = t
+		}
+		if input.Detail != "" {
+			body["detail"] = input.Detail
+		}
+		if input.URL != "" {
+			body["url"] = input.URL
+		}
+		if input.Priority != "" {
+			body["priority"] = input.Priority
+		}
+		if len(input.Categories) > 0 {
+			body["categories"] = input.Categories
+		}
+		if input.Comment != "" {
+			body["comment"] = input.Comment
 		}
 
 		resp, err := client.postJSON(ctx, "/api/v1/tasks", body)
@@ -312,19 +336,32 @@ func registerCreateTask(server *mcp.Server, client *apiClient) {
 // --- update_task ---
 
 // UpdateTaskInput holds the partial-update payload. Omitted pointer fields
-// leave the task unchanged. ClearDueAt wins over DueAt when both are set.
+// leave the task unchanged. ClearXxx flags win over the value pointer when
+// both are set (allows null-ing a column without sending a value).
 type UpdateTaskInput struct {
-	ID         string  `json:"id"`
-	Title      *string `json:"title,omitempty"`
-	DueAt      *string `json:"due_at,omitempty"` // RFC3339
-	ClearDueAt bool    `json:"clear_due_at,omitempty"`
-	Detail     *string `json:"detail,omitempty"`
+	ID            string    `json:"id"`
+	Title         *string   `json:"title,omitempty"`
+	DueAt         *string   `json:"due_at,omitempty"` // RFC3339
+	ClearDueAt    bool      `json:"clear_due_at,omitempty"`
+	Detail        *string   `json:"detail,omitempty"`
+	URL           *string   `json:"url,omitempty"`
+	ClearURL      bool      `json:"clear_url,omitempty"`
+	Priority      *string   `json:"priority,omitempty"`
+	ClearPriority bool      `json:"clear_priority,omitempty"`
+	// Categories: nil = leave unchanged; non-nil (incl. empty slice) =
+	// replace wholesale. Send "categories": [] to clear.
+	Categories   *[]string `json:"categories,omitempty"`
+	Comment      *string   `json:"comment,omitempty"`
+	ClearComment bool      `json:"clear_comment,omitempty"`
 }
 
 func registerUpdateTask(server *mcp.Server, client *apiClient) {
 	mcp.AddTool[UpdateTaskInput, any](server, &mcp.Tool{
-		Name:        "update_task",
-		Description: "Partially update a task. Only supplied fields are changed. Use clear_due_at=true to remove an existing due date (takes priority over due_at when both set). Detail can be cleared by sending an empty string. Title cannot be empty.",
+		Name: "update_task",
+		Description: "Partially update a task. Only supplied fields are changed. " +
+			"Use clear_due_at / clear_url / clear_priority / clear_comment to null out a column (the Clear flag wins over the value pointer when both are set). " +
+			"Categories is wholesale: send a list to replace the existing set, an empty list to clear, or omit to leave unchanged. " +
+			"Detail and comment can be cleared by sending an empty string. Title cannot be empty.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateTaskInput) (*mcp.CallToolResult, any, error) {
 		if input.ID == "" {
 			return nil, nil, fmt.Errorf("id is required")
@@ -346,6 +383,27 @@ func registerUpdateTask(server *mcp.Server, client *apiClient) {
 		}
 		if input.Detail != nil {
 			body["detail"] = *input.Detail
+		}
+		if input.URL != nil {
+			body["url"] = *input.URL
+		}
+		if input.ClearURL {
+			body["clear_url"] = true
+		}
+		if input.Priority != nil {
+			body["priority"] = *input.Priority
+		}
+		if input.ClearPriority {
+			body["clear_priority"] = true
+		}
+		if input.Categories != nil {
+			body["categories"] = *input.Categories
+		}
+		if input.Comment != nil {
+			body["comment"] = *input.Comment
+		}
+		if input.ClearComment {
+			body["clear_comment"] = true
 		}
 		if len(body) == 0 {
 			return nil, nil, fmt.Errorf("no fields to update")

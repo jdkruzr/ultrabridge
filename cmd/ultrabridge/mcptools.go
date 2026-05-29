@@ -98,16 +98,28 @@ type getTaskInput struct {
 }
 
 type createTaskInput struct {
-	Title string `json:"title"`
-	DueAt string `json:"due_at,omitempty"`
+	Title      string   `json:"title"`
+	DueAt      string   `json:"due_at,omitempty"`
+	Detail     string   `json:"detail,omitempty"`
+	URL        string   `json:"url,omitempty"`
+	Priority   string   `json:"priority,omitempty"`
+	Categories []string `json:"categories,omitempty"`
+	Comment    string   `json:"comment,omitempty"`
 }
 
 type updateTaskInput struct {
-	ID         string  `json:"id"`
-	Title      *string `json:"title,omitempty"`
-	DueAt      *string `json:"due_at,omitempty"`
-	ClearDueAt bool    `json:"clear_due_at,omitempty"`
-	Detail     *string `json:"detail,omitempty"`
+	ID            string    `json:"id"`
+	Title         *string   `json:"title,omitempty"`
+	DueAt         *string   `json:"due_at,omitempty"`
+	ClearDueAt    bool      `json:"clear_due_at,omitempty"`
+	Detail        *string   `json:"detail,omitempty"`
+	URL           *string   `json:"url,omitempty"`
+	ClearURL      bool      `json:"clear_url,omitempty"`
+	Priority      *string   `json:"priority,omitempty"`
+	ClearPriority bool      `json:"clear_priority,omitempty"`
+	Categories    *[]string `json:"categories,omitempty"`
+	Comment       *string   `json:"comment,omitempty"`
+	ClearComment  bool      `json:"clear_comment,omitempty"`
 }
 
 type completeTaskInput struct {
@@ -527,8 +539,12 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 
 	// create_task
 	mcp.AddTool[createTaskInput, any](server, &mcp.Tool{
-		Name:        "create_task",
-		Description: "Create a new task. Requires a title; due_at is optional and must be RFC3339 when provided. The new task syncs to configured CalDAV devices on the next sync cycle.",
+		Name: "create_task",
+		Description: "Create a new task. Requires a title; everything else is optional. " +
+			"due_at must be RFC3339 when provided. " +
+			"url and priority land in dedicated columns (priority is the VTODO PRIORITY value, \"1\"-\"9\"). " +
+			"categories and comment ride in the iCal blob, so they're readable via get_task right after create. " +
+			"The new task syncs to configured CalDAV devices on the next sync cycle.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input createTaskInput) (*mcp.CallToolResult, any, error) {
 		if client.verbose && client.logger != nil {
 			client.logger.Info("MCP tool call", "tool", "create_task", "input", input)
@@ -543,6 +559,21 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 				return nil, nil, fmt.Errorf("due_at must be RFC3339: %w", err)
 			}
 			body["due_at"] = parsed
+		}
+		if input.Detail != "" {
+			body["detail"] = input.Detail
+		}
+		if input.URL != "" {
+			body["url"] = input.URL
+		}
+		if input.Priority != "" {
+			body["priority"] = input.Priority
+		}
+		if len(input.Categories) > 0 {
+			body["categories"] = input.Categories
+		}
+		if input.Comment != "" {
+			body["comment"] = input.Comment
 		}
 		resp, err := client.postJSON(ctx, "/api/v1/tasks", body)
 		if err != nil {
@@ -564,8 +595,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 
 	// update_task
 	mcp.AddTool[updateTaskInput, any](server, &mcp.Tool{
-		Name:        "update_task",
-		Description: "Partially update a task. Only supplied fields are changed. Use clear_due_at=true to remove an existing due date (takes priority over due_at when both set). Detail can be cleared by sending an empty string. Title cannot be empty.",
+		Name: "update_task",
+		Description: "Partially update a task. Only supplied fields are changed. " +
+			"Use clear_due_at / clear_url / clear_priority / clear_comment to null out a column (the Clear flag wins over the value pointer when both are set). " +
+			"Categories is wholesale: send a list to replace the existing set, an empty list to clear, or omit to leave unchanged. " +
+			"Detail and comment can be cleared by sending an empty string. Title cannot be empty.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input updateTaskInput) (*mcp.CallToolResult, any, error) {
 		if client.verbose && client.logger != nil {
 			client.logger.Info("MCP tool call", "tool", "update_task", "input", input)
@@ -589,6 +623,27 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		}
 		if input.Detail != nil {
 			body["detail"] = *input.Detail
+		}
+		if input.URL != nil {
+			body["url"] = *input.URL
+		}
+		if input.ClearURL {
+			body["clear_url"] = true
+		}
+		if input.Priority != nil {
+			body["priority"] = *input.Priority
+		}
+		if input.ClearPriority {
+			body["clear_priority"] = true
+		}
+		if input.Categories != nil {
+			body["categories"] = *input.Categories
+		}
+		if input.Comment != nil {
+			body["comment"] = *input.Comment
+		}
+		if input.ClearComment {
+			body["clear_comment"] = true
 		}
 		if len(body) == 0 {
 			return nil, nil, fmt.Errorf("no fields to update")

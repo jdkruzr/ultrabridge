@@ -600,3 +600,126 @@ func TestAPIv1PurgeDeleted(t *testing.T) {
 		}
 	})
 }
+
+
+// TestAPIv1CreateTaskNewFields verifies POST /api/v1/tasks accepts the
+// extended write surface (detail, url, priority, categories, comment) and
+// returns them on the created task.
+func TestAPIv1CreateTaskNewFields(t *testing.T) {
+	h := newTestHandler()
+
+	body := `{
+		"title": "rich create",
+		"detail": "ctx body",
+		"url": "https://ub.example/n/abc",
+		"priority": "1",
+		"categories": ["work", "urgent"],
+		"comment": "from a meeting"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var got service.Task
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Title != "rich create" {
+		t.Errorf("title: %q", got.Title)
+	}
+	if got.Detail == nil || *got.Detail != "ctx body" {
+		t.Errorf("detail: %+v", got.Detail)
+	}
+	if got.URL == nil || *got.URL != "https://ub.example/n/abc" {
+		t.Errorf("url: %+v", got.URL)
+	}
+	if got.Priority == nil || *got.Priority != "1" {
+		t.Errorf("priority: %+v", got.Priority)
+	}
+	if len(got.Categories) != 2 || got.Categories[0] != "work" {
+		t.Errorf("categories: %v", got.Categories)
+	}
+	if got.Comment != "from a meeting" {
+		t.Errorf("comment: %q", got.Comment)
+	}
+}
+
+// TestAPIv1UpdateTaskNewFields verifies PATCH /api/v1/tasks/{id} accepts
+// the same extended fields and respects the Clear* sentinels.
+func TestAPIv1UpdateTaskNewFields(t *testing.T) {
+	h := newTestHandler()
+	tasks := h.tasks.(*mockTaskService)
+	url := "https://old/"
+	prio := "5"
+	tasks.tasks = []service.Task{
+		{
+			ID:         "t1",
+			Title:      "orig",
+			Status:     service.StatusNeedsAction,
+			URL:        &url,
+			Priority:   &prio,
+			Categories: []string{"old"},
+			Comment:    "old comment",
+		},
+	}
+
+	t.Run("patch each new field", func(t *testing.T) {
+		body := `{
+			"url": "https://new/",
+			"priority": "1",
+			"categories": ["new1", "new2"],
+			"comment": "new comment"
+		}`
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/tasks/t1", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		var got service.Task
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.URL == nil || *got.URL != "https://new/" {
+			t.Errorf("url: %+v", got.URL)
+		}
+		if got.Priority == nil || *got.Priority != "1" {
+			t.Errorf("priority: %+v", got.Priority)
+		}
+		if len(got.Categories) != 2 || got.Categories[0] != "new1" {
+			t.Errorf("categories: %v", got.Categories)
+		}
+		if got.Comment != "new comment" {
+			t.Errorf("comment: %q", got.Comment)
+		}
+	})
+
+	t.Run("clear flags null out columns", func(t *testing.T) {
+		body := `{"clear_url": true, "clear_priority": true, "clear_comment": true}`
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/tasks/t1", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		var got service.Task
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.URL != nil {
+			t.Errorf("url should be nil: %+v", got.URL)
+		}
+		if got.Priority != nil {
+			t.Errorf("priority should be nil: %+v", got.Priority)
+		}
+		if got.Comment != "" {
+			t.Errorf("comment should be empty: %q", got.Comment)
+		}
+	})
+}
