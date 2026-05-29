@@ -152,6 +152,17 @@ func (m *mockTaskStore) DeleteCompleted(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+func (m *mockTaskStore) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (int64, error) {
+	var count int64
+	for id, t := range m.tasks {
+		if t.IsDeleted == "Y" && t.LastModified.Valid && t.LastModified.Int64 < cutoffMs {
+			delete(m.tasks, id)
+			count++
+		}
+	}
+	return count, nil
+}
+
 // mockNotifier implements SyncNotifier for testing
 type mockNotifier struct {
 	called  int
