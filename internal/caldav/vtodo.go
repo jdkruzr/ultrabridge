@@ -201,6 +201,21 @@ func VTODOToTask(cal *ical.Calendar, dueTimeMode string) (*taskstore.Task, error
 	if prio := todo.Props.Get("PRIORITY"); prio != nil {
 		t.Importance = taskstore.SqlStr(prio.Value)
 	}
+	if u := todo.Props.Get("URL"); u != nil {
+		// URL is a URI value; FN emits the https deep link back to the source
+		// page here (paired with the X-FORESTNOTE-NATIVE-URL forestnote:// form).
+		// Lift it into the links column — TaskToVTODO emits URL from t.Links, so
+		// without this the inbound link round-trips only inside the blob and never
+		// surfaces in REST/MCP. Mirror SUMMARY/DESCRIPTION: prefer .Text() (un-escapes
+		// any SetText-escaped round-trip), fall back to raw .Value; empty → leave NULL.
+		v, err := u.Text()
+		if err != nil {
+			v = u.Value
+		}
+		if v != "" {
+			t.Links = taskstore.SqlStr(v)
+		}
+	}
 
 	// Handle completion time mapping (Supernote quirk: last_modified = actual completion time)
 	if taskstore.NullStr(t.Status) == "completed" {
