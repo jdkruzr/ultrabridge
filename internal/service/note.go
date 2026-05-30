@@ -506,6 +506,30 @@ func (s *noteService) GetContent(ctx context.Context, path string) (interface{},
 	return s.searchIndex.GetContent(ctx, path)
 }
 
+// GetNotePages returns the indexed OCR content for a note as typed page views,
+// ordered by page, for the in-tab detail grid. A note that was never indexed
+// yields an empty slice (not an error) so the caller can render an empty state.
+func (s *noteService) GetNotePages(ctx context.Context, path string) ([]NotePageView, error) {
+	if s.searchIndex == nil {
+		return nil, nil
+	}
+	docs, err := s.searchIndex.GetContent(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	pages := make([]NotePageView, 0, len(docs))
+	for _, d := range docs {
+		pages = append(pages, NotePageView{
+			Page:      d.Page,
+			Source:    d.Source,
+			BodyText:  d.BodyText,
+			Keywords:  d.Keywords,
+			TitleText: d.TitleText,
+		})
+	}
+	return pages, nil
+}
+
 func (s *noteService) RenderPage(ctx context.Context, path string, pageIdx int) (io.ReadCloser, string, error) {
 	// ForestNote paths are an opaque scheme (never a filesystem path), so branch
 	// on them first. The page ULID is in the path; pageIdx is ignored.

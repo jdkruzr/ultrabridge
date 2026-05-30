@@ -169,6 +169,17 @@ type ForestNoteNotebookDetail struct {
 	Pages      []ForestNotePage `json:"pages"`
 }
 
+// NotePageView is one indexed page of a Supernote/Boox note, surfaced for the
+// in-tab detail page grid. It mirrors the OCR-bearing fields ForestNotePage
+// carries so the three sources share one detail renderer.
+type NotePageView struct {
+	Page      int    `json:"page"`
+	Source    string `json:"source"`     // OCR provenance ("myScript" | "api")
+	BodyText  string `json:"body_text"`  // recognized text for the page
+	Keywords  string `json:"keywords"`   // page-0 keyword annotations, if any
+	TitleText string `json:"title_text"` // page-0 title annotation, if any
+}
+
 // ForestNoteTreeNode is a folder in the ForestNote browse tree, holding its child
 // folders and the notebooks filed directly under it.
 type ForestNoteTreeNode struct {
@@ -207,11 +218,11 @@ type EmbeddingJobStatus struct {
 // in the parent struct when no ForestNote source is wired (server-mode
 // without the FN source, or pre-source-start polls).
 type ForestNoteQueueStatus struct {
-	Pending   int   `json:"pending"`    // pages waiting in the bridge channel
-	InFlight  int   `json:"in_flight"`  // pages currently being OCR'd
-	Processed int64 `json:"processed"`  // pages finished since process start
-	Dropped   int64 `json:"dropped"`    // enqueues lost to channel-full
-	Capacity  int   `json:"capacity"`   // channel buffer size
+	Pending   int   `json:"pending"`   // pages waiting in the bridge channel
+	InFlight  int   `json:"in_flight"` // pages currently being OCR'd
+	Processed int64 `json:"processed"` // pages finished since process start
+	Dropped   int64 `json:"dropped"`   // enqueues lost to channel-full
+	Capacity  int   `json:"capacity"`  // channel buffer size
 }
 
 type ActiveTask struct {
@@ -232,21 +243,21 @@ type ActiveTask struct {
 // can supply alongside the basics. Categories is wholesale (the patch
 // replaces the entire list; partial add/remove would need a richer API).
 type TaskPatch struct {
-	Title       *string    `json:"title,omitempty"`
-	DueAt       *time.Time `json:"due_at,omitempty"`
-	ClearDueAt  bool       `json:"clear_due_at,omitempty"`
-	Detail      *string    `json:"detail,omitempty"`
-	URL         *string    `json:"url,omitempty"`
-	ClearURL    bool       `json:"clear_url,omitempty"`
-	Priority    *string    `json:"priority,omitempty"`
-	ClearPriority bool     `json:"clear_priority,omitempty"`
+	Title         *string    `json:"title,omitempty"`
+	DueAt         *time.Time `json:"due_at,omitempty"`
+	ClearDueAt    bool       `json:"clear_due_at,omitempty"`
+	Detail        *string    `json:"detail,omitempty"`
+	URL           *string    `json:"url,omitempty"`
+	ClearURL      bool       `json:"clear_url,omitempty"`
+	Priority      *string    `json:"priority,omitempty"`
+	ClearPriority bool       `json:"clear_priority,omitempty"`
 	// Categories: nil = leave alone, non-nil (incl. empty slice) = replace.
 	// A nil-vs-empty distinction is expressible in Go JSON decoding via a
 	// pointer, but []string already encodes the same thing — callers send
 	// `"categories": []` to clear, or omit the field to leave unchanged.
-	Categories *[]string `json:"categories,omitempty"`
-	Comment    *string   `json:"comment,omitempty"`
-	ClearComment bool    `json:"clear_comment,omitempty"`
+	Categories   *[]string `json:"categories,omitempty"`
+	Comment      *string   `json:"comment,omitempty"`
+	ClearComment bool      `json:"clear_comment,omitempty"`
 }
 
 // TaskCreate is the input shape for creating a new task via the
@@ -300,6 +311,7 @@ type NoteService interface {
 	GetBooxNote(ctx context.Context, path string) (BooxNoteSummary, error)
 	GetNoteDetails(ctx context.Context, path string) (interface{}, error)                 // history/job info
 	GetContent(ctx context.Context, path string) (interface{}, error)                     // OCR text and page metadata
+	GetNotePages(ctx context.Context, path string) ([]NotePageView, error)                // typed page content for the in-tab detail grid
 	RenderPage(ctx context.Context, path string, page int) (io.ReadCloser, string, error) // image stream, content-type
 
 	ScanFiles(ctx context.Context) error

@@ -487,11 +487,24 @@ func (h *Handler) handleFilesSupernote(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	data := map[string]interface{}{"activeTab": "files-supernote"}
-	if detail := r.URL.Query().Get("detail"); detail != "" {
-		data["detailPath"] = detail
-	}
 	if !h.notes.HasSupernoteSource() {
 		data["filesError"] = "No Supernote source configured. Add a source in Settings."
+		h.renderTemplate(w, r, "files_supernote", data)
+		return
+	}
+	if detail := r.URL.Query().Get("detail"); detail != "" {
+		if !h.validNotePath(detail) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		back := r.URL.Query().Get("back")
+		dv, err := h.buildNoteDetail(ctx, detail, filepath.Base(detail),
+			"/files/supernote?path="+url.QueryEscape(back), "", nil)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		data["detail"] = dv
 		h.renderTemplate(w, r, "files_supernote", data)
 		return
 	}
@@ -538,11 +551,35 @@ func (h *Handler) handleFilesBoox(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	data := map[string]interface{}{"activeTab": "files-boox"}
-	if detail := r.URL.Query().Get("detail"); detail != "" {
-		data["detailPath"] = detail
-	}
 	if !h.notes.HasBooxSource() {
 		data["filesError"] = "No Boox source configured. Add a source in Settings."
+		h.renderTemplate(w, r, "files_boox", data)
+		return
+	}
+	if detail := r.URL.Query().Get("detail"); detail != "" {
+		if !h.validNotePath(detail) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		title := filepath.Base(detail)
+		if note, err := h.notes.GetBooxNote(ctx, detail); err == nil && note.Title != "" {
+			title = note.Title
+		}
+		delAction := detailAction{
+			Label:   "✗ Delete",
+			Danger:  true,
+			HxPost:  "/files/delete-note",
+			Vals:    mustJSON(map[string]string{"path": detail}),
+			Confirm: "Delete this note, all job records, and cached renders?",
+			OnAfter: "if(event.detail.successful){window.location='/files/boox';}",
+		}
+		dv, err := h.buildNoteDetail(ctx, detail, title, "/files/boox",
+			"/files/boox/versions?path="+url.QueryEscape(detail), []detailAction{delAction})
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		data["detail"] = dv
 		h.renderTemplate(w, r, "files_boox", data)
 		return
 	}
@@ -1694,6 +1731,66 @@ type pipelinePanel struct {
 	Source    string
 	StartStop bool
 	Note      string
+}
+
+// detailView and its parts are the context for the shared _detail_page_grid
+// partial — the in-tab note detail that replaced the #history-modal.
+type detailView struct {
+	Title       string
+	BackURL     string
+	Meta        []detailKV
+	Pages       []detailPage
+	Actions     []detailAction
+	JobInfoURL  string // collapsible job-record fetch (/files/history)
+	VersionsURL string // collapsible version-history fetch (Boox only)
+	EmptyMsg    string
+}
+
+type detailKV struct{ Label, Value string }
+
+type detailPage struct {
+	ImgURL   string
+	Caption  string
+	BodyText string
+	Source   string
+}
+
+type detailAction struct {
+	Label   string
+	HxPost  string
+	Vals    string // hx-vals JSON
+	Confirm string
+	OnAfter string // hx-on:htmx:after-request body
+	Danger  bool
+}
+
+// buildNoteDetail assembles the in-tab detail for a Supernote/Boox note from
+// its indexed page content. Pages render lazily via /files/render; the job
+// record (and Boox version history) load on demand into collapsibles.
+func (h *Handler) buildNoteDetail(ctx context.Context, path, title, backURL, versionsURL string, actions []detailAction) (detailView, error) {
+	pages, err := h.notes.GetNotePages(ctx, path)
+	if err != nil {
+		return detailView{}, err
+	}
+	dps := make([]detailPage, 0, len(pages))
+	for _, p := range pages {
+		dps = append(dps, detailPage{
+			ImgURL:   "/files/render?path=" + url.QueryEscape(path) + "&page=" + strconv.Itoa(p.Page) + "&v=2",
+			Caption:  "Page " + strconv.Itoa(p.Page+1),
+			BodyText: p.BodyText,
+			Source:   p.Source,
+		})
+	}
+	return detailView{
+		Title:       title,
+		BackURL:     backURL,
+		Meta:        []detailKV{{Label: "Pages", Value: strconv.Itoa(len(pages))}},
+		Pages:       dps,
+		Actions:     actions,
+		JobInfoURL:  "/files/history?path=" + url.QueryEscape(path),
+		VersionsURL: versionsURL,
+		EmptyMsg:    "No indexed content yet — queue this note for OCR to see its pages.",
+	}, nil
 }
 
 // supernoteCrumbs adapts the Supernote relPath breadcrumb chain to []crumb.

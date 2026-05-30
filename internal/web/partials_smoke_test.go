@@ -3,8 +3,14 @@ package web
 import (
 	"bytes"
 	"html/template"
+	"io"
+	"log/slog"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sysop/ultrabridge/internal/logging"
+	"github.com/sysop/ultrabridge/internal/service"
 )
 
 func TestSharedPartialsRender(t *testing.T) {
@@ -70,5 +76,85 @@ func TestSharedPartialsRender(t *testing.T) {
 		if !strings.Contains(bc.String(), want) {
 			t.Errorf("breadcrumb missing %q in:\n%s", want, bc.String())
 		}
+	}
+}
+
+func TestDetailPageGridRenders(t *testing.T) {
+	funcs := template.FuncMap{} // partial uses no custom funcs
+	tmpl := template.Must(template.New("t").Funcs(funcs).ParseFS(templateFS,
+		"templates/_detail_page_grid.html"))
+
+	dv := detailView{
+		Title:       "foo.note",
+		BackURL:     "/files/supernote?path=Sub",
+		Meta:        []detailKV{{Label: "Pages", Value: "2"}},
+		Pages:       []detailPage{{ImgURL: "/files/render?path=x&page=0&v=2", Caption: "Page 1", BodyText: "hello", Source: "myScript"}},
+		Actions:     []detailAction{{Label: "✗ Delete", Danger: true, HxPost: "/files/delete-note", Confirm: "Delete?", OnAfter: "if(event.detail.successful){window.location='/files/boox';}"}},
+		JobInfoURL:  "/files/history?path=x",
+		VersionsURL: "/files/boox/versions?path=x",
+		EmptyMsg:    "nothing",
+	}
+	var out bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&out, "_detail_page_grid", dv); err != nil {
+		t.Fatalf("detail grid: %v", err)
+	}
+	s := out.String()
+	for _, want := range []string{
+		`hx-get="/files/supernote?path=Sub"`,            // back link
+		"foo.note",                                      // title
+		`src="/files/render?path=x&amp;page=0&amp;v=2"`, // lazy image (amp-escaped in attr)
+		"hello", "myScript", // OCR text + source
+		`hx-post="/files/delete-note"`, // action
+		// loader calls — slashes are JS-string-escaped (\/) in <script> context.
+		`ubLoadJobInfo("\/files\/history?path=x"`,
+		`ubLoadVersions("\/files\/boox\/versions?path=x"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("detail grid missing %q in:\n%s", want, s)
+		}
+	}
+
+	// Empty-pages path renders the empty message, not a grid.
+	dv.Pages = nil
+	var empty bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&empty, "_detail_page_grid", dv); err != nil {
+		t.Fatalf("detail grid (empty): %v", err)
+	}
+	if !strings.Contains(empty.String(), "nothing") {
+		t.Errorf("empty detail grid missing EmptyMsg")
+	}
+}
+
+// TestSupernoteDetailMode drives the handler's ?detail= branch end-to-end and
+// asserts the in-tab page grid renders (no modal). Guards the path that
+// renderTemplate would otherwise swallow on a template execution error.
+func TestSupernoteDetailMode(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	notes := &mockNoteService{
+		contents:           make(map[string]interface{}),
+		pipelineConfigured: true,
+		notePages: map[string][]service.NotePageView{
+			"/notes/foo.note": {{Page: 0, Source: "myScript", BodyText: "recognized words"}},
+		},
+	}
+	h := NewHandler(&mockTaskService{}, notes, &mockSearchService{}, &mockConfigService{},
+		nil, "/notes", "", logger, logging.NewLogBroadcaster())
+
+	req := httptest.NewRequest("GET", "/files/supernote?detail=/notes/foo.note&back=Sub", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("detail mode status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"foo.note", "recognized words", "← Back", "detail-page-grid"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("detail body missing %q", want)
+		}
+	}
+	// The old modal must be gone.
+	if strings.Contains(body, "history-modal") || strings.Contains(body, "showHistory(") {
+		t.Errorf("detail body still references the removed modal")
 	}
 }

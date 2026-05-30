@@ -4,6 +4,8 @@
     <div class="card" style="border-color: var(--status-text-failed);">
         <p class="text-danger">{{.filesError}}</p>
     </div>
+  {{else if .detail}}
+    {{template "_detail_page_grid" .detail}}
   {{else}}
     {{template "_files_status_panel" .pipelinePanel}}
 
@@ -194,21 +196,4 @@
                 }
             });
     }
-    {{if .detailPath}}
-    // Stash the detail path in a window global. Two cases call it:
-    //
-    // 1. HTMX swap (clicking a red-ink task's "Open note details" link
-    //    from the Tasks tab): showHistory is already defined; we fire
-    //    immediately below.
-    // 2. Hard browser load (clicking the absolute-URL link in a CalDAV
-    //    client): this script runs while the document is still parsing,
-    //    BEFORE layout.html's script block defines showHistory. The
-    //    layout script reads the global after it defines showHistory
-    //    and fires the call there.
-    window.__ubPendingDetail = "{{.detailPath}}";
-    if (typeof showHistory === 'function') {
-        showHistory(window.__ubPendingDetail);
-        window.__ubPendingDetail = null;
-    }
-    {{end}}
 </script>

@@ -4,6 +4,8 @@
     <div class="card" style="border-color: var(--status-text-failed);">
         <p class="text-danger">{{.filesError}}</p>
     </div>
+  {{else if .detail}}
+    {{template "_detail_page_grid" .detail}}
   {{else if .files}}
     {{template "_files_status_panel" .pipelinePanel}}
 
@@ -58,14 +60,4 @@
     document.addEventListener('DOMContentLoaded', function() {
         if (typeof updateProcessorStatus === 'function') updateProcessorStatus();
     });
-    {{if .detailPath}}
-    // See files_boox.html for the rationale; this two-path dance covers
-    // both HTMX swaps (showHistory already defined) and hard browser
-    // loads (script runs before layout.html defines showHistory).
-    window.__ubPendingDetail = "{{.detailPath}}";
-    if (typeof showHistory === 'function') {
-        showHistory(window.__ubPendingDetail);
-        window.__ubPendingDetail = null;
-    }
-    {{end}}
 </script>

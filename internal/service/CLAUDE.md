@@ -1,6 +1,6 @@
 # internal/service
 
-Last verified: 2026-05-30 (TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; PurgeCompleted now returns (int64, error); PurgeDeleted now returns (purged, skipped, error); ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
+Last verified: 2026-05-30 (NoteService.GetNotePages → []NotePageView typed page content backing the in-tab note detail grid (web); TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; PurgeCompleted now returns (int64, error); PurgeDeleted now returns (purged, skipped, error); ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
 
 ## Purpose
 

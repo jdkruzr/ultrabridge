@@ -7,7 +7,9 @@
         <br><span class="device-info">{{ taskDetailHTML .Detail }}</span>
         {{end}}
         {{if .Links}}{{with taskLink .Links}}
-        <br><span class="device-info"><a href="#" onclick="showHistory('{{.Path | js}}'); return false;" style="color:#6b7280;">⬔ From note, page {{.Page}}</a></span>
+        {{$durl := printf "/files/supernote?detail=%s" (.Path | urlquery)}}
+        {{if eq (noteSource .Path) "Boox"}}{{$durl = printf "/files/boox?detail=%s" (.Path | urlquery)}}{{end}}
+        <br><span class="device-info"><a href="{{$durl}}" hx-get="{{$durl}}" hx-target="#main-content" hx-push-url="true" style="color:#6b7280;">⬔ From note, page {{.Page}}</a></span>
         {{end}}{{end}}
     </td>
     <td>

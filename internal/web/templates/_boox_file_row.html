@@ -33,7 +33,7 @@
         <button type="button" hx-post="/files/skip?path={{.Path | urlquery}}" hx-target="closest tr" hx-swap="outerHTML" class="btn-small">Skip</button>
       {{end}}
       <button type="button" class="btn-small" onclick="rowMoveOpen('{{ fileRowID .Path }}')">Move…</button>
-      <button type="button" class="btn-small" onclick="showHistory('{{.Path}}')">Details</button>
+      <button type="button" class="btn-small" hx-get="/files/boox?detail={{.Path | urlquery}}" hx-target="#main-content" hx-push-url="true">Details</button>
     </div>
     <span class="row-move-picker" id="rmp-{{ fileRowID .Path }}" style="display:none; margin-left:0.5rem;">
       <select class="row-move-folder" data-path="{{.Path}}"></select>

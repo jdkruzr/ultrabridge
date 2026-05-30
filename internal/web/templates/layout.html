@@ -525,29 +525,7 @@
         </main>
     </div>
 
-    <!-- Modals & Overlays -->
-    <div id="modal-overlay" onclick="closeModals()"></div>
-    <div id="history-modal" style="display:none; position:fixed; top:5%; left:50%;
-         transform:translateX(-50%); background:var(--surface-color); border:1px solid var(--border-color);
-         padding:1.5rem; border-radius:6px; width:800px; max-width:90vw; max-height:85vh;
-         overflow-y:auto; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-        <h3 style="margin:0;">Note Details</h3>
-        <div style="display:flex; gap:0.5rem;">
-          <form id="delete-note-form" hx-post="/files/delete-note" hx-swap="none" hx-on:htmx:after-request="if (!event.detail.successful) return; const path = this.querySelector('input[name=path]').value; const row = Array.from(document.querySelectorAll('input.file-checkbox')).find(cb => cb.value === path)?.closest('tr'); if (row) row.remove(); document.getElementById('history-modal').style.display = 'none';" style="display:inline;">
-            <input type="hidden" id="delete-note-path" name="path" value="">
-            <button type="submit" class="btn-small" style="color:var(--status-text-failed);"
-              onclick="return confirm('Delete this note, all job records, and cached renders?')">✗ Delete</button>
-          </form>
-          <button onclick="document.getElementById('history-modal').style.display='none'" class="btn-small">Close</button>
-        </div>
-      </div>
-      <div id="history-job" style="margin-bottom:1rem;">
-        <h4 style="margin:0 0 0.5rem;">Job Info</h4>
-        <pre id="history-content" style="font-size:0.8rem; white-space:pre-wrap; background:var(--body-bg); padding:0.5rem; border-radius:3px; max-height:150px; overflow-y:auto;"></pre>
-      </div>
-      <div id="history-pages"></div>
-    </div>
+    <!-- Note details render in-tab (see _detail_page_grid.html); no modal. -->
 
     <script>
         // Global error logging
@@ -823,14 +801,6 @@
                 tabs.forEach(t => t.classList.remove('active'));
                 const el = document.getElementById(active);
                 if (el) el.classList.add('active');
-                if (active === 'files') {
-                    // Auto-open detail modal if ?detail= parameter is present
-                    const params = new URLSearchParams(window.location.search);
-                    const detailPath = params.get('detail');
-                    if (detailPath) {
-                        showHistory(detailPath);
-                    }
-                }
                 if (active === 'logs') {
                     connectLogs();
                 }
@@ -892,106 +862,39 @@
             connectLogs();
         }
 
-        function showHistory(path) {
-          var modal = document.getElementById('history-modal');
-          var jobPre = document.getElementById('history-content');
-          var pagesDiv = document.getElementById('history-pages');
-          jobPre.textContent = 'Loading...';
-          pagesDiv.innerHTML = '';
-          modal.style.display = 'block';
-          document.getElementById('delete-note-path').value = path;
-
-          // Fetch job info
-          fetch('/files/history?path=' + encodeURIComponent(path))
+        // ubLoadJobInfo / ubLoadVersions back the collapsible panels in the
+        // in-tab note detail (_detail_page_grid.html). The page grid + OCR
+        // text are server-rendered; these two debug affordances lazy-load
+        // their JSON on first render of the detail view.
+        function ubLoadJobInfo(url, elId) {
+          var el = document.getElementById(elId);
+          if (!el) return;
+          fetch(url)
             .then(function(r) { return r.json(); })
             .then(function(data) {
-              jobPre.textContent = data ? JSON.stringify(data, null, 2) : 'No job record found.';
+              el.textContent = data ? JSON.stringify(data, null, 2) : 'No job record found.';
             })
-            .catch(function() { jobPre.textContent = 'Failed to load job info.'; });
-
-          // Fetch indexed content + render images
-          fetch('/files/content?path=' + encodeURIComponent(path))
-            .then(function(r) { return r.json(); })
-            .then(function(pages) {
-              if (!pages || pages.length === 0) {
-                pagesDiv.innerHTML = '<p style="color:#666;">No indexed content.</p>';
-                return;
-              }
-
-              // Detect source from path: if path starts with booxNotesPath, it's a Boox note
-              var isBoox = (booxNotesPath && path.startsWith(booxNotesPath)) || (booxImportPath && path.startsWith(booxImportPath));
-
-              pagesDiv.innerHTML = '<h4 style="margin:0 0 0.5rem;">Pages</h4>';
-              pages.forEach(function(pg) {
-                var div = document.createElement('div');
-                div.style.cssText = 'display:flex; gap:1rem; margin-bottom:1rem; padding:0.5rem; border:1px solid #eee; border-radius:4px;';
-
-                // The /files/content endpoint speaks snake_case (post a19a2a0
-                // headless-API unification); treat the old PascalCase as a
-                // fallback in case anything else still emits it.
-                var pageNum = (pg.page != null) ? pg.page : pg.Page;
-                var source = pg.source || pg.Source || '';
-                var bodyTextRaw = pg.body_text || pg.BodyText;
-                var keywords = pg.keywords || pg.Keywords;
-
-                var imgDiv = document.createElement('div');
-                imgDiv.style.cssText = 'flex-shrink:0;';
-                var img = document.createElement('img');
-                var renderUrl = '/files/render?path=' + encodeURIComponent(path) + '&page=' + pageNum + '&v=2';
-                img.src = renderUrl;
-                img.alt = 'Page ' + (pageNum + 1);
-                img.style.cssText = 'width:200px; border:1px solid #ddd; border-radius:3px; background:#fafafa;';
-                img.onerror = function() { this.alt = 'No render'; this.style.display = 'none'; };
-                imgDiv.appendChild(img);
-
-                var textDiv = document.createElement('div');
-                textDiv.style.cssText = 'flex:1; min-width:0;';
-                var header = '<strong>Page ' + (pageNum + 1) + '</strong> <span style="color:#888; font-size:0.8rem;">[' + source + ']</span>';
-                var bodyText = bodyTextRaw || '<em style="color:#999;">empty</em>';
-                textDiv.innerHTML = header + '<pre style="font-size:0.8rem; white-space:pre-wrap; margin-top:0.3rem; max-height:200px; overflow-y:auto;">' + escapeHtml(bodyText) + '</pre>';
-                if (keywords) {
-                  textDiv.innerHTML += '<div style="font-size:0.8rem; color:#555; margin-top:0.3rem;">Keywords: ' + escapeHtml(keywords) + '</div>';
-                }
-
-                div.appendChild(imgDiv);
-                div.appendChild(textDiv);
-                pagesDiv.appendChild(div);
-              });
-
-              // If Boox note, fetch and display version history
-              if (isBoox) {
-                fetch('/files/boox/versions?path=' + encodeURIComponent(path))
-                  .then(function(r) { return r.json(); })
-                  .then(function(versions) {
-                    if (!versions || versions.length === 0) {
-                      return;
-                    }
-                    var versionsHtml = '<h4 style="margin:1rem 0 0.5rem;">Version History</h4>';
-                    versionsHtml += '<ul style="font-size:0.9rem; color:#555; padding-left:1.5rem;">';
-                    versions.forEach(function(v) {
-                      versionsHtml += '<li>' + v.Timestamp + ' (' + (v.SizeBytes / 1024).toFixed(1) + ' KB)</li>';
-                    });
-                    versionsHtml += '</ul>';
-                    pagesDiv.innerHTML += versionsHtml;
-                  })
-                  .catch(function() {
-                    // silently fail if versions can't be loaded
-                  });
-              }
-            })
-            .catch(function() {
-              pagesDiv.innerHTML = '<p style="color:#842029;">Failed to load content.</p>';
-            });
+            .catch(function() { el.textContent = 'Failed to load job info.'; });
         }
 
-        // Hard-load case for ?detail=<path> on /files/{boox,supernote}:
-        // the inline script in files_boox.html / files_supernote.html runs
-        // before this script is parsed, so it stashes the path in
-        // window.__ubPendingDetail. Now that showHistory is defined, fire
-        // the call here.
-        if (typeof window.__ubPendingDetail === 'string' && window.__ubPendingDetail) {
-            showHistory(window.__ubPendingDetail);
-            window.__ubPendingDetail = null;
+        function ubLoadVersions(url, elId) {
+          var el = document.getElementById(elId);
+          if (!el) return;
+          fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(versions) {
+              if (!versions || versions.length === 0) {
+                el.innerHTML = '<p class="text-small text-secondary">No prior versions.</p>';
+                return;
+              }
+              var html = '<ul style="font-size:0.85rem; color:var(--text-secondary); padding-left:1.25rem; margin:0;">';
+              versions.forEach(function(v) {
+                html += '<li>' + escapeHtml(v.Timestamp) + ' (' + (v.SizeBytes / 1024).toFixed(1) + ' KB)</li>';
+              });
+              html += '</ul>';
+              el.innerHTML = html;
+            })
+            .catch(function() { el.innerHTML = '<p class="text-small text-secondary">Failed to load versions.</p>'; });
         }
 
         // Chat functions

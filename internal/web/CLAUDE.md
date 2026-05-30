@@ -1,6 +1,6 @@
 # internal/web
 
-Last verified: 2026-05-30 (Files-tab consistency: shared _files_pagination/_files_status_panel/_files_breadcrumb partials back all three Files tabs + Digests; ForestNote now gets a status panel; global status bar uses one symmetric per-source active/actionable rule. Prior: REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
+Last verified: 2026-05-30 (Files-tab consistency: shared _files_pagination/_files_status_panel/_files_breadcrumb partials back all three Files tabs + Digests; ForestNote now gets a status panel; global status bar uses one symmetric per-source active/actionable rule; in-tab note detail (`_detail_page_grid.html` + `NoteService.GetNotePages`) replaced the `#history-modal`/`showHistory` for Supernote+Boox, and Search/Task/CalDAV deep links now navigate to `?detail=` in-tab. Prior: REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
 
 ## REST v1 task API — write/read surface extensions (2026-05-29)
 
@@ -91,8 +91,8 @@ For tests, `LegacyNewHandler` in `handler_test.go` bridges the old 22-argument s
 | GET | `/settings` | `handleSettings` | Settings page (config + MCP tokens + UB-as-SPC server card) |
 | POST | `/settings/save` | `handleSettingsSave` | Save config changes. Routes by hidden `section` field: `supernote`, `general`, `boox`, `ub-spc` (UB-as-SPC server config — all restart-required; secret fields keep current value when left blank). |
 | GET | `/files` | `handleFiles` | Legacy entry point; 303-redirects to `/files/supernote` or `/files/boox` based on configured sources. Renders an empty-state placeholder when neither is configured. |
-| GET | `/files/supernote` | `handleFilesSupernote` | Supernote file browser (directory tree, breadcrumbs, sort, pagination). Path traversal guarded. |
-| GET | `/files/boox` | `handleFilesBoox` | Boox catalog listing (flat, Title/Folder/Device/NoteType/Pages columns, sort, pagination). |
+| GET | `/files/supernote` | `handleFilesSupernote` | Supernote file browser (directory tree, breadcrumbs, sort, pagination). Path traversal guarded. `?detail=<path>&back=<relPath>` renders the in-tab note detail (page grid) instead of the list — see "In-tab note detail" below. |
+| GET | `/files/boox` | `handleFilesBoox` | Boox catalog listing (flat, Title/Folder/Device/NoteType/Pages columns, sort, pagination). `?detail=<path>` renders the in-tab note detail (page grid + Delete + version history). |
 | GET | `/files/forestnote` | `handleFilesForestNote` | ForestNote browser. Default/`?folder=<id>`: a Supernote-style table (Name/Type/Pages/Created/Modified/Status/Actions) of that folder's subfolders + notebooks, with a breadcrumb trail. `?notebook=<id>`: the enriched detail view (metadata header + per-page thumbnail + OCR text + Delete/Re-OCR/Download actions). Inventory is a live projection of the `fn_*` mirror (no filesystem); created_at is synced, "Modified" is derived MAX(lww_wall_ts) over notebook+pages+strokes. |
 | GET | `/files/forestnote/render` | `handleForestNoteRender` | JPEG for a `forestnote://{nb}/{page}` path, rendered on the fly from strokes (no cache). `Cache-Control: public, max-age=300`. |
 | POST | `/files/forestnote/delete` | `handleForestNoteDelete` | Soft-delete a notebook (UB-local, by `notebook` form value) + de-index its pages. HX: empty 200 (row swaps out); non-HX: 303 to `?folder=<back>`. Device-authoritative source: a re-edited notebook can resurrect on next sync (messaged in UI). |
@@ -320,6 +320,31 @@ ForestNote (no global worker) sets `Note` instead (Re-OCR is per-notebook).
 The shared `_files_pagination.html` (a `pager` map: BaseURL/Page/
 TotalPages/Params) and `_files_breadcrumb.html` (`[]crumb{Label, HxGet}`)
 partials likewise back all three Files tabs + Digests.
+
+### In-tab note detail (2026-05-30) — no modal
+
+All three sources show note detail as an **in-tab page grid** (the old
+`#history-modal` + client-side `showHistory()` are gone). Supernote and Boox
+render the shared `_detail_page_grid.html` partial (a `detailView` context:
+back link, title, optional `Actions`, a `Meta` row, the page grid, and
+collapsible Job Info / Version History panels); ForestNote keeps its own
+bespoke detail template but follows the same visual pattern. The page grid +
+OCR text are **server-rendered** from `NoteService.GetNotePages(path)` (typed
+`[]NotePageView`, mirroring `ForestNotePage`); page images stay lazy via
+`/files/render?path=&page=N` (RenderPage branches by path scheme). The Job
+Info and Version History collapsibles lazy-load their JSON on render via the
+small `ubLoadJobInfo` / `ubLoadVersions` helpers in `layout.html` (hitting the
+still-present `/files/history` and `/files/boox/versions` endpoints).
+
+Every detail entry point is a plain `hx-get` to `/files/{supernote,boox}?detail=`
+with `hx-target="#main-content" hx-push-url="true"` — the row "Details"
+buttons, the Search-result links (`search.html`, SN/Boox only; digest/FN are
+plain text), the Task note-links (`_task_row.html`, source picked via
+`noteSource`), and the Boox red-ink `taskDetailHTML` links (which already
+emitted `?detail=` URLs). There is no client-side detail state to restore on
+hard-load — `?detail=` is server-rendered, so a CalDAV/bookmark deep link
+Just Works. The web `/files/content` JSON endpoint is now orphaned by the UI
+(its `/api/v1/files/content` sibling remains the headless surface).
 
 ### Design: minimal scope, no OOB
 
