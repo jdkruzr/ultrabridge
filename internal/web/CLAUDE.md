@@ -1,6 +1,6 @@
 # internal/web
 
-Last verified: 2026-05-30 (REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
+Last verified: 2026-05-30 (Files-tab consistency: shared _files_pagination/_files_status_panel/_files_breadcrumb partials back all three Files tabs + Digests; ForestNote now gets a status panel; global status bar uses one symmetric per-source active/actionable rule. Prior: REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
 
 ## REST v1 task API — write/read surface extensions (2026-05-29)
 
@@ -299,12 +299,27 @@ Dropped / Capacity). Both fields are `omitempty`, so non-FN / non-Boox
 deployments emit no key for the missing source — JS gate any UI on
 presence, not on zero values. `updateProcessorStatus()` (layout.html)
 renders both the Files-tab proc-status line and the global status bar from
-this single poll; the global bar's visibility gate matches against any
-configured source. Re-OCR buttons in `_fn_note_row.html` and
-`files_forestnote.html` show a transient "Queued ✓" / "Failed ✗" hint and
-call `updateProcessorStatus()` after a successful enqueue so the operator
-sees Pending tick up immediately rather than waiting for the next 5 s
-poll.
+this single poll. The two surfaces split by intent: the **in-tab
+`#proc-status`** line is the detailed view (carries the informational
+counts — done/processed, unmigrated — and the SN running/stopped state);
+the **global bar** uses one symmetric per-source rule — a `Source: …`
+segment appears only when that source has *active or actionable* state
+(in-flight/pending, or failed/dropped), so an idle deployment shows an
+empty (hidden) bar regardless of which sources are configured. Done/
+unmigrated are deliberately kept out of the global bar (they kept the Boox
+segment perpetually visible pre-2026-05-30). Re-OCR buttons in
+`_fn_note_row.html` and `files_forestnote.html` show a transient
+"Queued ✓" / "Failed ✗" hint and call `updateProcessorStatus()` after a
+successful enqueue so the operator sees Pending tick up immediately rather
+than waiting for the next 5 s poll.
+
+The in-tab panel itself is the shared `_files_status_panel.html` partial,
+fed a `pipelinePanel{Source, StartStop, Note}` context: Supernote/Boox set
+`StartStop` + a `Source` slug (→ `/processor/<source>/{start,stop}`);
+ForestNote (no global worker) sets `Note` instead (Re-OCR is per-notebook).
+The shared `_files_pagination.html` (a `pager` map: BaseURL/Page/
+TotalPages/Params) and `_files_breadcrumb.html` (`[]crumb{Label, HxGet}`)
+partials likewise back all three Files tabs + Digests.
 
 ### Design: minimal scope, no OOB
 

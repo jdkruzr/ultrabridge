@@ -5,7 +5,7 @@
         <p class="text-danger">{{.filesError}}</p>
     </div>
   {{else if .files}}
-    {{template "_files_status_panel" "supernote"}}
+    {{template "_files_status_panel" .pipelinePanel}}
 
     <div class="toolbar">
       <form hx-post="/files/scan" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">

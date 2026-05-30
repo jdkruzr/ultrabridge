@@ -47,6 +47,7 @@
     {{end}}
   {{else}}
     {{/* Browse mode: Supernote-style table of folders + notebooks. */}}
+    {{template "_files_status_panel" .pipelinePanel}}
     <div class="card">
       {{template "_files_breadcrumb" .navCrumbs}}
       {{if .fnEntries}}

@@ -527,6 +527,7 @@ func (h *Handler) handleFilesSupernote(w http.ResponseWriter, r *http.Request) {
 	}
 	data["filesTotalPages"] = totalPages
 	data["pager"] = pager("/files/supernote", page, totalPages, map[string]string{"path": relPath})
+	data["pipelinePanel"] = pipelinePanel{Source: "supernote", StartStop: true}
 	h.renderTemplate(w, r, "files_supernote", data)
 }
 
@@ -584,6 +585,7 @@ func (h *Handler) handleFilesBoox(w http.ResponseWriter, r *http.Request) {
 	}
 	data["filesTotalPages"] = totalPages
 	data["pager"] = pager("/files/boox", page, totalPages, map[string]string{"folder": folder, "device": device})
+	data["pipelinePanel"] = pipelinePanel{Source: "boox", StartStop: true}
 	h.renderTemplate(w, r, "files_boox", data)
 }
 
@@ -625,6 +627,7 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 	data["fnEntries"], data["fnCrumbs"], data["fnFolderID"] = entries, crumbs, folderID
 	data["navCrumbs"] = forestNoteCrumbs(crumbs)
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
+	data["pipelinePanel"] = pipelinePanel{Note: "Re-OCR is per-notebook — open a notebook to reprocess it."}
 	h.renderTemplate(w, r, "files_forestnote", data)
 }
 
@@ -1683,6 +1686,15 @@ func buildBreadcrumbs(p string) []breadcrumb {
 // crumb is the normalized breadcrumb shape consumed by the shared
 // _files_breadcrumb partial: a display label paired with the navigation URL.
 type crumb struct{ Label, HxGet string }
+
+// pipelinePanel is the context for the shared _files_status_panel partial.
+// Sources with a processor worker (Supernote, Boox) set StartStop and a Source
+// slug; ForestNote (no global worker) sets Note instead.
+type pipelinePanel struct {
+	Source    string
+	StartStop bool
+	Note      string
+}
 
 // supernoteCrumbs adapts the Supernote relPath breadcrumb chain to []crumb.
 // RelPath is emitted raw (matching the pre-refactor inline template, which did

@@ -35,15 +35,27 @@ func TestSharedPartialsRender(t *testing.T) {
 		}
 	}
 
-	// status panel: source slug threads into /processor/<slug>/{start,stop}.
+	// status panel (worker source): slug threads into /processor/<slug>/{start,stop}.
 	var sp bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&sp, "_files_status_panel", "supernote"); err != nil {
+	if err := tmpl.ExecuteTemplate(&sp, "_files_status_panel", pipelinePanel{Source: "supernote", StartStop: true}); err != nil {
 		t.Fatalf("status panel: %v", err)
 	}
 	for _, want := range []string{"/processor/supernote/start", "/processor/supernote/stop", `id="proc-status"`} {
 		if !strings.Contains(sp.String(), want) {
 			t.Errorf("status panel missing %q", want)
 		}
+	}
+
+	// status panel (no-worker source, e.g. ForestNote): Note instead of controls.
+	var spFN bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&spFN, "_files_status_panel", pipelinePanel{Note: "Re-OCR is per-notebook."}); err != nil {
+		t.Fatalf("status panel (note): %v", err)
+	}
+	if strings.Contains(spFN.String(), "/processor/") {
+		t.Errorf("no-worker panel should not render processor controls:\n%s", spFN.String())
+	}
+	if !strings.Contains(spFN.String(), "Re-OCR is per-notebook.") {
+		t.Errorf("no-worker panel missing note text")
 	}
 
 	// breadcrumb: []crumb renders label + nav url.

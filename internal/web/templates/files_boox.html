@@ -5,7 +5,7 @@
         <p class="text-danger">{{.filesError}}</p>
     </div>
   {{else}}
-    {{template "_files_status_panel" "boox"}}
+    {{template "_files_status_panel" .pipelinePanel}}
 
     <div class="toolbar">
       {{if .BooxImportPath}}

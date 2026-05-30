@@ -724,67 +724,78 @@
           fetch('/files/status')
             .then(function(r) { return r.json(); })
             .then(function(data) {
-              // Update Files tab detail view (if on Files page).
+              // Update the in-tab Files panel (#proc-status, if on a Files
+              // page). This is the *detailed* view: it carries the
+              // informational counts (done/processed, unmigrated) that the
+              // global bar intentionally omits.
               var el = document.getElementById('proc-status');
               if (el) {
                 var parts = [];
-                var state = data.running ? '▶ SN Running' : '⏹ SN Stopped';
-                parts.push(state);
-                if (data.pending_count > 0 || data.in_flight_count > 0) {
-                  parts.push('SN Queue: ' + data.pending_count);
-                }
+                parts.push(data.running ? '▶ SN Running' : '⏹ SN Stopped');
+                var snQ = [];
+                if (data.in_flight_count > 0) snQ.push(data.in_flight_count + ' in progress');
+                if (data.pending_count > 0) snQ.push(data.pending_count + ' queued');
+                if (data.failed_count > 0) snQ.push(data.failed_count + ' failed');
+                if (snQ.length) parts.push('SN: ' + snQ.join(', '));
                 if (data.boox) {
                   var b = data.boox;
-                  if (b.in_progress > 0 && b.active_title) {
-                    parts.push('⚙ ' + b.active_title);
-                  }
-                  var queueParts = [];
-                  if (b.pending > 0) queueParts.push(b.pending + ' queued');
-                  if (b.failed > 0) queueParts.push(b.failed + ' failed');
-                  queueParts.push(b.done + ' done');
-                  parts.push('Boox: ' + queueParts.join(', '));
+                  var bq = [];
+                  if (b.in_progress > 0 && b.active_title) bq.push('⚙ ' + b.active_title);
+                  else if (b.in_progress > 0) bq.push('⚙ ' + b.in_progress + ' in progress');
+                  if (b.pending > 0) bq.push(b.pending + ' queued');
+                  if (b.failed > 0) bq.push(b.failed + ' failed');
+                  bq.push(b.done + ' done');
+                  if (b.unmigrated_count > 0) bq.push('⬇ ' + b.unmigrated_count + ' unmigrated');
+                  parts.push('Boox: ' + bq.join(', '));
                 }
                 if (data.forestnote) {
                   var fn = data.forestnote;
-                  var fnParts = [];
-                  if (fn.in_flight > 0) fnParts.push('⚙ ' + fn.in_flight + ' in progress');
-                  if (fn.pending > 0) fnParts.push(fn.pending + ' queued');
-                  if (fn.dropped > 0) fnParts.push(fn.dropped + ' dropped');
-                  fnParts.push(fn.processed + ' done');
-                  parts.push('FN: ' + fnParts.join(', '));
+                  var fq = [];
+                  if (fn.in_flight > 0) fq.push('⚙ ' + fn.in_flight + ' in progress');
+                  if (fn.pending > 0) fq.push(fn.pending + ' queued');
+                  if (fn.dropped > 0) fq.push(fn.dropped + ' dropped');
+                  fq.push(fn.processed + ' done');
+                  parts.push('FN: ' + fq.join(', '));
                 }
                 el.textContent = parts.join(' | ');
               }
 
-              // Update global status bar (visible on all pages).
+              // Update the global status bar (visible on every page). One
+              // symmetric rule across all sources: a "Source: ..." segment
+              // appears only when that source has active or actionable state
+              // (in-flight / pending, or failed / dropped). Informational
+              // counts (done, unmigrated) stay in the in-tab panel above, so
+              // an idle deployment shows a quiet, empty bar regardless of
+              // which sources are configured.
               var gs = document.getElementById('global-status');
               if (gs) {
                 var gParts = [];
+                if (data.in_flight_count > 0 || data.pending_count > 0 || data.failed_count > 0) {
+                  var s = [];
+                  if (data.in_flight_count > 0) s.push(data.in_flight_count + ' in progress');
+                  if (data.pending_count > 0) s.push(data.pending_count + ' queued');
+                  if (data.failed_count > 0) s.push(data.failed_count + ' failed');
+                  gParts.push('SN: ' + s.join(', '));
+                }
                 if (data.boox) {
                   var b = data.boox;
-                  if (b.in_progress > 0 && b.active_title) {
-                    gParts.push('⚙ Processing: ' + b.active_title);
+                  if (b.in_progress > 0 || b.pending > 0 || b.failed > 0) {
+                    var s = [];
+                    if (b.in_progress > 0 && b.active_title) s.push('⚙ ' + b.active_title);
+                    else if (b.in_progress > 0) s.push('⚙ ' + b.in_progress + ' in progress');
+                    if (b.pending > 0) s.push(b.pending + ' queued');
+                    if (b.failed > 0) s.push(b.failed + ' failed');
+                    gParts.push('Boox: ' + s.join(', '));
                   }
-                  if (b.pending > 0) gParts.push(b.pending + ' queued');
-                  if (b.failed > 0) gParts.push(b.failed + ' failed');
-                  if (b.done > 0) gParts.push(b.done + ' done');
-                  if (b.unmigrated_count > 0) gParts.push('⬇ ' + b.unmigrated_count + ' unmigrated');
-                }
-                if (data.pending_count > 0 || data.in_flight_count > 0) {
-                  gParts.push('SN: ' + data.pending_count + ' queued');
                 }
                 if (data.forestnote) {
                   var fn = data.forestnote;
-                  // Show FN only when there's actual ongoing work — matches
-                  // SN's gate condition (pending|in_flight > 0) and Boox's
-                  // effective behavior (its per-segment gates collectively
-                  // hide the block when every counter is zero). Idle global
-                  // bar = nothing to surface.
-                  if (fn.in_flight > 0 || fn.pending > 0) {
-                    var fnSegments = ['FN:'];
-                    if (fn.in_flight > 0) fnSegments.push(fn.in_flight + ' in progress');
-                    if (fn.pending > 0) fnSegments.push(fn.pending + ' queued');
-                    gParts.push(fnSegments.join(' '));
+                  if (fn.in_flight > 0 || fn.pending > 0 || fn.dropped > 0) {
+                    var s = [];
+                    if (fn.in_flight > 0) s.push(fn.in_flight + ' in progress');
+                    if (fn.pending > 0) s.push(fn.pending + ' queued');
+                    if (fn.dropped > 0) s.push(fn.dropped + ' dropped');
+                    gParts.push('FN: ' + s.join(', '));
                   }
                 }
                 if (gParts.length > 0) {
