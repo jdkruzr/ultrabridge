@@ -1,0 +1,20 @@
+{{define "_files_status_panel"}}
+{{/*
+  Shared pipeline-status panel for source Files tabs that run a processor
+  worker (Supernote, Boox). Context: the source slug string ("supernote" or
+  "boox"), used to address the /processor/<source>/{start,stop} routes. The
+  live status text is filled in by updateProcessorStatus() (layout.html) into
+  #proc-status. ForestNote has no global processor and does not use this panel.
+*/}}
+<div class="status-panel">
+    <span class="text-bold">Pipeline Status:</span>
+    <span id="proc-status" class="text-small">Loading...</span>
+    <div class="flex-spacer"></div>
+    <form hx-post="/processor/{{.}}/start" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
+        <button type="submit" class="btn-small">▶ Start</button>
+    </form>
+    <form hx-post="/processor/{{.}}/stop" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
+        <button type="submit" class="btn-small" style="background: var(--text-secondary);">⏹ Stop</button>
+    </form>
+</div>
+{{end}}

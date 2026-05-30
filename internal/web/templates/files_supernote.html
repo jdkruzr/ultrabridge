@@ -5,17 +5,7 @@
         <p class="text-danger">{{.filesError}}</p>
     </div>
   {{else if .files}}
-    <div class="status-panel">
-        <span class="text-bold">Pipeline Status:</span>
-        <span id="proc-status" class="text-small">Loading...</span>
-        <div class="flex-spacer"></div>
-        <form hx-post="/processor/supernote/start" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
-            <button type="submit" class="btn-small">▶ Start</button>
-        </form>
-        <form hx-post="/processor/supernote/stop" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
-            <button type="submit" class="btn-small" style="background: var(--text-secondary);">⏹ Stop</button>
-        </form>
-    </div>
+    {{template "_files_status_panel" "supernote"}}
 
     <div class="toolbar">
       <form hx-post="/files/scan" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
@@ -33,11 +23,7 @@
     </div>
 
     <div class="card">
-        <div class="breadcrumb">
-          {{range .breadcrumbs}}
-            <a href="/files/supernote?path={{.RelPath}}" hx-get="/files/supernote?path={{.RelPath}}" hx-target="#main-content" hx-push-url="true">{{.Label}}</a><span class="sep">/</span>
-          {{end}}
-        </div>
+        {{template "_files_breadcrumb" .navCrumbs}}
     <div class="table-container">
     <table class="task-table">
       <thead>
@@ -60,17 +46,7 @@
     </div>
     </div> {{/* end of card */}}
 
-    {{if gt .filesTotalPages 1}}
-    <div style="margin-top:0.75rem; display:flex; align-items:center; gap:0.5rem; font-size:0.9rem;">
-      {{if gt .filesPage 1}}
-        <button class="btn-small" hx-get="/files/supernote?path={{.relPath | urlquery}}&page={{sub .filesPage 1}}" hx-target="#main-content" hx-push-url="true">◂ Prev</button>
-      {{end}}
-      <span>Page {{.filesPage}} of {{.filesTotalPages}}</span>
-      {{if lt .filesPage .filesTotalPages}}
-        <button class="btn-small" hx-get="/files/supernote?path={{.relPath | urlquery}}&page={{add .filesPage 1}}" hx-target="#main-content" hx-push-url="true">Next ▸</button>
-      {{end}}
-    </div>
-    {{end}}
+    {{template "_files_pagination" .pager}}
   {{else}}
     <div class="empty-state">
         <p>No Supernote files found.</p>

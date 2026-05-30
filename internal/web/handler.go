@@ -516,13 +516,17 @@ func (h *Handler) handleFilesSupernote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	data["files"], data["relPath"], data["breadcrumbs"], data["filesTotalFiles"] = files, relPath, buildBreadcrumbs(relPath), total
+	bs := buildBreadcrumbs(relPath)
+	data["files"], data["relPath"], data["breadcrumbs"], data["filesTotalFiles"] = files, relPath, bs, total
+	data["navCrumbs"] = supernoteCrumbs(bs)
 	data["filesPage"], data["filesPerPage"] = page, perPage
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
-	data["filesTotalPages"] = (total + perPage - 1) / perPage
-	if data["filesTotalPages"] == 0 {
-		data["filesTotalPages"] = 1
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
 	}
+	data["filesTotalPages"] = totalPages
+	data["pager"] = pager("/files/supernote", page, totalPages, map[string]string{"path": relPath})
 	h.renderTemplate(w, r, "files_supernote", data)
 }
 
@@ -574,10 +578,12 @@ func (h *Handler) handleFilesBoox(w http.ResponseWriter, r *http.Request) {
 	data["booxDevices"], data["booxDeviceFilter"] = devices, device
 	data["filesPage"], data["filesPerPage"] = page, perPage
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
-	data["filesTotalPages"] = (total + perPage - 1) / perPage
-	if data["filesTotalPages"] == 0 {
-		data["filesTotalPages"] = 1
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
 	}
+	data["filesTotalPages"] = totalPages
+	data["pager"] = pager("/files/boox", page, totalPages, map[string]string{"folder": folder, "device": device})
 	h.renderTemplate(w, r, "files_boox", data)
 }
 
@@ -617,6 +623,7 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	data["fnEntries"], data["fnCrumbs"], data["fnFolderID"] = entries, crumbs, folderID
+	data["navCrumbs"] = forestNoteCrumbs(crumbs)
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
 	h.renderTemplate(w, r, "files_forestnote", data)
 }
@@ -741,6 +748,7 @@ func (h *Handler) handleDigests(w http.ResponseWriter, r *http.Request) {
 		totalPages = 1
 	}
 	data["filesTotalPages"] = totalPages
+	data["pager"] = pager("/digests", page, totalPages, map[string]string{"group": group, "tag": tag})
 	h.renderTemplate(w, r, "digests", data)
 }
 
@@ -1670,6 +1678,50 @@ func buildBreadcrumbs(p string) []breadcrumb {
 		res = append(res, breadcrumb{Label: parts[i], RelPath: strings.Join(parts[:i+1], "/")})
 	}
 	return res
+}
+
+// crumb is the normalized breadcrumb shape consumed by the shared
+// _files_breadcrumb partial: a display label paired with the navigation URL.
+type crumb struct{ Label, HxGet string }
+
+// supernoteCrumbs adapts the Supernote relPath breadcrumb chain to []crumb.
+// RelPath is emitted raw (matching the pre-refactor inline template, which did
+// not urlquery it).
+func supernoteCrumbs(bs []breadcrumb) []crumb {
+	out := make([]crumb, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, crumb{Label: b.Label, HxGet: "/files/supernote?path=" + b.RelPath})
+	}
+	return out
+}
+
+// forestNoteCrumbs adapts the ForestNote folder chain to []crumb, prepending
+// the "Home" root the FN tab shows ahead of its synced folders.
+func forestNoteCrumbs(cs []service.ForestNoteCrumb) []crumb {
+	out := make([]crumb, 0, len(cs)+1)
+	out = append(out, crumb{Label: "Home", HxGet: "/files/forestnote"})
+	for _, c := range cs {
+		out = append(out, crumb{Label: c.Name, HxGet: "/files/forestnote?folder=" + c.FolderID})
+	}
+	return out
+}
+
+// pager builds the context map for the shared _files_pagination partial. params
+// holds the preserved (non-page) query params; empty-valued entries are dropped
+// so the pager never emits a stray "&key=".
+func pager(baseURL string, page, totalPages int, params map[string]string) map[string]any {
+	clean := make(map[string]string, len(params))
+	for k, v := range params {
+		if v != "" {
+			clean[k] = v
+		}
+	}
+	return map[string]any{
+		"BaseURL":    baseURL,
+		"Page":       page,
+		"TotalPages": totalPages,
+		"Params":     clean,
+	}
 }
 
 func safeRelPath(p string) (string, bool) {
