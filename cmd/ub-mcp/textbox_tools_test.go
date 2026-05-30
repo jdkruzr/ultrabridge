@@ -58,7 +58,7 @@ func TestListTextBoxes(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "", "")
+	client := newAPIClient(mockServer.URL, "", "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
 	registerTools(server, client)
 
@@ -76,7 +76,7 @@ func TestListTextBoxes(t *testing.T) {
 }
 
 func TestListTextBoxesRequiresNotebook(t *testing.T) {
-	client := newAPIClient("http://unused", "", "", "")
+	client := newAPIClient("http://unused", "", "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
 	registerTools(server, client)
 	if _, err := callTool(t, server, "list_text_boxes", ListTextBoxesInput{}); err == nil {
@@ -97,7 +97,7 @@ func TestEditTextBox(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "", "")
+	client := newAPIClient(mockServer.URL, "", "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
 	registerTools(server, client)
 
@@ -115,7 +115,7 @@ func TestEditTextBox(t *testing.T) {
 }
 
 func TestEditTextBoxRequiresID(t *testing.T) {
-	client := newAPIClient("http://unused", "", "", "")
+	client := newAPIClient("http://unused", "", "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
 	registerTools(server, client)
 	if _, err := callTool(t, server, "edit_text_box", EditTextBoxInput{Text: "x"}); err == nil {
@@ -130,7 +130,7 @@ func TestEditTextBoxAPIError(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := newAPIClient(mockServer.URL, "", "", "")
+	client := newAPIClient(mockServer.URL, "", "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
 	registerTools(server, client)
 

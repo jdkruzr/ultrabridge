@@ -168,3 +168,79 @@ func TestAPIResponseContentType(t *testing.T) {
 		t.Errorf("Expected Content-Type 'application/json', got '%s'", contentType)
 	}
 }
+
+
+// TestAPISearch_LimitParamThreadsThrough is the regression for the
+// QA-found "search_notes ignores limit" bug (UB-1). The handler previously
+// dropped the ?limit= query param entirely; SearchService.Search has a
+// new limit arg now and the mock captures lastLimit so we can assert the
+// param round-tripped.
+func TestAPISearch_LimitParamThreadsThrough(t *testing.T) {
+	t.Run("integer ?limit= reaches the service", func(t *testing.T) {
+		svc := &mockSearchService{}
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		broadcaster := logging.NewLogBroadcaster()
+		handler := NewHandler(nil, nil, svc, nil, nil, "", "", logger, broadcaster)
+
+		req := httptest.NewRequest("GET", "/api/search?q=test&limit=3", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+		}
+		if svc.lastLimit != 3 {
+			t.Errorf("lastLimit: got %d, want 3", svc.lastLimit)
+		}
+	})
+
+	t.Run("absent ?limit= passes 0 (service-default)", func(t *testing.T) {
+		svc := &mockSearchService{}
+		handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
+
+		req := httptest.NewRequest("GET", "/api/search?q=test", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d, want 200", w.Code)
+		}
+		if svc.lastLimit != 0 {
+			t.Errorf("lastLimit: got %d, want 0 (service-default sentinel)", svc.lastLimit)
+		}
+	})
+
+	t.Run("non-integer ?limit= is tolerated as 0", func(t *testing.T) {
+		svc := &mockSearchService{}
+		handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
+
+		// Per the handler doc — non-integer ?limit is treated as 0, not a 400,
+		// since MCP callers sometimes stringify ints loosely.
+		req := httptest.NewRequest("GET", "/api/search?q=test&limit=banana", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("non-integer limit should not 400; got %d", w.Code)
+		}
+		if svc.lastLimit != 0 {
+			t.Errorf("lastLimit: got %d, want 0", svc.lastLimit)
+		}
+	})
+
+	t.Run("negative ?limit= is tolerated as 0", func(t *testing.T) {
+		svc := &mockSearchService{}
+		handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
+
+		req := httptest.NewRequest("GET", "/api/search?q=test&limit=-5", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d, want 200", w.Code)
+		}
+		if svc.lastLimit != 0 {
+			t.Errorf("lastLimit: got %d, want 0", svc.lastLimit)
+		}
+	})
+}

@@ -116,7 +116,7 @@ func registerSearchNotes(server *mcp.Server, client *apiClient) {
 		for i, r := range results {
 			sb.WriteString(fmt.Sprintf("--- Result %d ---\n", i+1))
 			sb.WriteString(fmt.Sprintf("Note: %s (page %d)\n", r.Path, r.Page))
-			detailURL := fmt.Sprintf("%s/files?detail=%s", client.baseURL, url.QueryEscape(r.Path))
+			detailURL := fmt.Sprintf("%s/files?detail=%s", client.displayBaseURL(), url.QueryEscape(r.Path))
 			sb.WriteString(fmt.Sprintf("URL: %s\n", detailURL))
 			sb.WriteString(fmt.Sprintf("Text:\n%s\n\n", r.Snippet))
 		}

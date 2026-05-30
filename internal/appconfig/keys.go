@@ -96,10 +96,18 @@ const (
 	KeyBooxImportPDFs      = "boox_import_pdfs"
 	KeyBooxImportOnyxPaths = "boox_import_onyx_paths"
 	// KeyBooxExternalBaseURL is the externally-reachable base URL of this
-	// UltraBridge deployment (e.g. https://ub.example.com). Prepended to
-	// red-ink-TODO detail links so CalDAV clients render a full clickable
-	// URL. Empty string falls back to a relative path (web UI still works,
-	// external clients see path-as-text).
+	// UltraBridge deployment (e.g. https://ub.example.com). Two consumers:
+	// (1) the Boox red-ink-TODO task creator prepends it to the Open-link
+	// in each created task's Detail so CalDAV clients render a full
+	// clickable URL; (2) the MCP search_notes formatter uses it as the
+	// host for result deep-links so links remain clickable for remote LLM
+	// consumers that can't resolve the loopback host the MCP runs against.
+	// Empty string falls back to relative paths (web UI still works; the
+	// MCP search path falls back to whatever loopback URL its API client
+	// is talking to, which works only on the same host).
+	//
+	// Key name is the historical one — predates the search_notes use —
+	// renaming would require a config migration; not worth it for now.
 	KeyBooxExternalBaseURL = "boox_external_base_url"
 )
 

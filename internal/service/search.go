@@ -79,9 +79,27 @@ func (s *searchService) HasEmbeddingPipeline() bool {
 	return s.embedder != nil && s.embedStore != nil
 }
 
-func (s *searchService) Search(ctx context.Context, query, folder string, sources []string) ([]SearchResult, error) {
+// searchDefaultLimit is the result cap used when the caller passes 0. Picked
+// to match the legacy implicit default the retriever was returning (~20)
+// while giving the LLM-side caller a useful ceiling per query.
+const searchDefaultLimit = 20
+
+// searchMaxLimit is the hard ceiling — any caller-supplied limit above this
+// is clamped down. Keeps a misbehaving client from yanking the entire index
+// through a single hybrid query.
+const searchMaxLimit = 100
+
+func (s *searchService) Search(ctx context.Context, query, folder string, sources []string, limit int) ([]SearchResult, error) {
 	if s.retriever == nil {
 		return nil, nil
+	}
+	// Resolve the caller's limit against the service defaults: 0/negative
+	// means "use the default"; anything over the max is clamped down.
+	switch {
+	case limit <= 0:
+		limit = searchDefaultLimit
+	case limit > searchMaxLimit:
+		limit = searchMaxLimit
 	}
 	// Hybrid retrieval (FTS5 + vector RRF) with the source-type facet. Going
 	// through the retriever (rather than the bare FTS index) means digests and
@@ -91,6 +109,7 @@ func (s *searchService) Search(ctx context.Context, query, folder string, source
 		Query:   query,
 		Folder:  folder,
 		Sources: sources,
+		Limit:   limit,
 	})
 	if err != nil {
 		s.logger.Error("search failed", "error", err)

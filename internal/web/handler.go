@@ -783,7 +783,7 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	data["searchSources"] = selected
 	if query != "" {
-		results, _ := h.search.Search(r.Context(), query, folder, sources)
+		results, _ := h.search.Search(r.Context(), query, folder, sources, 0)
 		data["searchResults"] = results
 	}
 	h.renderTemplate(w, r, "search", data)

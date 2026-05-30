@@ -16,7 +16,11 @@ func apiError(w http.ResponseWriter, code int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// handleAPISearch handles GET /api/search
+// handleAPISearch handles GET /api/search. Optional ?limit=N caps the
+// result count (0/absent → service default; out-of-range → service ceiling).
+// Non-integer ?limit is treated as 0 (use default) rather than a 400 —
+// keeps the surface friendly to MCP callers that send the param as a
+// string sometimes.
 func (h *Handler) handleAPISearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
@@ -26,7 +30,13 @@ func (h *Handler) handleAPISearch(w http.ResponseWriter, r *http.Request) {
 
 	folder := r.URL.Query().Get("folder")
 	sources := r.URL.Query()["source"] // repeated: ?source=digest&source=supernote
-	results, err := h.search.Search(r.Context(), q, folder, sources)
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	results, err := h.search.Search(r.Context(), q, folder, sources, limit)
 	if err != nil {
 		h.logger.Error("api search failed", "err", err)
 		apiError(w, http.StatusInternalServerError, "search failed")
