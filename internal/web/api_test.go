@@ -177,7 +177,7 @@ func TestAPIResponseContentType(t *testing.T) {
 // param round-tripped.
 func TestAPISearch_LimitParamThreadsThrough(t *testing.T) {
 	t.Run("integer ?limit= reaches the service", func(t *testing.T) {
-		svc := &mockSearchService{}
+		svc := &mockSearchService{embeddingPipelineConfigured: true}
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		broadcaster := logging.NewLogBroadcaster()
 		handler := NewHandler(nil, nil, svc, nil, nil, "", "", logger, broadcaster)
@@ -195,7 +195,7 @@ func TestAPISearch_LimitParamThreadsThrough(t *testing.T) {
 	})
 
 	t.Run("absent ?limit= passes 0 (service-default)", func(t *testing.T) {
-		svc := &mockSearchService{}
+		svc := &mockSearchService{embeddingPipelineConfigured: true}
 		handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
 
 		req := httptest.NewRequest("GET", "/api/search?q=test", nil)
@@ -211,7 +211,7 @@ func TestAPISearch_LimitParamThreadsThrough(t *testing.T) {
 	})
 
 	t.Run("non-integer ?limit= is tolerated as 0", func(t *testing.T) {
-		svc := &mockSearchService{}
+		svc := &mockSearchService{embeddingPipelineConfigured: true}
 		handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
 
 		// Per the handler doc — non-integer ?limit is treated as 0, not a 400,
@@ -229,7 +229,7 @@ func TestAPISearch_LimitParamThreadsThrough(t *testing.T) {
 	})
 
 	t.Run("negative ?limit= is tolerated as 0", func(t *testing.T) {
-		svc := &mockSearchService{}
+		svc := &mockSearchService{embeddingPipelineConfigured: true}
 		handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
 
 		req := httptest.NewRequest("GET", "/api/search?q=test&limit=-5", nil)
