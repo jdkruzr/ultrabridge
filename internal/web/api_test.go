@@ -195,7 +195,10 @@ func TestAPISearch_LimitParamThreadsThrough(t *testing.T) {
 	})
 
 	t.Run("absent ?limit= passes 0 (service-default)", func(t *testing.T) {
-		svc := &mockSearchService{embeddingPipelineConfigured: true}
+		// Pre-seed lastLimit with a sentinel so a "Search was never called"
+		// regression is distinguishable from "Search was called with 0" —
+		// without this both look like lastLimit==0 to the assertion.
+		svc := &mockSearchService{embeddingPipelineConfigured: true, lastLimit: -1}
 		handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
 
 		req := httptest.NewRequest("GET", "/api/search?q=test", nil)
@@ -206,7 +209,8 @@ func TestAPISearch_LimitParamThreadsThrough(t *testing.T) {
 			t.Fatalf("status=%d, want 200", w.Code)
 		}
 		if svc.lastLimit != 0 {
-			t.Errorf("lastLimit: got %d, want 0 (service-default sentinel)", svc.lastLimit)
+			t.Errorf("lastLimit: got %d, want 0 (service-default sentinel); -1 means Search was never invoked",
+				svc.lastLimit)
 		}
 	})
 
