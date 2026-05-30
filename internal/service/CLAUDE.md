@@ -1,6 +1,6 @@
 # internal/service
 
-Last verified: 2026-05-30 (TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
+Last verified: 2026-05-30 (TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; PurgeCompleted now returns (int64, error); PurgeDeleted now returns (purged, skipped, error); ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
 
 ## Purpose
 
@@ -27,11 +27,16 @@ all implemented by unexported structs and constructed via
   Categories is wholesale (nil = unchanged, non-nil incl. empty slice =
   replace). **`ListIncludingDeleted`** surfaces soft-tombstoned rows
   alongside live ones (the `Deleted bool` on each `Task` distinguishes
-  them); the default `List` still hides them. **`PurgeDeleted(ctx,
-  olderThanDays) (int64, error)`** is the irreversible end of the
-  pipeline — rejects `olderThanDays <= 0`, does NOT notify (rows were
-  already tombstoned for sync); delegates to
-  `TaskStore.HardDeleteOlderThan`.
+  them); the default `List` still hides them. **`PurgeCompleted(ctx)
+  (int64, error)`** soft-deletes every completed row and returns the count
+  affected (was just `error` pre-UB-3; the count is what backs the
+  "Soft-deleted N completed task(s)." MCP/REST surface). **`PurgeDeleted(ctx,
+  olderThanDays) (purged, skipped int64, err error)`** is the irreversible
+  end of the pipeline — rejects `olderThanDays <= 0`, does NOT notify (rows
+  were already tombstoned for sync); delegates to
+  `TaskStore.HardDeleteOlderThan`. `skipped` counts soft-deleted rows still
+  inside the safety window so callers can tell "0 purged because nothing
+  was eligible" from "0 purged because the gate broke."
 - **`NoteService`** — file listing (Supernote tree, Boox catalog,
   ForestNote folder tree), content, page rendering, pipeline
   start/stop, bulk import. Nil-safe: `HasSupernoteSource()` /

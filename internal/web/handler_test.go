@@ -166,15 +166,19 @@ func (m *mockTaskStore) DeleteCompleted(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-func (m *mockTaskStore) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (int64, error) {
-	var count int64
+func (m *mockTaskStore) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged, skipped int64, err error) {
 	for id, t := range m.tasks {
-		if t.IsDeleted == "Y" && t.LastModified.Valid && t.LastModified.Int64 < cutoffMs {
+		if t.IsDeleted != "Y" || !t.LastModified.Valid {
+			continue
+		}
+		if t.LastModified.Int64 < cutoffMs {
 			delete(m.tasks, id)
-			count++
+			purged++
+		} else {
+			skipped++
 		}
 	}
-	return count, nil
+	return purged, skipped, nil
 }
 
 // mockNotifier implements SyncNotifier for testing

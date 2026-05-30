@@ -401,7 +401,10 @@ func TestPurgeCompleted_Success(t *testing.T) {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 		if r.Method == http.MethodPost {
-			w.WriteHeader(http.StatusNoContent)
+			// UB-3: REST now returns 200 + {"deleted": N} (was 204 no-body).
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"deleted":5}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -416,7 +419,8 @@ func TestPurgeCompleted_Success(t *testing.T) {
 	if capturedPath != "/api/v1/tasks/purge-completed" {
 		t.Errorf("wrong URL: %s", capturedPath)
 	}
-	if !strings.Contains(resultText(t, result), "purged") {
-		t.Errorf("unexpected ack: %s", resultText(t, result))
+	out := resultText(t, result)
+	if !strings.Contains(out, "Soft-deleted 5") {
+		t.Errorf("expected count in response; got: %q", out)
 	}
 }

@@ -170,22 +170,58 @@ func (s *Store) DeleteCompleted(ctx context.Context) (int64, error) {
 }
 
 // HardDeleteOlderThan permanently removes soft-deleted rows whose
-// last_modified is older than cutoffMs. This is the *only* path that does
-// real DELETE FROM tasks — everything else in the system soft-deletes. The
-// caller picks the cutoff; the service layer translates a user-facing
-// "older_than_days" into a millisecond instant before calling here.
+// last_modified is older than cutoffMs, and returns (purged, skipped, error).
+// This is the *only* path that does real DELETE FROM tasks — everything
+// else in the system soft-deletes. The caller picks the cutoff; the
+// service layer translates a user-facing "older_than_days" into a
+// millisecond instant before calling here.
+//
+// Skipped is the count of rows that were eligible by virtue of being
+// soft-deleted but were too recent to purge (inside the safety window) —
+// surfaced so callers can distinguish "the gate works and there was
+// nothing to do" from "the gate is broken and silently skipped everything."
+//
+// Both the COUNT and the DELETE run inside an explicit transaction so the
+// two counts can't drift under concurrent writes. Without this, a Delete
+// or Update landing between the COUNT and the DELETE could move a row
+// between the two buckets, leaving the caller with inconsistent totals.
+// (SQLite serializes writers, but the bare-DB code path uses an implicit
+// per-statement transaction for each call, so we'd still see the
+// interleaved state without the wrapper.)
 //
 // Doesn't VACUUM — that's an explicit maintenance operation and we don't
 // want to hold a write lock for it inside the request path. Space gets
 // reclaimed by SQLite incrementally; the freed rows are gone immediately.
-func (s *Store) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (int64, error) {
-	result, err := s.db.ExecContext(ctx,
+func (s *Store) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged, skipped int64, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin tx for hard delete: %w", err)
+	}
+	defer func() {
+		// Best-effort rollback on any non-committing exit. Commit's
+		// idempotent-Rollback contract makes the post-Commit call a no-op.
+		_ = tx.Rollback()
+	}()
+
+	if err = tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE is_deleted = 'Y' AND last_modified >= ?`,
+		cutoffMs).Scan(&skipped); err != nil {
+		return 0, 0, fmt.Errorf("count skipped tasks at cutoff %d: %w", cutoffMs, err)
+	}
+	result, err := tx.ExecContext(ctx,
 		`DELETE FROM tasks WHERE is_deleted = 'Y' AND last_modified < ?`,
 		cutoffMs)
 	if err != nil {
-		return 0, fmt.Errorf("hard delete tasks older than %d: %w", cutoffMs, err)
+		return 0, 0, fmt.Errorf("hard delete tasks older than %d: %w", cutoffMs, err)
 	}
-	return result.RowsAffected()
+	purged, err = result.RowsAffected()
+	if err != nil {
+		return 0, skipped, fmt.Errorf("rows affected: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("commit hard delete tx: %w", err)
+	}
+	return purged, skipped, nil
 }
 
 // IsEmpty returns true if the task store has no tasks (including deleted ones).

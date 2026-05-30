@@ -124,21 +124,34 @@ func TestAPIv1UpdateTask(t *testing.T) {
 }
 
 // TestAPIv1PurgeCompleted verifies POST /api/v1/tasks/purge-completed
-// invokes the service and returns 204.
+// invokes the service and returns 200 with {"deleted": N}. Previously
+// returned 204-no-body; the count was added per UB-3 so MCP/CLI callers
+// can surface "Soft-deleted N completed task(s)." rather than the
+// opaque "All completed tasks purged." they used to get.
 func TestAPIv1PurgeCompleted(t *testing.T) {
 	h := newTestHandler()
 	tasks := h.tasks.(*mockTaskService)
 	tasks.tasks = []service.Task{
 		{ID: "t1", Status: service.StatusCompleted},
 		{ID: "t2", Status: service.StatusNeedsAction},
+		{ID: "t3", Status: service.StatusCompleted},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/purge-completed", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status=%d, want 204; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Deleted int64 `json:"deleted"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Deleted != 2 {
+		t.Errorf("deleted: got %d, want 2", body.Deleted)
 	}
 	// The mock's PurgeCompleted drops completed tasks from the slice.
 	if len(tasks.tasks) != 1 || tasks.tasks[0].ID != "t2" {
@@ -521,13 +534,13 @@ func TestAuthMiddlewareInstallsIdentity(t *testing.T) {
 // purgeDeletedFn hook so we can observe the days that reach the service —
 // the in-memory mock doesn't carry timestamps.
 func TestAPIv1PurgeDeleted(t *testing.T) {
-	t.Run("default cutoff is 30 days", func(t *testing.T) {
+	t.Run("default cutoff is 30 days; response carries deleted+skipped", func(t *testing.T) {
 		h := newTestHandler()
 		tasks := h.tasks.(*mockTaskService)
 		var observedDays int
-		tasks.purgeDeletedFn = func(ctx context.Context, days int) (int64, error) {
+		tasks.purgeDeletedFn = func(ctx context.Context, days int) (purged, skipped int64, err error) {
 			observedDays = days
-			return 7, nil
+			return 7, 3, nil
 		}
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/purge-deleted", nil)
@@ -542,6 +555,7 @@ func TestAPIv1PurgeDeleted(t *testing.T) {
 		}
 		var body struct {
 			Deleted int64 `json:"deleted"`
+			Skipped int64 `json:"skipped"`
 		}
 		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
@@ -549,15 +563,18 @@ func TestAPIv1PurgeDeleted(t *testing.T) {
 		if body.Deleted != 7 {
 			t.Errorf("deleted: got %d, want 7", body.Deleted)
 		}
+		if body.Skipped != 3 {
+			t.Errorf("skipped: got %d, want 3", body.Skipped)
+		}
 	})
 
 	t.Run("explicit older_than_days is honored", func(t *testing.T) {
 		h := newTestHandler()
 		tasks := h.tasks.(*mockTaskService)
 		var observedDays int
-		tasks.purgeDeletedFn = func(ctx context.Context, days int) (int64, error) {
+		tasks.purgeDeletedFn = func(ctx context.Context, days int) (purged, skipped int64, err error) {
 			observedDays = days
-			return 1500, nil
+			return 1500, 0, nil
 		}
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/purge-deleted?older_than_days=7", nil)
@@ -588,8 +605,8 @@ func TestAPIv1PurgeDeleted(t *testing.T) {
 	t.Run("service error surfaces as 500", func(t *testing.T) {
 		h := newTestHandler()
 		tasks := h.tasks.(*mockTaskService)
-		tasks.purgeDeletedFn = func(ctx context.Context, days int) (int64, error) {
-			return 0, errors.New("disk full")
+		tasks.purgeDeletedFn = func(ctx context.Context, days int) (purged, skipped int64, err error) {
+			return 0, 0, errors.New("disk full")
 		}
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/purge-deleted", nil)

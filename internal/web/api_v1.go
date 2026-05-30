@@ -266,14 +266,23 @@ func (h *Handler) handleV1UpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleV1PurgeCompleted soft-deletes every completed task in a single
-// call. Returns 204 on success.
+// call. Returns 200 + {"deleted": N}. (Was 204 no-body pre-UB-3; the
+// shape change is documented in the inline comment below.)
 func (h *Handler) handleV1PurgeCompleted(w http.ResponseWriter, r *http.Request) {
-	if err := h.tasks.PurgeCompleted(r.Context()); err != nil {
+	n, err := h.tasks.PurgeCompleted(r.Context())
+	if err != nil {
 		apiError(w, http.StatusInternalServerError, "failed to purge completed tasks")
 		return
 	}
-	h.auditMutation(r, "purge_completed")
-	w.WriteHeader(http.StatusNoContent)
+	h.auditMutation(r, "purge_completed", "deleted", n)
+	// Returns 200 + {"deleted": N} to match purge-deleted's response shape
+	// and give MCP/CLI callers visibility into what actually happened.
+	// Was 204 no-body previously; this is a soft-breaking change but every
+	// known caller in-tree is updated in this commit. Browser POSTs through
+	// the legacy /tasks/purge-completed route still get the empty-200 / 303
+	// shape they expect.
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int64{"deleted": n})
 }
 
 // purgeDeletedDefaultDays is the safety-window default when no
@@ -289,8 +298,13 @@ const purgeDeletedDefaultDays = 30
 
 // handleV1PurgeDeleted permanently removes soft-deleted tasks whose
 // last_modified is older than ?older_than_days=N (default 30). Returns 200
-// with {"deleted": N}. This is irreversible. Days must be > 0 — pass an
-// explicit small value (e.g. 1) to aggressively reap, never 0 to mean "all".
+// with {"deleted": N, "skipped": M}. This is irreversible. Days must be > 0 —
+// pass an explicit small value (e.g. 1) to aggressively reap, never 0 to
+// mean "all".
+//
+// `skipped` counts rows that were soft-deleted but inside the safety window;
+// it disambiguates "0 purged because nothing was eligible" from "0 purged
+// because the gate broke" for the caller.
 func (h *Handler) handleV1PurgeDeleted(w http.ResponseWriter, r *http.Request) {
 	days := purgeDeletedDefaultDays
 	if raw := r.URL.Query().Get("older_than_days"); raw != "" {
@@ -302,14 +316,14 @@ func (h *Handler) handleV1PurgeDeleted(w http.ResponseWriter, r *http.Request) {
 		days = n
 	}
 
-	removed, err := h.tasks.PurgeDeleted(r.Context(), days)
+	purged, skipped, err := h.tasks.PurgeDeleted(r.Context(), days)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "failed to purge deleted tasks")
 		return
 	}
-	h.auditMutation(r, "purge_deleted", "older_than_days", days, "deleted", removed)
+	h.auditMutation(r, "purge_deleted", "older_than_days", days, "deleted", purged, "skipped", skipped)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int64{"deleted": removed})
+	json.NewEncoder(w).Encode(map[string]int64{"deleted": purged, "skipped": skipped})
 }
 
 func (h *Handler) handleV1CreateTask(w http.ResponseWriter, r *http.Request) {

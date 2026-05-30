@@ -20,7 +20,7 @@ type TaskStore interface {
 	Update(ctx context.Context, t *taskstore.Task) error
 	Delete(ctx context.Context, taskID string) error
 	DeleteCompleted(ctx context.Context) (int64, error)
-	HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (int64, error)
+	HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged, skipped int64, err error)
 }
 
 // SyncNotifier is the interface for triggering device sync.
@@ -244,40 +244,42 @@ func (s *taskService) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *taskService) PurgeCompleted(ctx context.Context) error {
-	if s.store == nil {
-		return nil
-	}
-	_, err := s.store.DeleteCompleted(ctx)
-	if err != nil {
-		return err
-	}
-	s.notify(ctx)
-	return nil
-}
-
-// PurgeDeleted permanently removes soft-deleted tasks whose last_modified is
-// older than olderThanDays days. Returns the row count. Unlike PurgeCompleted
-// (which soft-deletes completed rows), this is the irreversible end of the
-// pipeline — once removed, the row is gone. A non-positive olderThanDays is
-// rejected to prevent accidentally wiping every ghost regardless of age:
-// callers must specify a window explicitly, even if they want to use 0 via
-// some future "purge everything" toggle.
-func (s *taskService) PurgeDeleted(ctx context.Context, olderThanDays int) (int64, error) {
+func (s *taskService) PurgeCompleted(ctx context.Context) (int64, error) {
 	if s.store == nil {
 		return 0, nil
 	}
-	if olderThanDays <= 0 {
-		return 0, fmt.Errorf("older_than_days must be > 0, got %d", olderThanDays)
-	}
-	cutoff := time.Now().Add(-time.Duration(olderThanDays) * 24 * time.Hour).UnixMilli()
-	n, err := s.store.HardDeleteOlderThan(ctx, cutoff)
+	n, err := s.store.DeleteCompleted(ctx)
 	if err != nil {
 		return 0, err
 	}
+	s.notify(ctx)
+	return n, nil
+}
+
+// PurgeDeleted permanently removes soft-deleted tasks whose last_modified is
+// older than olderThanDays days. Returns (purged, skipped, error). Skipped
+// counts rows that were soft-deleted but still inside the safety window —
+// the existence of this count is what disambiguates "0 purged because the
+// gate is doing its job and nothing was eligible" from "0 purged because
+// the gate broke and ate everything silently." Unlike PurgeCompleted (which
+// soft-deletes completed rows), this is the irreversible end of the
+// pipeline — once removed, the row is gone. A non-positive olderThanDays
+// is rejected to prevent accidentally wiping every ghost regardless of age.
+func (s *taskService) PurgeDeleted(ctx context.Context, olderThanDays int) (purged, skipped int64, err error) {
+	if s.store == nil {
+		return 0, 0, nil
+	}
+	if olderThanDays <= 0 {
+		return 0, 0, fmt.Errorf("older_than_days must be > 0, got %d", olderThanDays)
+	}
+	cutoff := time.Now().Add(-time.Duration(olderThanDays) * 24 * time.Hour).UnixMilli()
+	purged, skipped, err = s.store.HardDeleteOlderThan(ctx, cutoff)
+	if err != nil {
+		return 0, 0, err
+	}
 	// No notify(): hard-purging soft-deleted rows doesn't change what the
 	// live device sees (those rows were already tombstoned).
-	return n, nil
+	return purged, skipped, nil
 }
 
 func (s *taskService) BulkComplete(ctx context.Context, ids []string) error {

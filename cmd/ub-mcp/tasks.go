@@ -9,6 +9,7 @@ package main // FCIS: Imperative Shell
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,6 +27,65 @@ type taskLink struct {
 	AppName  string `json:"app_name"`
 	FilePath string `json:"file_path"`
 	Page     int    `json:"page"`
+}
+
+// nativeDeepLink is the shape Supernote/Viwoods devices stuff into the
+// VTODO URL property when they create a task from a page — base64-encoded
+// JSON with appName/fileId/filePath/page/pageId. Decoding it lets the MCP
+// formatter render a friendly "Source: <filename> (page N)" label instead
+// of dumping the raw base64 wall into list_tasks output.
+type nativeDeepLink struct {
+	AppName  string `json:"appName"`
+	FileID   string `json:"fileId"`
+	FilePath string `json:"filePath"`
+	Page     int    `json:"page"`
+	PageID   string `json:"pageId"`
+
+	// Filename is the derived basename of FilePath, set by decodeNativeDeepLink
+	// after parsing. Lifted out so callers don't redo the path-split.
+	Filename string `json:"-"`
+}
+
+// decodeNativeDeepLink tries to parse a task URL as a base64-encoded native
+// deep-link blob. Returns (decoded, true) on success; (zero, false) on any
+// failure path (non-base64, non-JSON, missing AppName field) — the failure
+// case is the common one (plain HTTP URLs, ForestNote NativeURLs, etc.)
+// and never an error worth logging. The AppName presence check guards
+// against incidentally-decodable URLs that happen to be valid base64+JSON
+// but aren't really native deep-links.
+func decodeNativeDeepLink(raw string) (nativeDeepLink, bool) {
+	// Quick gate — native deep-link payloads are JSON objects whose first
+	// key starts with an ASCII letter (`appName`, `fileId`, etc.), so the
+	// base64-encoded form always begins with `eyJ` (the encoding of `{"`
+	// followed by such a letter). Non-deep-link URLs that happen to start
+	// with `eyJ` fall through to the JSON unmarshal which rejects them
+	// safely; this gate just skips the round-trip on every plain URL.
+	if !strings.HasPrefix(raw, "eyJ") {
+		return nativeDeepLink{}, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nativeDeepLink{}, false
+	}
+	var dl nativeDeepLink
+	if err := json.Unmarshal(decoded, &dl); err != nil {
+		return nativeDeepLink{}, false
+	}
+	if dl.AppName == "" {
+		return nativeDeepLink{}, false
+	}
+	if dl.FilePath != "" {
+		// Inline last-segment extraction (these are device-side
+		// forward-slash paths; mirrors decodeMCPNativeDeepLink's split
+		// for cross-surface parity rather than importing path.Base just
+		// here while the other surface inlines).
+		if i := strings.LastIndex(dl.FilePath, "/"); i >= 0 {
+			dl.Filename = dl.FilePath[i+1:]
+		} else {
+			dl.Filename = dl.FilePath
+		}
+	}
+	return dl, true
 }
 
 // taskForestNote mirrors service.TaskForestNote — provenance for tasks
@@ -77,7 +137,25 @@ func formatTask(t task) string {
 		sb.WriteString(fmt.Sprintf("Priority: %s\n", *t.Priority))
 	}
 	if t.URL != nil && *t.URL != "" {
-		sb.WriteString(fmt.Sprintf("URL: %s\n", *t.URL))
+		// Supernote/Viwoods-native tasks land here with a base64-encoded JSON
+		// blob in URL — render a friendly "Source: <filename> (p.N)" label
+		// alongside (or instead of) the raw blob so list_tasks output isn't
+		// dominated by a wall of base64. Falls through to the bare URL line
+		// when the value isn't a recognized native-deep-link payload.
+		if dl, ok := decodeNativeDeepLink(*t.URL); ok {
+			if dl.Filename != "" {
+				if dl.Page > 0 {
+					sb.WriteString(fmt.Sprintf("Source: %s (page %d)\n", dl.Filename, dl.Page))
+				} else {
+					sb.WriteString(fmt.Sprintf("Source: %s\n", dl.Filename))
+				}
+				sb.WriteString(fmt.Sprintf("URL (native deep-link, base64): %s\n", *t.URL))
+			} else {
+				sb.WriteString(fmt.Sprintf("URL: %s\n", *t.URL))
+			}
+		} else {
+			sb.WriteString(fmt.Sprintf("URL: %s\n", *t.URL))
+		}
 	}
 	if len(t.Categories) > 0 {
 		sb.WriteString(fmt.Sprintf("Categories: %s\n", strings.Join(t.Categories, ", ")))
@@ -506,19 +584,27 @@ type PurgeCompletedTasksInput struct{}
 func registerPurgeCompletedTasks(server *mcp.Server, client *apiClient) {
 	mcp.AddTool[PurgeCompletedTasksInput, any](server, &mcp.Tool{
 		Name:        "purge_completed_tasks",
-		Description: "Soft-delete every completed task in a single call. Housekeeping convenience for clearing the list after a review session. This is not reversible through the API.",
+		Description: "Soft-delete every completed task in a single call. Housekeeping convenience for clearing the list after a review session. Returns the count affected. This is not reversible through the API.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ PurgeCompletedTasksInput) (*mcp.CallToolResult, any, error) {
 		resp, err := client.postJSON(ctx, "/api/v1/tasks/purge-completed", nil)
 		if err != nil {
 			return nil, nil, fmt.Errorf("API request failed: %w", err)
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != 204 {
+		if resp.StatusCode != 200 {
 			raw, _ := io.ReadAll(resp.Body)
 			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(raw))
 		}
+		var body struct {
+			Deleted int64 `json:"deleted"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return nil, nil, fmt.Errorf("decode response: %w", err)
+		}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "All completed tasks purged.\n"}},
+			Content: []mcp.Content{&mcp.TextContent{
+				Text: fmt.Sprintf("Soft-deleted %d completed task(s).\n", body.Deleted),
+			}},
 		}, nil, nil
 	})
 }
@@ -537,12 +623,14 @@ func registerPurgeDeletedTasks(server *mcp.Server, client *apiClient) {
 		Name: "purge_deleted_tasks",
 		Description: "PERMANENTLY remove soft-deleted tasks older than older_than_days (default 30, must be > 0). " +
 			"This is the only operation that actually frees rows from the task store — every other 'delete' just tombstones. " +
-			"Irreversible. Returns the number of rows removed. Use this to clear the trash backlog; pair with list_tasks { include_deleted: true } " +
-			"to confirm what's eligible before running.",
+			"Irreversible. Returns purged and skipped counts; skipped means rows that were soft-deleted but inside the safety window. " +
+			"A '0 purged, N skipped' result confirms the age gate is working with nothing eligible — distinct from '0 purged, 0 skipped' which means there were no soft-deleted rows at all. " +
+			"Pair with list_tasks { include_deleted: true } to confirm what's eligible before running.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input PurgeDeletedTasksInput) (*mcp.CallToolResult, any, error) {
+		days := input.OlderThanDays
 		path := "/api/v1/tasks/purge-deleted"
-		if input.OlderThanDays > 0 {
-			path = fmt.Sprintf("%s?older_than_days=%d", path, input.OlderThanDays)
+		if days > 0 {
+			path = fmt.Sprintf("%s?older_than_days=%d", path, days)
 		}
 		resp, err := client.postJSON(ctx, path, nil)
 		if err != nil {
@@ -555,13 +643,19 @@ func registerPurgeDeletedTasks(server *mcp.Server, client *apiClient) {
 		}
 		var body struct {
 			Deleted int64 `json:"deleted"`
+			Skipped int64 `json:"skipped"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
+		windowDays := days
+		if windowDays == 0 {
+			windowDays = 30 // server default; matches purgeDeletedDefaultDays
+		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{
-				Text: fmt.Sprintf("Hard-purged %d soft-deleted task(s).\n", body.Deleted),
+				Text: fmt.Sprintf("Hard-purged %d task(s); %d skipped (newer than %d days).\n",
+					body.Deleted, body.Skipped, windowDays),
 			}},
 		}, nil, nil
 	})

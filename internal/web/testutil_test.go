@@ -36,7 +36,7 @@ func newTestHandler() *Handler {
 // mockTaskService implements TaskService for testing
 type mockTaskService struct {
 	tasks          []service.Task
-	purgeDeletedFn func(ctx context.Context, olderThanDays int) (int64, error)
+	purgeDeletedFn func(ctx context.Context, olderThanDays int) (purged, skipped int64, err error)
 }
 
 func (m *mockTaskService) List(ctx context.Context) ([]service.Task, error) {
@@ -131,19 +131,22 @@ func (m *mockTaskService) Update(ctx context.Context, id string, patch service.T
 }
 func (m *mockTaskService) Complete(ctx context.Context, id string) error { return nil }
 func (m *mockTaskService) Delete(ctx context.Context, id string) error   { return nil }
-func (m *mockTaskService) PurgeCompleted(ctx context.Context) error {
+func (m *mockTaskService) PurgeCompleted(ctx context.Context) (int64, error) {
 	var active []service.Task
+	var purged int64
 	for _, t := range m.tasks {
 		if t.Status != service.StatusCompleted {
 			active = append(active, t)
+		} else {
+			purged++
 		}
 	}
 	m.tasks = active
-	return nil
+	return purged, nil
 }
-func (m *mockTaskService) PurgeDeleted(ctx context.Context, olderThanDays int) (int64, error) {
+func (m *mockTaskService) PurgeDeleted(ctx context.Context, olderThanDays int) (purged, skipped int64, err error) {
 	if olderThanDays <= 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	// Mock doesn't model last_modified; the handler tests provide a stubbed
 	// override via purgeDeletedFn when they need to observe the call shape.
@@ -151,16 +154,15 @@ func (m *mockTaskService) PurgeDeleted(ctx context.Context, olderThanDays int) (
 		return m.purgeDeletedFn(ctx, olderThanDays)
 	}
 	var kept []service.Task
-	var removed int64
 	for _, t := range m.tasks {
 		if t.Deleted {
-			removed++
+			purged++
 			continue
 		}
 		kept = append(kept, t)
 	}
 	m.tasks = kept
-	return removed, nil
+	return purged, 0, nil
 }
 func (m *mockTaskService) BulkComplete(ctx context.Context, ids []string) error { return nil }
 func (m *mockTaskService) BulkDelete(ctx context.Context, ids []string) error   { return nil }
