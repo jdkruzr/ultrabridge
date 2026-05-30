@@ -382,7 +382,7 @@ func TestMapInternalTask(t *testing.T) {
 		}
 	})
 
-	t.Run("Categories + NativeURL parsed from blob", func(t *testing.T) {
+	t.Run("Categories parsed from blob with no FN columns", func(t *testing.T) {
 		blob := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\n" +
 			"BEGIN:VTODO\r\nUID:id\r\nSUMMARY:T\r\n" +
 			"CATEGORIES:work,urgent\r\n" +
@@ -398,10 +398,38 @@ func TestMapInternalTask(t *testing.T) {
 		if len(got.Categories) != 2 || got.Categories[0] != "work" || got.Categories[1] != "urgent" {
 			t.Errorf("Categories: got %v want [work urgent]", got.Categories)
 		}
-		// NativeURL came from blob alone — no structured FN columns set —
-		// so ForestNote block exists but only NativeURL is populated.
-		if got.ForestNote == nil || got.ForestNote.NativeURL != "forestnote://notebook/abc/page/def" {
-			t.Errorf("NativeURL: got %+v", got.ForestNote)
+		// NativeURL came from the blob, but no structured X-FORESTNOTE-*
+		// column was set — per the Important-1 review fix, mapInternalTask
+		// drops the NativeURL on the floor in this case rather than conjure
+		// a misleading ForestNote provenance block carrying only `native_url`
+		// with no notebook context. (A blob with NativeURL alone almost
+		// certainly means an old build or a non-FN client copying the prop.)
+		if got.ForestNote != nil {
+			t.Errorf("blob-only NativeURL must NOT create a ForestNote block; got %+v", got.ForestNote)
+		}
+	})
+
+	t.Run("NativeURL attaches to existing ForestNote block from columns", func(t *testing.T) {
+		blob := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\n" +
+			"BEGIN:VTODO\r\nUID:id\r\nSUMMARY:T\r\n" +
+			"X-FORESTNOTE-NATIVE-URL:forestnote://notebook/abc/page/def\r\n" +
+			"END:VTODO\r\nEND:VCALENDAR\r\n"
+		in := taskstore.Task{
+			TaskID:               "id",
+			Title:                sql.NullString{String: "T", Valid: true},
+			Status:               sql.NullString{String: "needsAction", Valid: true},
+			ForestNoteNotebookID: sql.NullString{String: "01HZ3KAY", Valid: true},
+			ICalBlob:             sql.NullString{String: blob, Valid: true},
+		}
+		got := mapInternalTask(in)
+		if got.ForestNote == nil {
+			t.Fatal("ForestNote block should exist (NotebookID column was set)")
+		}
+		if got.ForestNote.NativeURL != "forestnote://notebook/abc/page/def" {
+			t.Errorf("NativeURL should be attached to the existing block; got %q", got.ForestNote.NativeURL)
+		}
+		if got.ForestNote.NotebookID != "01HZ3KAY" {
+			t.Errorf("NotebookID round-trip: got %q", got.ForestNote.NotebookID)
 		}
 	})
 
