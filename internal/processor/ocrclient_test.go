@@ -11,8 +11,9 @@ import (
 
 // TestRecognizeOpenAI_DisablesQwenThinking confirms the OpenAI request body
 // carries chat_template_kwargs.enable_thinking=false so Qwen3-class models
-// suppress their reasoning preamble. Non-Qwen endpoints tolerate the unknown
-// key per OpenAI Chat Completions's permissive-extra-fields convention.
+// (when served via vLLM) suppress their reasoning preamble. Strictness on
+// non-vLLM gateways varies — see the struct doc on ChatTemplateKwargs in
+// ocrclient.go for the escape hatch when a strict endpoint rejects it.
 func TestRecognizeOpenAI_DisablesQwenThinking(t *testing.T) {
 	var capturedBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
