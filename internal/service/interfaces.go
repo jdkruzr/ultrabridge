@@ -197,6 +197,21 @@ type EmbeddingJobStatus struct {
 	FailedCount    int                       `json:"failed_count"`
 	ActiveTask     *ActiveTask               `json:"active_task,omitempty"`
 	Boox           *booxpipeline.QueueStatus `json:"boox,omitempty"`
+	ForestNote     *ForestNoteQueueStatus    `json:"forestnote,omitempty"`
+}
+
+// ForestNoteQueueStatus is the ForestNote sync bridge's work snapshot for
+// the /files/status poller. Mirrors the Boox queue shape conceptually
+// (pending / in_flight / processed) but is plumbed from a separate source:
+// the syncbridge worker that turns inbound page strokes into OCR text. Nil
+// in the parent struct when no ForestNote source is wired (server-mode
+// without the FN source, or pre-source-start polls).
+type ForestNoteQueueStatus struct {
+	Pending   int   `json:"pending"`    // pages waiting in the bridge channel
+	InFlight  int   `json:"in_flight"`  // pages currently being OCR'd
+	Processed int64 `json:"processed"`  // pages finished since process start
+	Dropped   int64 `json:"dropped"`    // enqueues lost to channel-full
+	Capacity  int   `json:"capacity"`   // channel buffer size
 }
 
 type ActiveTask struct {

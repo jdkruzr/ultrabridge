@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sysop/ultrabridge/internal/fnpath"
@@ -67,6 +68,33 @@ type Bridge struct {
 	queue  chan string
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// Counters for Status(). All atomics so callers (web /files/status
+	// poller, MCP) can read without coordinating with the worker. See the
+	// Status type doc for the exact semantics of each.
+	inFlight  atomic.Int64
+	processed atomic.Int64
+	dropped   atomic.Int64
+}
+
+// Status is a point-in-time snapshot of the bridge's work counters. Pending is
+// the live channel depth so it can move between reads; the others are
+// monotonic since process start (no reset on Stop — caller can diff if it
+// cares about per-window deltas, but the UI only wants "are we busy" and
+// "what's the backlog").
+//
+// Processed counts every page that exited processPage to any terminal state —
+// successful OCR+index+embed AND the delete/blank-prune paths (dropPage) AND
+// hard-error early returns where processPage logged and bailed. This matches
+// "the worker handled it and moved on" rather than "OCR succeeded", which the
+// UI's "N done" label conveys conventionally. If a future caller needs to
+// distinguish OCR-vs-prune, split into separate counters at that time.
+type Status struct {
+	Pending   int   `json:"pending"`    // pages waiting in the channel right now
+	InFlight  int   `json:"in_flight"`  // pages currently being processed
+	Processed int64 `json:"processed"`  // pages handled to any terminal state since start (see type doc)
+	Dropped   int64 `json:"dropped"`    // PagesChanged enqueues lost to queue-full
+	Capacity  int   `json:"capacity"`   // channel buffer size (for "queue is X% full")
 }
 
 func New(store *syncstore.Store, deps Deps, logger *slog.Logger) *Bridge {
@@ -74,6 +102,21 @@ func New(store *syncstore.Store, deps Deps, logger *slog.Logger) *Bridge {
 		logger = slog.Default()
 	}
 	return &Bridge{store: store, deps: deps, logger: logger, queue: make(chan string, 256)}
+}
+
+// Status returns a snapshot of the bridge's counters. Safe to call from any
+// goroutine; nil-Bridge safe (zero value).
+func (b *Bridge) Status() Status {
+	if b == nil {
+		return Status{}
+	}
+	return Status{
+		Pending:   len(b.queue),
+		InFlight:  int(b.inFlight.Load()),
+		Processed: b.processed.Load(),
+		Dropped:   b.dropped.Load(),
+		Capacity:  cap(b.queue),
+	}
 }
 
 // Start launches the worker. ctx bounds its lifetime (in addition to Stop).
@@ -105,6 +148,7 @@ func (b *Bridge) PagesChanged(_ context.Context, pages []syncstore.TablePK) {
 		select {
 		case b.queue <- p.PK:
 		default:
+			b.dropped.Add(1)
 			b.logger.Warn("syncbridge: queue full, dropping page (will re-render on next change)", "page", p.PK)
 		}
 	}
@@ -123,7 +167,15 @@ func (b *Bridge) run(ctx context.Context) {
 }
 
 // processPage is best-effort: every failure is logged, never propagated.
+// The defer pair around the body makes inFlight/processed bookkeeping
+// resilient to every early-return path inside (and there are several).
 func (b *Bridge) processPage(ctx context.Context, pagePK string) {
+	b.inFlight.Add(1)
+	defer func() {
+		b.inFlight.Add(-1)
+		b.processed.Add(1)
+	}()
+
 	notebookID, live, err := b.store.LivePage(ctx, pagePK)
 	if err != nil {
 		b.logger.Error("syncbridge: live-page lookup failed", "page", pagePK, "err", err)

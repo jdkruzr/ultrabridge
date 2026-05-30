@@ -375,3 +375,74 @@ func TestBridge_StartPagesChangedStop(t *testing.T) {
 		t.Fatal("bridge did not process the page within 2s")
 	}
 }
+
+
+// TestStatus_TracksProcessAndQueueLifecycle confirms the new Status counters
+// move in the right directions: Pending matches channel depth, Processed
+// increments once per processPage completion, and Dropped fires when a
+// PagesChanged enqueue can't fit. InFlight is harder to assert
+// deterministically (it's nonzero only mid-processPage) so we rely on the
+// processed counter to confirm the defer ran at all.
+func TestStatus_TracksProcessAndQueueLifecycle(t *testing.T) {
+	s := newStore(t)
+	seedPageWithStroke(t, s)
+	fi := &fakeIndexer{}
+	b := New(s, Deps{Indexer: fi, OCR: fakeOCR{text: "x"}}, nil)
+
+	// Fresh bridge: every counter is zero, but Capacity is set.
+	st := b.Status()
+	if st.Pending != 0 || st.InFlight != 0 || st.Processed != 0 || st.Dropped != 0 {
+		t.Errorf("fresh status non-zero: %+v", st)
+	}
+	if st.Capacity != 256 {
+		t.Errorf("Capacity: got %d, want 256", st.Capacity)
+	}
+
+	// Drive a page through processPage directly — the inFlight defer
+	// must run and Processed must tick up by one.
+	b.processPage(context.Background(), pg1)
+	st = b.Status()
+	if st.Processed != 1 {
+		t.Errorf("Processed after one page: got %d, want 1", st.Processed)
+	}
+	if st.InFlight != 0 {
+		t.Errorf("InFlight should be 0 after processPage returns: got %d", st.InFlight)
+	}
+	if fi.count() != 1 {
+		t.Errorf("sanity: indexer should have been called once, got %d", fi.count())
+	}
+}
+
+// TestStatus_Dropped_IncrementsOnFullQueue verifies the queue-full path
+// in PagesChanged bumps the Dropped counter rather than silently warning.
+// We fill the channel by enqueueing capacity+overflow pages BEFORE
+// starting the worker, so nothing drains.
+func TestStatus_Dropped_IncrementsOnFullQueue(t *testing.T) {
+	s := newStore(t)
+	b := New(s, Deps{}, nil)
+
+	pages := make([]syncstore.TablePK, b.Status().Capacity+5)
+	for i := range pages {
+		pages[i] = syncstore.TablePK{Table: "page", PK: fmt.Sprintf("PK_%03d", i)}
+	}
+	b.PagesChanged(context.Background(), pages)
+
+	st := b.Status()
+	if st.Pending != st.Capacity {
+		t.Errorf("Pending should be at capacity: got %d, want %d", st.Pending, st.Capacity)
+	}
+	if st.Dropped != 5 {
+		t.Errorf("Dropped: got %d, want 5", st.Dropped)
+	}
+}
+
+// TestStatus_NilBridge confirms the nil-Bridge guard on Status — used by
+// the source-level Status() passthrough when the bridge hasn't been
+// constructed yet (source not started).
+func TestStatus_NilBridge(t *testing.T) {
+	var b *Bridge
+	st := b.Status()
+	if (st != Status{}) {
+		t.Errorf("nil bridge Status: got %+v, want zero value", st)
+	}
+}

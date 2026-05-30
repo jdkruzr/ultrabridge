@@ -1,6 +1,6 @@
 # internal/web
 
-Last verified: 2026-05-29 (REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted; legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view)
+Last verified: 2026-05-30 (REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted; legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback)
 
 ## REST v1 task API — write/read surface extensions (2026-05-29)
 
@@ -277,6 +277,23 @@ strings preserved where applicable.
   HTML5's "in body" insertion mode strips orphan `<tr>` tokens, so
   `new DOMParser().parseFromString(body, 'text/html').querySelectorAll('tr')`
   returns empty on raw row strings.
+
+### `/files/status` shape: per-source-additive (2026-05-30)
+
+`handleFilesStatus` returns `service.EmbeddingJobStatus` verbatim. The
+response carries optional per-source blocks under stable keys: `boox` (the
+`booxpipeline.QueueStatus` shape) and `forestnote` (the
+`service.ForestNoteQueueStatus` shape — Pending / InFlight / Processed /
+Dropped / Capacity). Both fields are `omitempty`, so non-FN / non-Boox
+deployments emit no key for the missing source — JS gate any UI on
+presence, not on zero values. `updateProcessorStatus()` (layout.html)
+renders both the Files-tab proc-status line and the global status bar from
+this single poll; the global bar's visibility gate matches against any
+configured source. Re-OCR buttons in `_fn_note_row.html` and
+`files_forestnote.html` show a transient "Queued ✓" / "Failed ✗" hint and
+call `updateProcessorStatus()` after a successful enqueue so the operator
+sees Pending tick up immediately rather than waiting for the next 5 s
+poll.
 
 ### Design: minimal scope, no OOB
 

@@ -1,6 +1,6 @@
 # internal/service
 
-Last verified: 2026-05-29 (TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge)
+Last verified: 2026-05-30 (TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote)
 
 ## Purpose
 
@@ -114,6 +114,17 @@ all implemented by unexported structs and constructed via
   pipelines and translate types between layers. Business rules
   live in the underlying packages (e.g. CalDAV soft-delete is in
   `taskdb`, OCR scheduling is in `processor`).
+- **Processor-status surface is per-source-additive**: `EmbeddingJobStatus`
+  carries an optional `Boox *booxpipeline.QueueStatus` and an optional
+  `ForestNote *ForestNoteQueueStatus` block (both `omitempty`). The FN
+  block mirrors the syncbridge `Status` shape (Pending / InFlight /
+  Processed / Dropped / Capacity) but is redeclared in `service` so the
+  web JSON contract doesn't leak the `syncbridge` package name. Attached
+  only when `Capacity > 0` (or any counter has moved), so deployments
+  with no FN source emit no `forestnote` key at all. Counters are
+  monotonic-since-process-start; the caller diffs across polls for a
+  rate. `ForestNoteReprocessor.Status()` is the read path and must be
+  nil-safe on both the source and the underlying bridge.
 
 ## Invariants
 

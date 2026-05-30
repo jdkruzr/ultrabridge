@@ -14,7 +14,8 @@
       <div class="flex-spacer"></div>
       <a class="btn-small" href="/files/forestnote/export?notebook={{$d.NotebookID}}">⬇ Download PDF</a>
       <button type="button" class="btn-small"
-              hx-post="/files/forestnote/reprocess?notebook={{$d.NotebookID}}" hx-swap="none">↻ Re-OCR</button>
+              hx-post="/files/forestnote/reprocess?notebook={{$d.NotebookID}}" hx-swap="none"
+              hx-on:htmx:after-request="if(event.detail.successful){ this.textContent='Queued ✓'; this.disabled=true; setTimeout(() => { this.textContent='↻ Re-OCR'; this.disabled=false; }, 2500); updateProcessorStatus(); } else { this.textContent='Failed ✗'; setTimeout(() => { this.textContent='↻ Re-OCR'; }, 2500); }">↻ Re-OCR</button>
       <button type="button" class="btn-small" style="background: var(--status-text-failed);"
               hx-post="/files/forestnote/delete"
               hx-vals='{"notebook": "{{$d.NotebookID}}"}'
