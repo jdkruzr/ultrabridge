@@ -266,7 +266,8 @@ func (h *Handler) handleV1UpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleV1PurgeCompleted soft-deletes every completed task in a single
-// call. Returns 204 on success.
+// call. Returns 200 + {"deleted": N}. (Was 204 no-body pre-UB-3; the
+// shape change is documented in the inline comment below.)
 func (h *Handler) handleV1PurgeCompleted(w http.ResponseWriter, r *http.Request) {
 	n, err := h.tasks.PurgeCompleted(r.Context())
 	if err != nil {

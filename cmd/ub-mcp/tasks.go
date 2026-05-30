@@ -54,9 +54,12 @@ type nativeDeepLink struct {
 // against incidentally-decodable URLs that happen to be valid base64+JSON
 // but aren't really native deep-links.
 func decodeNativeDeepLink(raw string) (nativeDeepLink, bool) {
-	// Quick gate — base64-encoded JSON object always starts with `eyJ` (which
-	// is `{"` in standard base64). Skip the full decode round-trip for
-	// anything that obviously isn't one.
+	// Quick gate — native deep-link payloads are JSON objects whose first
+	// key starts with an ASCII letter (`appName`, `fileId`, etc.), so the
+	// base64-encoded form always begins with `eyJ` (the encoding of `{"`
+	// followed by such a letter). Non-deep-link URLs that happen to start
+	// with `eyJ` fall through to the JSON unmarshal which rejects them
+	// safely; this gate just skips the round-trip on every plain URL.
 	if !strings.HasPrefix(raw, "eyJ") {
 		return nativeDeepLink{}, false
 	}
@@ -72,23 +75,17 @@ func decodeNativeDeepLink(raw string) (nativeDeepLink, bool) {
 		return nativeDeepLink{}, false
 	}
 	if dl.FilePath != "" {
-		// path.Base handles both forward-slash and the
-		// no-slash-at-all case ("foo.note" returns "foo.note").
-		// Note: filepath.Base would do OS-specific separators; path.Base
-		// is the right pick here since these paths are device-side (Linux-y).
-		dl.Filename = pathBase(dl.FilePath)
+		// Inline last-segment extraction (these are device-side
+		// forward-slash paths; mirrors decodeMCPNativeDeepLink's split
+		// for cross-surface parity rather than importing path.Base just
+		// here while the other surface inlines).
+		if i := strings.LastIndex(dl.FilePath, "/"); i >= 0 {
+			dl.Filename = dl.FilePath[i+1:]
+		} else {
+			dl.Filename = dl.FilePath
+		}
 	}
 	return dl, true
-}
-
-// pathBase returns the last segment of a forward-slash-separated path.
-// Stdlib path.Base would do this but we'd then need to import "path" just
-// for one call; trivial inline avoids the import.
-func pathBase(p string) string {
-	if i := strings.LastIndex(p, "/"); i >= 0 {
-		return p[i+1:]
-	}
-	return p
 }
 
 // taskForestNote mirrors service.TaskForestNote — provenance for tasks

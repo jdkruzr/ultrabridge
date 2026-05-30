@@ -188,6 +188,11 @@ type mcpNativeDeepLink struct {
 // between the two MCP surfaces (no shared internal package for this) — the
 // duplication is documented in cmd/ub-mcp/CLAUDE.md's "two surfaces" note.
 func decodeMCPNativeDeepLink(raw string) (mcpNativeDeepLink, bool) {
+	// `eyJ` is the base64 of `{"<letter>`; every native deep-link payload
+	// has an ASCII-letter first key (`appName`, `fileId`, etc.) so its
+	// encoding always starts with this prefix. Non-deep-link URLs that
+	// happen to start with `eyJ` are caught by the json.Unmarshal +
+	// AppName checks below.
 	if !strings.HasPrefix(raw, "eyJ") {
 		return mcpNativeDeepLink{}, false
 	}
