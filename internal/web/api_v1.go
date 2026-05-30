@@ -280,6 +280,11 @@ func (h *Handler) handleV1PurgeCompleted(w http.ResponseWriter, r *http.Request)
 // ?older_than_days= is provided. Long enough that recently-deleted rows
 // aren't surprise-cleared, short enough that the backlog doesn't grow
 // unbounded. Callers wanting a different window pass it explicitly.
+//
+// Paired with `webPurgeDeletedDays` in handler.go (the legacy form-route
+// constant). The two values are intentionally separate (one is per-API,
+// one is per-UI) but should agree numerically — if you tune one without
+// the other, the UI button and the REST default diverge.
 const purgeDeletedDefaultDays = 30
 
 // handleV1PurgeDeleted permanently removes soft-deleted tasks whose
