@@ -158,6 +158,27 @@ type openAIRequest struct {
 	Model     string      `json:"model"`
 	MaxTokens int         `json:"max_tokens"`
 	Messages  []openAIMsg `json:"messages"`
+	// ChatTemplateKwargs is a vLLM extension to the OpenAI Chat Completions
+	// schema — passed through to the model's chat template at render time.
+	// We use it to suppress Qwen3's reasoning/thinking tokens for OCR
+	// (`enable_thinking: false`), which would otherwise produce hundreds of
+	// `<think>...</think>` tokens before the actual transcription.
+	//
+	// Strictness caveat: this is a vLLM-only feature. OpenAI's Chat
+	// Completions has historically ignored unknown top-level fields, but
+	// strictness varies across compatible gateways (OpenRouter, Together,
+	// LiteLLM, Groq, Fireworks, Ollama all differ; OpenAI proper has been
+	// tightening param validation in newer modes). If you point this at a
+	// strict endpoint and OCR starts 400-ing, the cheapest fix is to flip
+	// back to OCRFormatAnthropic, or remove this field — a config gate
+	// would be the principled fix once we have a second vLLM-only feature
+	// to share it.
+	//
+	// JSON encoding: omitempty elides the field when the map is nil; a
+	// non-nil empty map (`map[string]any{}`) still serializes as `{}`.
+	// Today's only writer (recognizeOpenAI) always populates one key, so
+	// the field always ships when format=openai.
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 }
 
 type openAIMsg struct {
@@ -196,6 +217,12 @@ func (c *OCRClient) recognizeOpenAI(ctx context.Context, jpegData []byte, prompt
 				{Type: "image_url", ImageURL: &openAIImgURL{URL: dataURL}},
 			},
 		}},
+		// Disable Qwen3's thinking tokens for OCR — the recognized text is
+		// the only thing we want back, and the `<think>...</think>` preamble
+		// adds latency, eats max_tokens budget, and pollutes the body when
+		// it occasionally fails to terminate cleanly. See struct comment for
+		// non-Qwen endpoint behavior.
+		ChatTemplateKwargs: map[string]any{"enable_thinking": false},
 	}
 
 	body, err := json.Marshal(reqBody)
