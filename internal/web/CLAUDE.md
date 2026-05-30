@@ -1,6 +1,6 @@
 # internal/web
 
-Last verified: 2026-05-30 (REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted; legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
+Last verified: 2026-05-30 (REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
 
 ## REST v1 task API — write/read surface extensions (2026-05-29)
 
@@ -28,8 +28,19 @@ leave unchanged. The handler decodes directly into `service.TaskCreate` /
 New route: `POST /api/v1/tasks/purge-deleted?older_than_days=N`
 (default 30; rejects `N <= 0`). Hard-purges soft-deleted rows whose
 `last_modified` is older than the cutoff. Returns `200` with
-`{"deleted": N}`. This is the only endpoint that triggers a real `DELETE
-FROM tasks` — every other "delete" tombstones.
+`{"deleted": N, "skipped": M}`. `skipped` counts soft-deleted rows that
+were still inside the safety window — the count is what lets a caller
+distinguish "0 purged because nothing was eligible" from "0 purged
+because the gate broke." This is the only endpoint that triggers a real
+`DELETE FROM tasks` — every other "delete" tombstones.
+
+`POST /api/v1/tasks/purge-completed` now returns `200` with
+`{"deleted": N}` (was `204` no-body pre-UB-3). The shape change matches
+purge-deleted's response and gives MCP/CLI callers visibility into what
+happened. This is a soft-breaking change for any non-in-tree caller that
+hard-coded the `204` status. The legacy form route
+`POST /tasks/purge-completed` keeps its empty-200 / 303 shape — the web
+UI discards the count and DOM-sweeps after the post.
 
 ## Sidebar nav (device-grouped)
 

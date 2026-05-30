@@ -1,6 +1,6 @@
 # MCP Server (ub-mcp)
 
-Last verified: 2026-05-30 (search_notes deep-link host: UB_MCP_PUBLIC_URL env + displayBaseURL() helper mirrored across both MCP surfaces; task tools: ForestNote provenance + URL/Priority/Categories/Comment write surface + purge_deleted_tasks)
+Last verified: 2026-05-30 (search_notes deep-link host: UB_MCP_PUBLIC_URL env + displayBaseURL() helper mirrored across both MCP surfaces; task tools: ForestNote provenance + URL/Priority/Categories/Comment write surface + purge_deleted_tasks; UB-5 native-deep-link decoder mirrored across both surfaces (`decodeNativeDeepLink` / `decodeMCPNativeDeepLink`); purge response strings now include counts; first test file lands in `cmd/ultrabridge/native_deeplink_test.go`)
 
 ## Purpose
 Model Context Protocol server that exposes UltraBridge note search and retrieval
@@ -10,7 +10,7 @@ as MCP tools for AI agents (Claude Desktop, Cursor, etc.).
 - **Exposes**: Thirteen MCP tools across three categories.
   - Notes: `search_notes` (hybrid search), `get_note_pages` (page content), `get_note_image` (JPEG rendering).
   - ForestNote text boxes: `list_text_boxes` (discovery — boxes in a notebook with id/page/text), `edit_text_box` (server-authored edit of a box's text; relayed to devices on next sync, re-indexed; LWW so a newer device edit can override). Both require an active ForestNote source (404 otherwise).
-  - Tasks: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `purge_completed_tasks`, `purge_deleted_tasks` (new — hard-purges soft-tombstoned rows older than `older_than_days`, default 30; pair with `list_tasks { include_deleted: true }` to confirm targets first; the only operation that frees rows from the store). `list_tasks` gained provenance/metadata filters: `notebook_id`, `notebook_name`, `source`, `category` (case-sensitive equality), `priority` ("1".."9"), `include_deleted`. `get_task` / `list_tasks` outputs surface URL, Priority, Categories, ForestNote provenance (notebook id+name, page id, source, native URL), Comment, and a `deleted` flag. `create_task` / `update_task` accept `url`, `priority`, `categories`, `comment`; update additionally accepts `clear_url`, `clear_priority`, `clear_comment` sentinels (Clear wins over value when both set; mirrors existing `clear_due_at`). `categories` on update is wholesale (send `[]` to clear, omit to leave unchanged). All task mutations propagate to configured CalDAV devices on the next sync cycle (UB-wins). Dates are RFC3339.
+  - Tasks: `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `purge_completed_tasks`, `purge_deleted_tasks` (hard-purges soft-tombstoned rows older than `older_than_days`, default 30; pair with `list_tasks { include_deleted: true }` to confirm targets first; the only operation that frees rows from the store). `list_tasks` gained provenance/metadata filters: `notebook_id`, `notebook_name`, `source`, `category` (case-sensitive equality), `priority` ("1".."9"), `include_deleted`. `get_task` / `list_tasks` outputs surface URL, Priority, Categories, ForestNote provenance (notebook id+name, page id, source, native URL), Comment, and a `deleted` flag. Device-created Supernote/Viwoods tasks stuff a base64-encoded JSON blob (appName/fileId/filePath/page/pageId) into the URL property; the formatter detects this and renders an extra `Source: <filename> (page N)` label alongside the raw blob so list output isn't dominated by base64 walls (`decodeNativeDeepLink` in `tasks.go` / `decodeMCPNativeDeepLink` in `cmd/ultrabridge/mcptools.go`). `create_task` / `update_task` accept `url`, `priority`, `categories`, `comment`; update additionally accepts `clear_url`, `clear_priority`, `clear_comment` sentinels (Clear wins over value when both set; mirrors existing `clear_due_at`). `categories` on update is wholesale (send `[]` to clear, omit to leave unchanged). `purge_completed_tasks` returns "Soft-deleted N completed task(s)." and `purge_deleted_tasks` returns "Hard-purged N task(s); M skipped (newer than D days)." — both numerically driven by the REST response. All task mutations propagate to configured CalDAV devices on the next sync cycle (UB-wins). Dates are RFC3339.
   - Two transport modes: stdio (default) and HTTP SSE (`--http` flag).
 - **Guarantees**: All tools delegate to UltraBridge JSON API via HTTP, authenticating with a Bearer token (`UB_MCP_API_TOKEN`) when set, else Basic Auth. Image data returned as base64-encoded embedded images. Error responses use MCP error format.
 - **Expects**: Running UltraBridge instance with JSON API endpoints enabled (requires retriever). Environment variables for API connection.
@@ -22,9 +22,15 @@ binary) and `cmd/ultrabridge/mcptools.go` (the in-process MCP registered
 at `cmd/ultrabridge/main.go:753`, mounted at `/mcp/`). When adding or
 changing a tool, both surfaces must be updated; the input/output JSON
 shapes are mirrored intentionally (the in-process file keeps local
-`mcpTask` / `mcpTaskForestNote` / `mcpTaskLink` types so it doesn't
-import `internal/service`). Drift between the two is a contract bug,
-not a refactor opportunity.
+`mcpTask` / `mcpTaskForestNote` / `mcpTaskLink` / `mcpNativeDeepLink`
+types so it doesn't import `internal/service`). Drift between the two
+is a contract bug, not a refactor opportunity. The native-deep-link
+decoder follows the same rule — `decodeNativeDeepLink` (sidecar) and
+`decodeMCPNativeDeepLink` (in-process) are intentional twins with no
+shared internal package; behavior changes must land in both.
+`cmd/ultrabridge/native_deeplink_test.go` (currently the only test file
+in `cmd/ultrabridge/`) is the canonical decoder test set and any decoder
+edit should land matching cases here and in `cmd/ub-mcp/native_deeplink_test.go`.
 
 This applies to deep-link formatting too: both `apiClient` (sidecar) and
 `mcpAPIClient` (in-process) carry a `publicBaseURL` field plus a
@@ -59,9 +65,10 @@ creator uses); the standalone surface populates it from
 ## Key Files
 - `main.go` -- Entry point, transport selection, API client (GET / POST / PATCH / DELETE with JSON body support) and Bearer/Basic auth middleware.
 - `tools.go` -- Note-oriented MCP tools (`search_notes`, `get_note_pages`, `get_note_image`) and top-level `registerTools`.
-- `tasks.go` -- Task-oriented MCP tools (`list_tasks` / `get_task` / `create_task` / `update_task` / `complete_task` / `delete_task` / `purge_completed_tasks`) plus the local `task` / `taskLink` JSON-decode types mirroring `service.Task`.
+- `tasks.go` -- Task-oriented MCP tools (`list_tasks` / `get_task` / `create_task` / `update_task` / `complete_task` / `delete_task` / `purge_completed_tasks` / `purge_deleted_tasks`) plus the local `task` / `taskLink` / `taskForestNote` / `nativeDeepLink` JSON-decode types mirroring `service.Task` and the `decodeNativeDeepLink` helper used by `formatTask`.
 - `tools_test.go` -- Tests for note tools against mock HTTP servers.
 - `tasks_test.go` -- Tests for task tools with a shared `callTaskTool` helper (in-process MCP client-server transport).
+- `native_deeplink_test.go` -- Tests for `decodeNativeDeepLink` (happy path, failure paths, filename edge cases). Paired with `cmd/ultrabridge/native_deeplink_test.go` for the in-process twin — keep cases mirrored.
 
 ## Gotchas
 - MCP SDK uses generics for tool input types (SearchNotesInput, GetNotePagesInput, GetNoteImageInput)
