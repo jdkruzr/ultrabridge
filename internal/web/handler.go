@@ -285,6 +285,7 @@ func NewHandler(
 	h.mux.HandleFunc("POST /tasks/{id}/complete", h.handleCompleteTask)
 	h.mux.HandleFunc("POST /tasks/bulk", h.handleBulkAction)
 	h.mux.HandleFunc("POST /tasks/purge-completed", h.handlePurgeCompleted)
+	h.mux.HandleFunc("POST /tasks/purge-deleted", h.handlePurgeDeleted)
 	h.mux.HandleFunc("GET /logs", h.handleLogs)
 	h.mux.HandleFunc("GET /settings", h.handleSettings)
 	h.mux.HandleFunc("POST /settings/save", h.handleSettingsSave)
@@ -952,6 +953,28 @@ func (h *Handler) handlePurgeCompleted(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// webPurgeDeletedDays is the cutoff the legacy /tasks/purge-deleted form
+// uses. Hard-coded at 30 days so the UI button matches the REST default
+// (purgeDeletedDefaultDays in api_v1.go) without exposing the knob to the
+// web operator — power users wanting a different window go through the
+// REST endpoint or MCP tool directly.
+const webPurgeDeletedDays = 30
+
+// handlePurgeDeleted is the form-target sibling of /api/v1/tasks/purge-deleted.
+// HTMX response is empty 200; non-HX is a redirect home so a plain browser
+// also gets sensible behavior. Matches handlePurgeCompleted's pattern.
+func (h *Handler) handlePurgeDeleted(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.tasks.PurgeDeleted(r.Context(), webPurgeDeletedDays); err != nil {
+		http.Error(w, "purge failed", http.StatusInternalServerError)
+		return
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	cObj, _ := h.config.GetConfig(r.Context())
 	cfg := cObj.(*appconfig.Config)
@@ -1587,8 +1610,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.mux.Serv
 func (h *Handler) baseTemplateData(ctx context.Context) map[string]interface{} {
 	data := map[string]interface{}{}
 	if h.tasks != nil {
-		if t, err := h.tasks.List(ctx); err == nil {
+		// ListIncludingDeleted so the template can render the trash view
+		// gated on the "Show deleted" toggle. Each row carries Deleted bool;
+		// the template hides ghosts by default via inline style + data attr.
+		// DeletedCount surfaces the backlog size in the toggle label so the
+		// operator can decide whether to actually look at the trash.
+		if t, err := h.tasks.ListIncludingDeleted(ctx); err == nil {
 			data["tasks"] = t
+			deletedCount := 0
+			for _, tk := range t {
+				if tk.Deleted {
+					deletedCount++
+				}
+			}
+			data["DeletedCount"] = deletedCount
 		}
 	}
 	data["BooxNotesPath"] = h.booxNotesPath

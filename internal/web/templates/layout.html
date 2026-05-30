@@ -660,25 +660,40 @@
             {{end}}
         }
 
-        // Hide completed tasks by default on page load
+        // Hide completed + deleted tasks by default on page load
         document.addEventListener('DOMContentLoaded', function() {
-            toggleCompleted();
+            recomputeTaskVisibility();
         });
 
-        function toggleCompleted() {
-            const cb = document.getElementById('show-completed');
-            if (!cb) return; // #show-completed only exists on the Tasks tab
-            const show = cb.checked;
-            const rows = document.querySelectorAll('#task-table tbody tr[data-status="completed"]');
-            rows.forEach(function(row) {
-                row.style.display = show ? '' : 'none';
-                if (!show) {
-                    var cb = row.querySelector('.task-checkbox');
+        // recomputeTaskVisibility walks every task row and sets display
+        // based on the combined state of #show-completed AND #show-deleted.
+        // A row is hidden if it matches a class the user hasn't opted into;
+        // e.g. a row that is both completed AND deleted stays hidden until
+        // both toggles are on. Also un-checks any selection on hidden rows
+        // so bulk actions can't sweep in something the operator can't see.
+        function recomputeTaskVisibility() {
+            const completedCB = document.getElementById('show-completed');
+            if (!completedCB) return; // tasks tab not mounted
+            const deletedCB = document.getElementById('show-deleted');
+            const showCompleted = completedCB.checked;
+            const showDeleted = !!(deletedCB && deletedCB.checked);
+            document.querySelectorAll('#task-table tbody tr').forEach(function(row) {
+                const isCompleted = row.dataset.status === 'completed';
+                const isDeleted = row.dataset.deleted === 'true';
+                const hide = (isCompleted && !showCompleted) || (isDeleted && !showDeleted);
+                row.style.display = hide ? 'none' : '';
+                if (hide) {
+                    const cb = row.querySelector('.task-checkbox');
                     if (cb) cb.checked = false;
                 }
             });
             updateBulkActions();
         }
+
+        // Back-compat: existing layout-level swap hook calls toggleCompleted().
+        // Keep the alias so a swapped-in tasks fragment still re-evaluates
+        // visibility correctly even if a stale caller fires the old name.
+        function toggleCompleted() { recomputeTaskVisibility(); }
 
         function toggleSelectAll() {
             const checked = document.getElementById('select-all').checked;

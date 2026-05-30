@@ -22,8 +22,12 @@
             <h2>Task List</h2>
             <div class="flex-spacer"></div>
             <label class="text-small" style="cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
-                <input type="checkbox" id="show-completed" onchange="toggleCompleted()" style="width: auto;">
+                <input type="checkbox" id="show-completed" onchange="recomputeTaskVisibility()" style="width: auto;">
                 Show completed
+            </label>
+            <label class="text-small" style="cursor: pointer; display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem;">
+                <input type="checkbox" id="show-deleted" onchange="recomputeTaskVisibility(); document.getElementById('purge-deleted-form').style.display = this.checked ? 'block' : 'none';" style="width: auto;">
+                Show deleted{{if .DeletedCount}} <span class="text-small" style="color: var(--text-secondary, #6b7280);">({{.DeletedCount}})</span>{{end}}
             </label>
         </div>
 
@@ -57,14 +61,17 @@
         <form hx-post="/tasks/purge-completed" hx-swap="none" hx-on:htmx:after-request="if(!event.detail.successful) return; document.querySelectorAll('#task-table tbody tr[data-status=&quot;completed&quot;]').forEach(r => r.remove());" style="margin-top:0.5rem; text-align:right;">
           <button type="submit" class="btn-small" style="background: var(--status-text-failed);" onclick="return confirm('Purge all completed tasks? This cannot be undone.')">✗ Purge Completed</button>
         </form>
+        <form id="purge-deleted-form" hx-post="/tasks/purge-deleted" hx-swap="none" hx-on:htmx:after-request="if(!event.detail.successful) return; document.querySelectorAll('#task-table tbody tr[data-deleted=&quot;true&quot;]').forEach(r => r.remove()); const lbl = document.querySelector('label[for=&quot;show-deleted&quot;]'); /* count is now stale; reload for the simple path */ location.reload();" style="margin-top:0.5rem; text-align:right; display:none;">
+          <button type="submit" class="btn-small" style="background: var(--status-text-failed);" onclick="return confirm('Permanently delete soft-deleted tasks older than 30 days? This is IRREVERSIBLE — the rows are dropped from the database. Recently-deleted tasks (within 30 days) are kept as a safety window.')">✗ Purge Deleted (&gt;30 days)</button>
+        </form>
     </div>
 </div>
 
 <script>
     // Re-initialize visibility on swap. Deferred to DOMContentLoaded because
-    // layout.html defines toggleCompleted AFTER tab content; inline invocation
-    // at first paint otherwise throws ReferenceError.
+    // layout.html defines recomputeTaskVisibility AFTER tab content; inline
+    // invocation at first paint otherwise throws ReferenceError.
     document.addEventListener('DOMContentLoaded', function() {
-        if (typeof toggleCompleted === 'function') toggleCompleted();
+        if (typeof recomputeTaskVisibility === 'function') recomputeTaskVisibility();
     });
 </script>

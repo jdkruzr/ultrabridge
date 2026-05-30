@@ -1,8 +1,8 @@
 {{define "_task_row"}}
-<tr id="task-{{.ID}}" data-status="{{.Status}}" {{if eq .Status "completed"}}style="display: none;"{{end}}>
-    <td><input type="checkbox" name="task_ids" value="{{.ID}}" class="task-checkbox" onchange="updateBulkActions()"></td>
+<tr id="task-{{.ID}}" data-status="{{.Status}}" data-deleted="{{if .Deleted}}true{{else}}false{{end}}" {{if or (eq .Status "completed") .Deleted}}style="display: none;"{{end}}>
+    <td><input type="checkbox" name="task_ids" value="{{.ID}}" class="task-checkbox" onchange="updateBulkActions()" {{if .Deleted}}disabled{{end}}></td>
     <td class="task-title">
-        {{.Title}}
+        {{if .Deleted}}<span style="text-decoration: line-through; color: var(--text-secondary, #6b7280);">{{.Title}}</span>{{else}}{{.Title}}{{end}}
         {{if .Detail}}
         <br><span class="device-info">{{ taskDetailHTML .Detail }}</span>
         {{end}}
@@ -11,9 +11,13 @@
         {{end}}{{end}}
     </td>
     <td>
+        {{if .Deleted}}
+        <span class="task-status" style="background: var(--bg-color, #f3f4f6); color: var(--text-secondary, #6b7280);">Deleted</span>
+        {{else}}
         <span class="task-status {{if eq .Status "completed"}}status-completed{{else}}status-needsaction{{end}}">
             {{if eq .Status "completed"}}Completed{{else}}Needs Action{{end}}
         </span>
+        {{end}}
     </td>
     <td class="task-due-date">{{.CompletedAt | formatCreated}}</td>
     <td class="task-due-date">
@@ -24,7 +28,7 @@
         {{end}}
     </td>
     <td class="task-actions">
-        {{if ne .Status "completed"}}
+        {{if and (ne .Status "completed") (not .Deleted)}}
         <button type="button" hx-post="/tasks/{{.ID}}/complete" hx-target="closest tr" hx-swap="outerHTML" class="btn-small">Complete</button>
         {{end}}
     </td>
