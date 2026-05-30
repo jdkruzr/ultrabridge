@@ -744,6 +744,15 @@
                   queueParts.push(b.done + ' done');
                   parts.push('Boox: ' + queueParts.join(', '));
                 }
+                if (data.forestnote) {
+                  var fn = data.forestnote;
+                  var fnParts = [];
+                  if (fn.in_flight > 0) fnParts.push('⚙ ' + fn.in_flight + ' in progress');
+                  if (fn.pending > 0) fnParts.push(fn.pending + ' queued');
+                  if (fn.dropped > 0) fnParts.push(fn.dropped + ' dropped');
+                  fnParts.push(fn.processed + ' done');
+                  parts.push('FN: ' + fnParts.join(', '));
+                }
                 el.textContent = parts.join(' | ');
               }
 
@@ -763,6 +772,17 @@
                 }
                 if (data.pending_count > 0 || data.in_flight_count > 0) {
                   gParts.push('SN: ' + data.pending_count + ' queued');
+                }
+                if (data.forestnote) {
+                  var fn = data.forestnote;
+                  // Show FN only when there's actual ongoing work — the
+                  // global bar should disappear when idle, matching SN/Boox.
+                  if (fn.in_flight > 0 || fn.pending > 0) {
+                    var fnSegments = ['FN:'];
+                    if (fn.in_flight > 0) fnSegments.push(fn.in_flight + ' in progress');
+                    if (fn.pending > 0) fnSegments.push(fn.pending + ' queued');
+                    gParts.push(fnSegments.join(' '));
+                  }
                 }
                 if (gParts.length > 0) {
                   gs.textContent = gParts.join(' | ');

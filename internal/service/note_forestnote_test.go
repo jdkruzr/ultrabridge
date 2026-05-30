@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sysop/ultrabridge/internal/search"
+	"github.com/sysop/ultrabridge/internal/syncbridge"
 	"github.com/sysop/ultrabridge/internal/syncstore"
 )
 
@@ -187,6 +188,7 @@ func TestListForestNotePages_BuildsPaths(t *testing.T) {
 type fakeReprocessor struct {
 	called []string
 	err    error
+	status syncbridge.Status // returned by Status(); zero value is fine when caller doesn't care
 }
 
 func (f *fakeReprocessor) ReprocessNotebook(_ context.Context, nb string) error {
@@ -198,6 +200,8 @@ func (f *fakeReprocessor) EditTextBox(_ context.Context, boxID, _ string) error 
 	f.called = append(f.called, "edit:"+boxID)
 	return f.err
 }
+
+func (f *fakeReprocessor) Status() syncbridge.Status { return f.status }
 
 func TestListForestNoteFolder_EntriesAndStatus(t *testing.T) {
 	r := &fakeFNReader{
@@ -354,4 +358,70 @@ func TestBuildForestNoteTree_NestingAndUnfiled(t *testing.T) {
 	if len(unfiled) != 2 {
 		t.Errorf("unfiled = %+v, want 2 (loose + orphan)", unfiled)
 	}
+}
+
+
+// TestGetProcessorStatus_PopulatesForestNoteWhenWired verifies that when a
+// ForestNoteReprocessor is wired and its bridge has non-zero state (or even
+// just a non-zero capacity), GetProcessorStatus surfaces a ForestNote block
+// on the response. Mirrors the Boox pattern. Tested separately from the
+// "no source wired" case because the JSON omitempty hides the field
+// entirely when the source isn't live.
+func TestGetProcessorStatus_PopulatesForestNoteWhenWired(t *testing.T) {
+	t.Run("populated when bridge reports activity", func(t *testing.T) {
+		s := &noteService{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		s.SetForestNoteReprocessor(&fakeReprocessor{
+			status: syncbridge.Status{
+				Pending:   7,
+				InFlight:  1,
+				Processed: 42,
+				Dropped:   0,
+				Capacity:  256,
+			},
+		})
+		got, err := s.GetProcessorStatus(context.Background())
+		if err != nil {
+			t.Fatalf("GetProcessorStatus: %v", err)
+		}
+		if got.ForestNote == nil {
+			t.Fatal("ForestNote block should be populated when bridge has activity")
+		}
+		if got.ForestNote.Pending != 7 || got.ForestNote.InFlight != 1 ||
+			got.ForestNote.Processed != 42 || got.ForestNote.Capacity != 256 {
+			t.Errorf("ForestNote: got %+v", got.ForestNote)
+		}
+	})
+
+	t.Run("populated when bridge is fresh (Capacity>0, counters zero)", func(t *testing.T) {
+		// A just-started bridge has Capacity=256 but every counter at zero —
+		// the UI should still see the FN block so the operator knows the
+		// source is wired (even if there's no work yet).
+		s := &noteService{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		s.SetForestNoteReprocessor(&fakeReprocessor{
+			status: syncbridge.Status{Capacity: 256},
+		})
+		got, _ := s.GetProcessorStatus(context.Background())
+		if got.ForestNote == nil {
+			t.Errorf("ForestNote block should be present when Capacity>0; got nil")
+		}
+	})
+
+	t.Run("omitted when no reprocessor wired", func(t *testing.T) {
+		s := &noteService{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		got, _ := s.GetProcessorStatus(context.Background())
+		if got.ForestNote != nil {
+			t.Errorf("ForestNote block should be nil when no source wired; got %+v", got.ForestNote)
+		}
+	})
+
+	t.Run("omitted when bridge zero value (source not started)", func(t *testing.T) {
+		// fakeReprocessor.status is the zero value here — mimics what happens
+		// before the source's Start runs (bridge nil → Status() returns zero).
+		s := &noteService{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		s.SetForestNoteReprocessor(&fakeReprocessor{})
+		got, _ := s.GetProcessorStatus(context.Background())
+		if got.ForestNote != nil {
+			t.Errorf("ForestNote block should be nil when bridge is at zero value; got %+v", got.ForestNote)
+		}
+	})
 }

@@ -191,3 +191,13 @@ func (s *Source) ReprocessNotebook(ctx context.Context, notebookID string) error
 	}()
 	return nil
 }
+
+// Status returns the bridge's processing snapshot. Zero value when the
+// source hasn't been started — caller should treat that as "no work" rather
+// than as an error, since the UI polls this every few seconds.
+func (s *Source) Status() syncbridge.Status {
+	if s == nil || s.bridge == nil {
+		return syncbridge.Status{}
+	}
+	return s.bridge.Status()
+}

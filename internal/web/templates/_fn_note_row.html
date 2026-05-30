@@ -24,7 +24,8 @@
     <div style="display:inline-flex; gap: 0.25rem;">
       <a class="btn-small" href="/files/forestnote/export?notebook={{$e.ID}}">Download</a>
       <button type="button" class="btn-small"
-              hx-post="/files/forestnote/reprocess?notebook={{$e.ID}}" hx-swap="none">Re-OCR</button>
+              hx-post="/files/forestnote/reprocess?notebook={{$e.ID}}" hx-swap="none"
+              hx-on:htmx:after-request="if(event.detail.successful){ this.textContent='Queued ✓'; this.disabled=true; setTimeout(() => { this.textContent='Re-OCR'; this.disabled=false; }, 2500); updateProcessorStatus(); } else { this.textContent='Failed ✗'; setTimeout(() => { this.textContent='Re-OCR'; }, 2500); }">Re-OCR</button>
       <button type="button" class="btn-small" style="background: var(--status-text-failed);"
               hx-post="/files/forestnote/delete"
               hx-vals='{"notebook": "{{$e.ID}}", "back": "{{.FolderID}}"}'

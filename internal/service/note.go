@@ -107,6 +107,12 @@ type ForestNoteReprocessor interface {
 	// EditTextBox authors a server-side text-box edit (relayed to devices) and
 	// re-renders/re-indexes the affected page.
 	EditTextBox(ctx context.Context, boxID, newText string) error
+	// Status returns the sync bridge's current work snapshot for the
+	// /files/status poller. Counters are monotonic since process start; the
+	// caller diffs across polls if they want a rate. Implementations should
+	// return a zero value rather than erroring when the underlying bridge is
+	// nil (source not started).
+	Status() syncbridge.Status
 }
 
 type noteService struct {
@@ -1335,6 +1341,26 @@ func (s *noteService) GetProcessorStatus(ctx context.Context) (EmbeddingJobStatu
 			status.Boox = &booxStatus
 		} else {
 			s.logger.Error("failed to get boox queue status", "error", err)
+		}
+	}
+
+	// ForestNote sync-bridge counters surface here when a source is wired.
+	// Status() is safe to call when the underlying bridge is nil (returns the
+	// zero value); we only attach the block when there's an actual bridge,
+	// so the JSON omitempty hides the field for non-FN-wired deployments.
+	if s.fnReprocessor != nil {
+		bs := s.fnReprocessor.Status()
+		// Capacity==0 means the bridge was never constructed (zero value
+		// passthrough); treat as "no FN block to render" so the UI stays
+		// silent until the source is actually live.
+		if bs.Capacity > 0 || bs.Processed > 0 || bs.Dropped > 0 || bs.Pending > 0 || bs.InFlight > 0 {
+			status.ForestNote = &ForestNoteQueueStatus{
+				Pending:   bs.Pending,
+				InFlight:  bs.InFlight,
+				Processed: bs.Processed,
+				Dropped:   bs.Dropped,
+				Capacity:  bs.Capacity,
+			}
 		}
 	}
 
