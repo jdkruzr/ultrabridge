@@ -1,6 +1,6 @@
 # internal/service
 
-Last verified: 2026-05-30 (TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote)
+Last verified: 2026-05-30 (TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
 
 ## Purpose
 
@@ -47,10 +47,13 @@ all implemented by unexported structs and constructed via
 - **`SearchService`** — FTS5+vector hybrid search, vLLM-streamed
   chat (returns `<-chan ChatResponse` for SSE), embedding
   backfill. `HasEmbeddingPipeline()` gates the chat tab.
-  `Search(ctx, query, folder, sources)` runs through the `rag`
+  `Search(ctx, query, folder, sources, limit)` runs through the `rag`
   retriever (not the bare FTS index) and accepts a source-type
   facet (`supernote|boox|forestnote|digest`); each `SearchResult`
-  carries its `SourceType`.
+  carries its `SourceType`. The `limit` arg caps result count;
+  `limit <= 0` means "use service default" (20) and anything over
+  the ceiling (100) is clamped down server-side. Callers that don't
+  care should pass `0` rather than try to pick a default.
 - **`DigestService`** (`digest.go`) — read + delete surface over
   `digeststore` for the web Digests tab: `ListDigests(group, tag,
   page, perPage)` + `ListGroups`, plus `DeleteDigest(id)`. All-users

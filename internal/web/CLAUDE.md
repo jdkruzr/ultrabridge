@@ -1,6 +1,6 @@
 # internal/web
 
-Last verified: 2026-05-30 (REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted; legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback)
+Last verified: 2026-05-30 (REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted; legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
 
 ## REST v1 task API — write/read surface extensions (2026-05-29)
 
@@ -150,7 +150,7 @@ In addition to previously documented methods, `BooxStore` now includes:
 
 ### Search & Notes API (requires retriever)
 
-- `GET /api/search?q=...&folder=...&device=...&from=...&to=...&limit=...` -- hybrid search using SearchRetriever
+- `GET /api/search?q=...&folder=...&source=...&limit=...` -- hybrid search via `SearchService.Search`. `source` is repeated (`supernote|boox|forestnote|digest`; none = all). `limit` is optional: absent/0 → service default (20), positive integer above the ceiling → clamped to 100, non-integer or negative → treated as 0 (intentionally lenient — keeps the surface friendly to MCP callers that occasionally send the param stringly). Returns `400` only when `q` is empty.
 - `GET /api/notes/pages?path=...` -- fetch indexed content for a note (all pages)
 - `GET /api/notes/pages/image?path=...&page=...` -- render JPEG image for a page
 
