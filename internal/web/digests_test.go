@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sysop/ultrabridge/internal/digeststore"
 	"github.com/sysop/ultrabridge/internal/service"
 )
 
@@ -22,6 +23,14 @@ func (f *fakeDigestService) ListDigests(_ context.Context, _, _ string, _, _ int
 }
 func (f *fakeDigestService) ListGroups(_ context.Context) ([]service.DigestGroupView, error) {
 	return f.groups, nil
+}
+func (f *fakeDigestService) GetDigest(_ context.Context, id int64) (service.DigestView, error) {
+	for _, it := range f.items {
+		if it.ID == id {
+			return it, nil
+		}
+	}
+	return service.DigestView{}, digeststore.ErrNotFound
 }
 func (f *fakeDigestService) DeleteDigest(_ context.Context, id int64) error {
 	if f.deleteErr != nil {
@@ -109,5 +118,75 @@ func TestDigestsTab_NilServiceShowsNotice(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "device sync server") {
 		t.Errorf("expected disabled notice, got:\n%s", w.Body.String())
+	}
+}
+
+func TestDigestDetail_RendersAndLinks(t *testing.T) {
+	h := newTestHandler()
+	h.SetDigestService(&fakeDigestService{
+		items: []service.DigestView{{
+			ID: 5, Name: "Trip notes", Excerpt: "buy tickets", Comment: "call airline",
+			Tags: []string{"travel"}, SourceLabel: "Note", SourceType: 2,
+			SourcePath: "NOTE/Note/trip.note", HasHandwriting: true,
+		}},
+	})
+
+	// The list row links into the detail page.
+	listReq := httptest.NewRequest("GET", "/digests", nil)
+	listReq.Header.Set("HX-Request", "true")
+	listW := httptest.NewRecorder()
+	h.ServeHTTP(listW, listReq)
+	if !strings.Contains(listW.Body.String(), `hx-get="/digests/5"`) {
+		t.Errorf("digest row should link to /digests/5:\n%s", listW.Body.String())
+	}
+
+	// The detail page renders the full excerpt + comment + source path.
+	req := httptest.NewRequest("GET", "/digests/5", nil)
+	req.Header.Set("HX-Request", "true")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /digests/5 = %d; body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{"Trip notes", "buy tickets", "call airline", "NOTE/Note/trip.note"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("digest detail missing %q\n%s", want, body)
+		}
+	}
+	// No SPC file root wired in this handler → no source image (avoids a
+	// broken <img>), but the .mark note still shows.
+	if strings.Contains(body, `src="/digests/5/render"`) {
+		t.Errorf("expected no source image without an SPC file root")
+	}
+}
+
+func TestDigestDetail_NotFound(t *testing.T) {
+	h := newTestHandler()
+	h.SetDigestService(&fakeDigestService{items: []service.DigestView{{ID: 1}}})
+	req := httptest.NewRequest("GET", "/digests/999", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("GET /digests/999 = %d, want 404", w.Code)
+	}
+}
+
+func TestDigestRender_PDFOrMissingIs404(t *testing.T) {
+	h := newTestHandler()
+	h.SetSPCFileRoot(t.TempDir()) // root set, but the source file won't exist
+	h.SetDigestService(&fakeDigestService{
+		items: []service.DigestView{
+			{ID: 1, SourceType: 1, SourcePath: "doc.pdf"},           // PDF: unsupported
+			{ID: 2, SourceType: 2, SourcePath: "NOTE/missing.note"}, // Note, but absent on disk
+		},
+	})
+	for _, id := range []string{"1", "2"} {
+		req := httptest.NewRequest("GET", "/digests/"+id+"/render", nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("GET /digests/%s/render = %d, want 404", id, w.Code)
+		}
 	}
 }

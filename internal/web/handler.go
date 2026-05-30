@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -67,6 +68,7 @@ type Handler struct {
 	notesPathPrefix string
 	booxNotesPath   string
 	booxImportPath  string
+	spcFileRoot     string // UB-as-SPC file tree root; resolves digest source paths (set via SetSPCFileRoot)
 	tmpl            *template.Template
 	mux             *http.ServeMux
 	logger          *slog.Logger
@@ -305,6 +307,8 @@ func NewHandler(
 	h.mux.HandleFunc("POST /files/forestnote/reprocess", h.handleForestNoteReprocess)
 	h.mux.HandleFunc("GET /files/forestnote/export", h.handleForestNoteExport)
 	h.mux.HandleFunc("GET /digests", h.handleDigests)
+	h.mux.HandleFunc("GET /digests/{id}", h.handleDigestDetail)
+	h.mux.HandleFunc("GET /digests/{id}/render", h.handleDigestRender)
 	h.mux.HandleFunc("DELETE /digests/{id}", h.handleDeleteDigest)
 	h.mux.HandleFunc("GET /search", h.handleSearch)
 	h.mux.HandleFunc("POST /files/queue", h.handleFilesQueue)
@@ -383,6 +387,14 @@ func NewHandler(
 // A setter (not a constructor arg) keeps the many NewHandler call sites stable.
 func (h *Handler) SetDigestService(d service.DigestService) {
 	h.digests = d
+}
+
+// SetSPCFileRoot wires the UB-as-SPC file-tree root used to resolve a digest's
+// device-relative SourcePath into an on-disk note for the digest render route.
+// Set from main alongside SetDigestService (both SPC-server-mode only); a setter
+// keeps the NewHandler call sites stable.
+func (h *Handler) SetSPCFileRoot(root string) {
+	h.spcFileRoot = root
 }
 
 func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, name string, data map[string]interface{}) {
@@ -817,6 +829,99 @@ func (h *Handler) handleDeleteDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.respondEmptyOrRedirect(w, r, "/digests")
+}
+
+// handleDigestDetail renders the in-tab detail page for one digest: full
+// (untruncated) excerpt, the OCR'd handwriting comment, group/tags/dates, and
+// a rendered image of the source page the excerpt came from.
+func (h *Handler) handleDigestDetail(w http.ResponseWriter, r *http.Request) {
+	if h.digests == nil {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad digest id", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	d, err := h.digests.GetDigest(ctx, id)
+	if err != nil {
+		if errors.Is(err, digeststore.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		h.logger.Error("get digest", "id", id, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	// A source image is available only for Note digests whose source .note we
+	// can resolve under the SPC file root (PDF digests render text-only).
+	hasImage := d.SourceType == 2 && h.digestSourceAbsPath(d.SourcePath) != ""
+	data := map[string]interface{}{
+		"activeTab": "digests",
+		"digest":    d,
+		"hasImage":  hasImage,
+	}
+	h.renderTemplate(w, r, "digest_detail", data)
+}
+
+// handleDigestRender streams the source note page a digest excerpt came from,
+// reusing the Supernote render path. Baseline: Note digests only (the .mark
+// handwriting blob — RATTA_RLE — is not yet decoded; see the Phase 4 plan).
+func (h *Handler) handleDigestRender(w http.ResponseWriter, r *http.Request) {
+	if h.digests == nil {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad digest id", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	d, err := h.digests.GetDigest(ctx, id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	abs := h.digestSourceAbsPath(d.SourcePath)
+	if d.SourceType != 2 || abs == "" {
+		http.NotFound(w, r) // PDF digest, or source not resolvable/present
+		return
+	}
+	// NOTE: NotePage is treated as a 0-based ordinal (see service.parseNotePage);
+	// if hardware shows the device numbers pages from 1, subtract one here.
+	stream, contentType, err := h.notes.RenderPage(ctx, abs, d.NotePage)
+	if err != nil {
+		h.logger.Error("digest render", "id", id, "path", abs, "page", d.NotePage, "error", err)
+		http.Error(w, "render failed", http.StatusInternalServerError)
+		return
+	}
+	defer stream.Close()
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	io.Copy(w, stream)
+}
+
+// digestSourceAbsPath resolves a digest's device-relative SourcePath (e.g.
+// "NOTE/Note/foo.note") to an absolute path under the SPC file root, or "" if
+// the root is unset, the path escapes the root, or the file is missing.
+func (h *Handler) digestSourceAbsPath(sourcePath string) string {
+	if h.spcFileRoot == "" || sourcePath == "" {
+		return ""
+	}
+	rel, ok := safeRelPath(strings.TrimPrefix(sourcePath, "/"))
+	if !ok {
+		return ""
+	}
+	abs := filepath.Join(h.spcFileRoot, rel)
+	if fi, err := os.Stat(abs); err != nil || fi.IsDir() {
+		return ""
+	}
+	return abs
 }
 
 func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {

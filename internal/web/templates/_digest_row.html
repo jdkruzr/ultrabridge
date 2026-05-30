@@ -1,7 +1,7 @@
 {{define "_digest_row"}}
 <tr>
   <td>
-    <div class="text-bold">{{if .Name}}{{.Name}}{{else}}(untitled){{end}}{{if .HasHandwriting}} <span title="Has handwritten annotation">✎</span>{{end}}</div>
+    <div class="text-bold"><a href="/digests/{{.ID}}" hx-get="/digests/{{.ID}}" hx-target="#main-content" hx-push-url="true">{{if .Name}}{{.Name}}{{else}}(untitled){{end}}</a>{{if .HasHandwriting}} <span title="Has handwritten annotation">✎</span>{{end}}</div>
     {{if .Excerpt}}<div class="text-small" style="color:var(--text-secondary); white-space:normal; max-width:48rem;">{{.Excerpt}}</div>{{end}}
     {{if .Comment}}<div class="text-small" style="color:var(--text-muted); white-space:normal;">✎ {{.Comment}}</div>{{end}}
   </td>

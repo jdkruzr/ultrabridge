@@ -427,6 +427,12 @@ type DigestView struct {
 	HasHandwriting bool     `json:"has_handwriting"` // a .mark annotation exists
 	CreatedAt      int64    `json:"created_at"`      // millis UTC
 	ModifiedAt     int64    `json:"modified_at"`     // millis UTC
+
+	// Detail-view fields (surfaced by GetDigest for the digest detail page).
+	SourcePath         string `json:"source_path,omitempty"`          // device-relative source doc, e.g. "NOTE/Note/foo.note"
+	SourceType         int    `json:"source_type,omitempty"`          // 1=PDF, 2=Note
+	HandwriteInnerName string `json:"handwrite_inner_name,omitempty"` // .mark blob filename under <SPCFileRoot>/.digests, if any
+	NotePage           int    `json:"note_page,omitempty"`            // page ordinal the excerpt came from (from metadata.note_page)
 }
 
 // DigestGroupView is a digest group/library, used for the filter pills.
@@ -441,6 +447,9 @@ type DigestGroupView struct {
 type DigestService interface {
 	ListDigests(ctx context.Context, group, tag string, page, perPage int) ([]DigestView, int, error)
 	ListGroups(ctx context.Context) ([]DigestGroupView, error)
+	// GetDigest returns one digest with detail-view fields populated, or the
+	// store's ErrNotFound. Backs the GET /digests/{id} detail page.
+	GetDigest(ctx context.Context, id int64) (DigestView, error)
 	// DeleteDigest soft-deletes a digest and propagates the delete to the device
 	// via a durable DELETE_DIGEST tombstone (D2).
 	DeleteDigest(ctx context.Context, id int64) error

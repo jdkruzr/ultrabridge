@@ -1,0 +1,63 @@
+<!-- Digest Detail -->
+<div id="digests" class="tab-content active">
+  <div class="toolbar">
+    <a class="btn-small" href="/digests" hx-get="/digests" hx-target="#main-content" hx-push-url="true">← Digests</a>
+    <span class="text-bold" style="margin-left: 0.5rem;">{{if .digest.Name}}{{.digest.Name}}{{else}}(untitled){{end}}</span>
+    <div class="flex-spacer"></div>
+    <button class="btn btn-small btn-danger"
+            hx-delete="/digests/{{.digest.ID}}" hx-swap="none"
+            hx-on:htmx:after-request="if(event.detail.successful){window.location='/digests';}"
+            hx-confirm="Delete this digest? It will be removed from this device too.">Delete</button>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; flex-wrap: wrap; gap: 1.25rem; margin-bottom: 0.75rem;">
+      {{if .digest.SourceLabel}}<span><span class="text-secondary">Source:</span> {{.digest.SourceLabel}}</span>{{end}}
+      {{if .digest.Group}}<span><span class="text-secondary">Group:</span> {{.digest.Group}}</span>{{end}}
+      <span><span class="text-secondary">Created:</span> {{formatTimestamp .digest.CreatedAt}}</span>
+      <span><span class="text-secondary">Modified:</span> {{formatTimestamp .digest.ModifiedAt}}</span>
+      {{if .digest.SourcePath}}<span><span class="text-secondary">From:</span> {{.digest.SourcePath}}</span>{{end}}
+    </div>
+
+    {{if .digest.Tags}}
+    <div style="margin-bottom: 0.75rem;">
+      {{range .digest.Tags}}<a href="/digests?tag={{. | urlquery}}" hx-get="/digests?tag={{. | urlquery}}" hx-target="#main-content" hx-push-url="true" class="pill">{{.}}</a>{{end}}
+    </div>
+    {{end}}
+
+    <div class="digest-detail-body">
+      {{if .hasImage}}
+      <figure class="digest-detail-img">
+        <img src="/digests/{{.digest.ID}}/render" alt="Source page" onerror="this.closest('figure').style.display='none'">
+        <figcaption class="text-small text-secondary">Source page</figcaption>
+      </figure>
+      {{end}}
+      <div class="digest-detail-text">
+        {{if .digest.Excerpt}}
+        <h4 style="margin: 0 0 0.25rem;">Excerpt</h4>
+        <div style="white-space: pre-wrap;">{{.digest.Excerpt}}</div>
+        {{end}}
+        {{if .digest.Comment}}
+        <h4 style="margin: 1rem 0 0.25rem;">✎ Handwriting (recognized)</h4>
+        <div style="white-space: pre-wrap;">{{.digest.Comment}}</div>
+        {{end}}
+        {{if and .digest.HasHandwriting (not .digest.Comment)}}
+        <p class="text-small text-secondary" style="margin-top: 0.75rem;">A handwritten annotation is attached, but no recognized text accompanied it.</p>
+        {{end}}
+        {{if .digest.HasHandwriting}}
+        <p class="text-small text-secondary" style="margin-top: 0.75rem;">Rendering the handwriting strokes themselves (the <code>.mark</code> blob) is not yet supported; the recognized text is shown above{{if .hasImage}} and the source page at left{{end}}.</p>
+        {{end}}
+        {{if and (not .digest.Excerpt) (not .digest.Comment)}}
+        <p class="text-secondary">This digest has no saved text.</p>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .digest-detail-body { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start; }
+  .digest-detail-img { margin: 0; flex: 0 0 auto; max-width: 45%; }
+  .digest-detail-img img { max-width: 100%; height: auto; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background: #fff; }
+  .digest-detail-text { flex: 1; min-width: 16rem; }
+</style>
