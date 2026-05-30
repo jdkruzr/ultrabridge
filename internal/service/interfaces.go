@@ -274,11 +274,17 @@ type TaskService interface {
 	Update(ctx context.Context, id string, patch TaskPatch) (Task, error)
 	Complete(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
-	PurgeCompleted(ctx context.Context) error
+	// PurgeCompleted soft-deletes every completed task. Returns the count
+	// affected so callers (REST handler, MCP tool) can surface "Soft-deleted
+	// N completed task(s)." rather than the previous opaque all-or-nothing
+	// success.
+	PurgeCompleted(ctx context.Context) (int64, error)
 	// PurgeDeleted hard-deletes soft-deleted rows whose last_modified is older
-	// than olderThanDays. Returns the count removed. Irreversible — used to
-	// keep the ghost backlog bounded after long retention.
-	PurgeDeleted(ctx context.Context, olderThanDays int) (int64, error)
+	// than olderThanDays. Returns (purged, skipped, error) — skipped counts
+	// rows that were soft-deleted but inside the safety window (too recent),
+	// so a caller can tell "0 purged because nothing was eligible" apart from
+	// "0 purged because the gate broke." Irreversible.
+	PurgeDeleted(ctx context.Context, olderThanDays int) (purged, skipped int64, err error)
 	BulkComplete(ctx context.Context, ids []string) error
 	BulkDelete(ctx context.Context, ids []string) error
 }

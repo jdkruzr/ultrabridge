@@ -682,13 +682,17 @@ func TestStore_HardDeleteOlderThan_RespectsAgeAndDeletedFlag(t *testing.T) {
 	}
 
 	// Cutoff 30 days ago: only "d-deleted-ancient" matches both predicates.
+	// "c-deleted-recent" is soft-deleted but inside the window → counted as skipped.
 	cutoff := now - 30*dayMs
-	removed, err := store.HardDeleteOlderThan(ctx, cutoff)
+	purged, skipped, err := store.HardDeleteOlderThan(ctx, cutoff)
 	if err != nil {
 		t.Fatalf("HardDeleteOlderThan: %v", err)
 	}
-	if removed != 1 {
-		t.Errorf("removed: got %d, want 1", removed)
+	if purged != 1 {
+		t.Errorf("purged: got %d, want 1", purged)
+	}
+	if skipped != 1 {
+		t.Errorf("skipped: got %d, want 1 (c-deleted-recent inside window)", skipped)
 	}
 
 	// Confirm survivors are physically present (querying including deleted).
@@ -735,12 +739,18 @@ func TestStore_HardDeleteOlderThan_NoMatchesReturnsZero(t *testing.T) {
 	}
 
 	cutoff := now - int64(30*24*60*60*1000)
-	removed, err := store.HardDeleteOlderThan(ctx, cutoff)
+	purged, skipped, err := store.HardDeleteOlderThan(ctx, cutoff)
 	if err != nil {
 		t.Fatalf("HardDeleteOlderThan: %v", err)
 	}
-	if removed != 0 {
-		t.Errorf("removed: got %d, want 0", removed)
+	if purged != 0 {
+		t.Errorf("purged: got %d, want 0", purged)
+	}
+	// recent-ghost is the lone soft-deleted row, and it's inside the 30-day
+	// window → counted as skipped, NOT purged. Confirms the response
+	// disambiguates "the gate is doing its job" from "the gate is broken."
+	if skipped != 1 {
+		t.Errorf("skipped: got %d, want 1 (recent-ghost inside window)", skipped)
 	}
 }
 

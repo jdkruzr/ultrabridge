@@ -178,14 +178,30 @@ func (s *Store) DeleteCompleted(ctx context.Context) (int64, error) {
 // Doesn't VACUUM — that's an explicit maintenance operation and we don't
 // want to hold a write lock for it inside the request path. Space gets
 // reclaimed by SQLite incrementally; the freed rows are gone immediately.
-func (s *Store) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (int64, error) {
+// HardDeleteOlderThan permanently removes soft-deleted rows older than the
+// cutoff and returns (purged, skipped, error). Skipped is the count of rows
+// that were eligible by virtue of being soft-deleted but were too recent to
+// purge (inside the safety window) — surfaced so callers can distinguish
+// "the gate works and there was nothing to do" from "the gate is broken
+// and silently skipped everything." Pre-counted in the same transaction
+// scope as the DELETE to avoid race-window drift between the two queries.
+func (s *Store) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged, skipped int64, err error) {
+	if err = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE is_deleted = 'Y' AND last_modified >= ?`,
+		cutoffMs).Scan(&skipped); err != nil {
+		return 0, 0, fmt.Errorf("count skipped tasks at cutoff %d: %w", cutoffMs, err)
+	}
 	result, err := s.db.ExecContext(ctx,
 		`DELETE FROM tasks WHERE is_deleted = 'Y' AND last_modified < ?`,
 		cutoffMs)
 	if err != nil {
-		return 0, fmt.Errorf("hard delete tasks older than %d: %w", cutoffMs, err)
+		return 0, 0, fmt.Errorf("hard delete tasks older than %d: %w", cutoffMs, err)
 	}
-	return result.RowsAffected()
+	purged, err = result.RowsAffected()
+	if err != nil {
+		return 0, skipped, fmt.Errorf("rows affected: %w", err)
+	}
+	return purged, skipped, nil
 }
 
 // IsEmpty returns true if the task store has no tasks (including deleted ones).

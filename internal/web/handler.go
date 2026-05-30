@@ -942,7 +942,12 @@ func (h *Handler) handleBulkAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handlePurgeCompleted(w http.ResponseWriter, r *http.Request) {
-	if err := h.tasks.PurgeCompleted(r.Context()); err != nil {
+	// Legacy form route — keeps the empty-200 / 303 shape the web UI
+	// expects. The count returned by PurgeCompleted is intentionally
+	// discarded here; the page reloads / DOM-sweeps anyway. The
+	// /api/v1/tasks/purge-completed path is the one that returns
+	// {"deleted": N} for MCP/CLI callers.
+	if _, err := h.tasks.PurgeCompleted(r.Context()); err != nil {
 		http.Error(w, "purge failed", http.StatusInternalServerError)
 		return
 	}
@@ -964,7 +969,7 @@ const webPurgeDeletedDays = 30
 // HTMX response is empty 200; non-HX is a redirect home so a plain browser
 // also gets sensible behavior. Matches handlePurgeCompleted's pattern.
 func (h *Handler) handlePurgeDeleted(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.tasks.PurgeDeleted(r.Context(), webPurgeDeletedDays); err != nil {
+	if _, _, err := h.tasks.PurgeDeleted(r.Context(), webPurgeDeletedDays); err != nil {
 		http.Error(w, "purge failed", http.StatusInternalServerError)
 		return
 	}

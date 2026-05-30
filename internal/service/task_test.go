@@ -71,15 +71,19 @@ func (m *mockTaskStore) DeleteCompleted(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-func (m *mockTaskStore) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (int64, error) {
-	var count int64
+func (m *mockTaskStore) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged, skipped int64, err error) {
 	for id, t := range m.tasks {
-		if t.IsDeleted == "Y" && t.LastModified.Valid && t.LastModified.Int64 < cutoffMs {
+		if t.IsDeleted != "Y" || !t.LastModified.Valid {
+			continue
+		}
+		if t.LastModified.Int64 < cutoffMs {
 			delete(m.tasks, id)
-			count++
+			purged++
+		} else {
+			skipped++
 		}
 	}
-	return count, nil
+	return purged, skipped, nil
 }
 
 type mockNotifier struct {
@@ -479,12 +483,15 @@ func TestTaskService_PurgeDeleted(t *testing.T) {
 		}}
 		svc := &taskService{store: store}
 
-		removed, err := svc.PurgeDeleted(ctx, 30)
+		purged, skipped, err := svc.PurgeDeleted(ctx, 30)
 		if err != nil {
 			t.Fatalf("PurgeDeleted: %v", err)
 		}
-		if removed != 1 {
-			t.Errorf("removed: got %d, want 1", removed)
+		if purged != 1 {
+			t.Errorf("purged: got %d, want 1", purged)
+		}
+		if skipped != 1 {
+			t.Errorf("skipped: got %d, want 1 (the recent-ghost row)", skipped)
 		}
 		if _, present := store.tasks["ancient-ghost"]; present {
 			t.Error("ancient-ghost should have been hard-deleted")
@@ -500,7 +507,7 @@ func TestTaskService_PurgeDeleted(t *testing.T) {
 	t.Run("zero or negative days is rejected", func(t *testing.T) {
 		svc := &taskService{store: &mockTaskStore{tasks: map[string]taskstore.Task{}}}
 		for _, days := range []int{0, -1, -30} {
-			if _, err := svc.PurgeDeleted(ctx, days); err == nil {
+			if _, _, err := svc.PurgeDeleted(ctx, days); err == nil {
 				t.Errorf("PurgeDeleted(%d) should return error, got nil", days)
 			}
 		}
@@ -508,12 +515,12 @@ func TestTaskService_PurgeDeleted(t *testing.T) {
 
 	t.Run("nil store is a no-op", func(t *testing.T) {
 		svc := &taskService{store: nil}
-		removed, err := svc.PurgeDeleted(ctx, 30)
+		purged, skipped, err := svc.PurgeDeleted(ctx, 30)
 		if err != nil {
 			t.Errorf("nil-store PurgeDeleted should not error: %v", err)
 		}
-		if removed != 0 {
-			t.Errorf("nil-store removed: got %d, want 0", removed)
+		if purged != 0 || skipped != 0 {
+			t.Errorf("nil-store counts: got purged=%d skipped=%d, want 0/0", purged, skipped)
 		}
 	})
 
@@ -523,7 +530,7 @@ func TestTaskService_PurgeDeleted(t *testing.T) {
 			store:    &mockTaskStore{tasks: map[string]taskstore.Task{}},
 			notifier: notifier,
 		}
-		if _, err := svc.PurgeDeleted(ctx, 30); err != nil {
+		if _, _, err := svc.PurgeDeleted(ctx, 30); err != nil {
 			t.Fatalf("PurgeDeleted: %v", err)
 		}
 		if notifier.notified != 0 {
@@ -534,7 +541,7 @@ func TestTaskService_PurgeDeleted(t *testing.T) {
 	t.Run("propagates store error", func(t *testing.T) {
 		base := &mockTaskStore{tasks: map[string]taskstore.Task{}}
 		svc := &taskService{store: &errStore{TaskStore: base, err: errors.New("disk full")}}
-		if _, err := svc.PurgeDeleted(ctx, 30); err == nil || err.Error() != "disk full" {
+		if _, _, err := svc.PurgeDeleted(ctx, 30); err == nil || err.Error() != "disk full" {
 			t.Errorf("expected disk-full error, got %v", err)
 		}
 	})
@@ -547,8 +554,8 @@ type errStore struct {
 	err error
 }
 
-func (e *errStore) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (int64, error) {
-	return 0, e.err
+func (e *errStore) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged, skipped int64, err error) {
+	return 0, 0, e.err
 }
 
 

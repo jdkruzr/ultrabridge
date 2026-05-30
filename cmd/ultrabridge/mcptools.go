@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -169,6 +170,48 @@ type mcpTaskLink struct {
 	Page     int    `json:"page"`
 }
 
+// mcpNativeDeepLink mirrors the Supernote/Viwoods native deep-link blob
+// stuffed into the URL field on device-created tasks. See the standalone
+// ub-mcp/tasks.go for the full rationale; both surfaces decode it for the
+// same reason (avoid dumping base64 walls into LLM context).
+type mcpNativeDeepLink struct {
+	AppName  string `json:"appName"`
+	FileID   string `json:"fileId"`
+	FilePath string `json:"filePath"`
+	Page     int    `json:"page"`
+	PageID   string `json:"pageId"`
+	Filename string `json:"-"`
+}
+
+// decodeMCPNativeDeepLink is the in-process MCP twin of decodeNativeDeepLink
+// in cmd/ub-mcp/tasks.go. Kept separate to preserve the package boundary
+// between the two MCP surfaces (no shared internal package for this) — the
+// duplication is documented in cmd/ub-mcp/CLAUDE.md's "two surfaces" note.
+func decodeMCPNativeDeepLink(raw string) (mcpNativeDeepLink, bool) {
+	if !strings.HasPrefix(raw, "eyJ") {
+		return mcpNativeDeepLink{}, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return mcpNativeDeepLink{}, false
+	}
+	var dl mcpNativeDeepLink
+	if err := json.Unmarshal(decoded, &dl); err != nil {
+		return mcpNativeDeepLink{}, false
+	}
+	if dl.AppName == "" {
+		return mcpNativeDeepLink{}, false
+	}
+	if dl.FilePath != "" {
+		if i := strings.LastIndex(dl.FilePath, "/"); i >= 0 {
+			dl.Filename = dl.FilePath[i+1:]
+		} else {
+			dl.Filename = dl.FilePath
+		}
+	}
+	return dl, true
+}
+
 // mcpTaskForestNote mirrors service.TaskForestNote. Local copy keeps this
 // file decoupled from internal/service.
 type mcpTaskForestNote struct {
@@ -216,7 +259,20 @@ func formatMCPTask(t mcpTask) string {
 		sb.WriteString(fmt.Sprintf("Priority: %s\n", *t.Priority))
 	}
 	if t.URL != nil && *t.URL != "" {
-		sb.WriteString(fmt.Sprintf("URL: %s\n", *t.URL))
+		// Friendly-decode the Supernote/Viwoods native deep-link blob (see
+		// decodeMCPNativeDeepLink) so list_tasks doesn't dump a wall of
+		// base64 into the LLM context. Falls through to the bare URL when
+		// the value isn't a recognized native-deep-link payload.
+		if dl, ok := decodeMCPNativeDeepLink(*t.URL); ok && dl.Filename != "" {
+			if dl.Page > 0 {
+				sb.WriteString(fmt.Sprintf("Source: %s (page %d)\n", dl.Filename, dl.Page))
+			} else {
+				sb.WriteString(fmt.Sprintf("Source: %s\n", dl.Filename))
+			}
+			sb.WriteString(fmt.Sprintf("URL (native deep-link, base64): %s\n", *t.URL))
+		} else {
+			sb.WriteString(fmt.Sprintf("URL: %s\n", *t.URL))
+		}
 	}
 	if len(t.Categories) > 0 {
 		sb.WriteString(fmt.Sprintf("Categories: %s\n", strings.Join(t.Categories, ", ")))
@@ -749,43 +805,12 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 	// purge_completed_tasks
 	mcp.AddTool[purgeCompletedTasksInput, any](server, &mcp.Tool{
 		Name:        "purge_completed_tasks",
-		Description: "Soft-delete every completed task in a single call. Housekeeping convenience for clearing the list after a review session. This is not reversible through the API.",
+		Description: "Soft-delete every completed task in a single call. Housekeeping convenience for clearing the list after a review session. Returns the count affected. This is not reversible through the API.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ purgeCompletedTasksInput) (*mcp.CallToolResult, any, error) {
 		if client.verbose && client.logger != nil {
 			client.logger.Info("MCP tool call", "tool", "purge_completed_tasks")
 		}
 		resp, err := client.postJSON(ctx, "/api/v1/tasks/purge-completed", nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("API request failed: %w", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 204 {
-			raw, _ := io.ReadAll(resp.Body)
-			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(raw))
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "All completed tasks purged.\n"}},
-		}, nil, nil
-	})
-
-	// purge_deleted_tasks — the *only* path that actually frees rows from
-	// the task store. Every other "delete" tombstones. Mirrors the same
-	// tool on the standalone cmd/ub-mcp binary so both MCP surfaces expose
-	// the same capability.
-	mcp.AddTool[purgeDeletedTasksInput, any](server, &mcp.Tool{
-		Name: "purge_deleted_tasks",
-		Description: "PERMANENTLY remove soft-deleted tasks older than older_than_days (default 30, must be > 0). " +
-			"This is the only operation that actually frees rows from the task store — every other 'delete' just tombstones. " +
-			"Irreversible. Returns the number of rows removed. Pair with list_tasks { include_deleted: true } to confirm what's eligible before running.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input purgeDeletedTasksInput) (*mcp.CallToolResult, any, error) {
-		if client.verbose && client.logger != nil {
-			client.logger.Info("MCP tool call", "tool", "purge_deleted_tasks", "input", input)
-		}
-		path := "/api/v1/tasks/purge-deleted"
-		if input.OlderThanDays > 0 {
-			path = fmt.Sprintf("%s?older_than_days=%d", path, input.OlderThanDays)
-		}
-		resp, err := client.postJSON(ctx, path, nil)
 		if err != nil {
 			return nil, nil, fmt.Errorf("API request failed: %w", err)
 		}
@@ -802,7 +827,55 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{
-				Text: fmt.Sprintf("Hard-purged %d soft-deleted task(s).\n", body.Deleted),
+				Text: fmt.Sprintf("Soft-deleted %d completed task(s).\n", body.Deleted),
+			}},
+		}, nil, nil
+	})
+
+	// purge_deleted_tasks — the *only* path that actually frees rows from
+	// the task store. Every other "delete" tombstones. Mirrors the same
+	// tool on the standalone cmd/ub-mcp binary so both MCP surfaces expose
+	// the same capability.
+	mcp.AddTool[purgeDeletedTasksInput, any](server, &mcp.Tool{
+		Name: "purge_deleted_tasks",
+		Description: "PERMANENTLY remove soft-deleted tasks older than older_than_days (default 30, must be > 0). " +
+			"This is the only operation that actually frees rows from the task store — every other 'delete' just tombstones. " +
+			"Irreversible. Returns purged and skipped counts; skipped means rows that were soft-deleted but inside the safety window. " +
+			"A '0 purged, N skipped' result confirms the age gate is working with nothing eligible — distinct from '0 purged, 0 skipped' which means there were no soft-deleted rows at all. " +
+			"Pair with list_tasks { include_deleted: true } to confirm what's eligible before running.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input purgeDeletedTasksInput) (*mcp.CallToolResult, any, error) {
+		if client.verbose && client.logger != nil {
+			client.logger.Info("MCP tool call", "tool", "purge_deleted_tasks", "input", input)
+		}
+		days := input.OlderThanDays
+		path := "/api/v1/tasks/purge-deleted"
+		if days > 0 {
+			path = fmt.Sprintf("%s?older_than_days=%d", path, days)
+		}
+		resp, err := client.postJSON(ctx, path, nil)
+		if err != nil {
+			return nil, nil, fmt.Errorf("API request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			raw, _ := io.ReadAll(resp.Body)
+			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(raw))
+		}
+		var body struct {
+			Deleted int64 `json:"deleted"`
+			Skipped int64 `json:"skipped"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return nil, nil, fmt.Errorf("decode response: %w", err)
+		}
+		windowDays := days
+		if windowDays == 0 {
+			windowDays = 30
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{
+				Text: fmt.Sprintf("Hard-purged %d task(s); %d skipped (newer than %d days).\n",
+					body.Deleted, body.Skipped, windowDays),
 			}},
 		}, nil, nil
 	})
