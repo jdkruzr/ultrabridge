@@ -158,6 +158,15 @@ type openAIRequest struct {
 	Model     string      `json:"model"`
 	MaxTokens int         `json:"max_tokens"`
 	Messages  []openAIMsg `json:"messages"`
+	// ChatTemplateKwargs is a vLLM extension to the OpenAI Chat Completions
+	// schema — passed through to the model's chat template at render time.
+	// We use it to suppress Qwen3's reasoning/thinking tokens for OCR
+	// (`enable_thinking: false`), which would otherwise produce hundreds of
+	// `<think>...</think>` tokens before the actual transcription. Non-vLLM
+	// OpenAI-compatible endpoints (OpenAI proper, OpenRouter) generally
+	// tolerate unknown JSON keys and treat this as a no-op. omitempty so we
+	// only ship it when explicitly populated.
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 }
 
 type openAIMsg struct {
@@ -196,6 +205,12 @@ func (c *OCRClient) recognizeOpenAI(ctx context.Context, jpegData []byte, prompt
 				{Type: "image_url", ImageURL: &openAIImgURL{URL: dataURL}},
 			},
 		}},
+		// Disable Qwen3's thinking tokens for OCR — the recognized text is
+		// the only thing we want back, and the `<think>...</think>` preamble
+		// adds latency, eats max_tokens budget, and pollutes the body when
+		// it occasionally fails to terminate cleanly. See struct comment for
+		// non-Qwen endpoint behavior.
+		ChatTemplateKwargs: map[string]any{"enable_thinking": false},
 	}
 
 	body, err := json.Marshal(reqBody)
