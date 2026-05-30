@@ -53,8 +53,9 @@ func TestDecodeNativeDeepLink_FailurePaths(t *testing.T) {
 	}
 }
 
-// TestDecodeNativeDeepLink_FilenameEdgeCases probes the inline pathBase
-// helper across separator/edge variants without standing up a full table.
+// TestDecodeNativeDeepLink_FilenameEdgeCases probes the inlined
+// last-segment extraction across separator/edge variants without standing
+// up a full table.
 func TestDecodeNativeDeepLink_FilenameEdgeCases(t *testing.T) {
 	cases := map[string]string{
 		"/foo/bar.note":  "bar.note",
