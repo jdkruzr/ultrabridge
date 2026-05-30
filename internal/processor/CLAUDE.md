@@ -1,6 +1,6 @@
 # Processor
 
-Last verified: 2026-04-08
+Last verified: 2026-05-30
 
 ## Purpose
 Background OCR job queue. Processes .note files through a pipeline of backup,
@@ -22,6 +22,7 @@ text extraction, optional vision-API OCR, RECOGNTEXT injection, search indexing,
   - `OCRFormatAnthropic` (`anthropic`): Anthropic Messages API `/v1/messages` — used with direct Anthropic API or OpenRouter
   - `OCRFormatOpenAI` (`openai`): OpenAI Chat Completions `/v1/chat/completions` — used with vLLM, Ollama, or any OpenAI-compatible endpoint
   - Configured via `UB_OCR_FORMAT`; defaults to `anthropic`
+  - OpenAI-format requests unconditionally include `chat_template_kwargs: {enable_thinking: false}` — a vLLM extension that suppresses Qwen3 reasoning tokens at chat-template render time. Strictness caveat: gateways vary in how they handle unknown top-level fields (OpenRouter / Together / LiteLLM / Groq / Fireworks / Ollama / OpenAI proper all differ, and OpenAI has been tightening param validation). If a strict endpoint starts 400-ing, fall back to `OCRFormatAnthropic` or drop the field; a config gate is the principled fix once a second vLLM-only feature shares it. Full rationale in the `openAIRequest.ChatTemplateKwargs` struct doc in `ocrclient.go`.
 - Two-source indexing: "myScript" (existing RECOGNTEXT) indexed first, then "api" (OCR result) overwrites
 - File reloaded after each page injection: .note format offsets shift when RECOGNTEXT is written
 - Standard-only injection: only notes with `FILE_RECOGN_TYPE=0` (Standard) get RECOGNTEXT injection; RTR notes (`FILE_RECOGN_TYPE=1`) are OCR'd and indexed but the file is NOT modified. Reason: device AUTO_CONVERT clobbers injected RECOGNTEXT on RTR notes ~40s after opening, and silently converting RTR→Standard removes the real-time recognition sidebar.
