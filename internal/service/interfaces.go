@@ -376,8 +376,9 @@ type SearchResult struct {
 // SearchService manages search and chat interactions.
 type SearchService interface {
 	// Search runs hybrid (FTS5 + vector) retrieval. sources filters by source
-	// type (empty = all); see rag.Source* constants for the values.
-	Search(ctx context.Context, query, folder string, sources []string) ([]SearchResult, error)
+	// type (empty = all); see rag.Source* constants for the values. limit caps
+	// the number of returned results (0 = service default; capped server-side).
+	Search(ctx context.Context, query, folder string, sources []string, limit int) ([]SearchResult, error)
 
 	// Chat (SSE stream)
 	Ask(ctx context.Context, question string, sessionID int) (<-chan ChatResponse, error)

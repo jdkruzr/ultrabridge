@@ -745,7 +745,14 @@ func main() {
 	// Wire MCP server at /mcp/ — speaks MCP protocol for Claude Web and other MCP clients.
 	// Tools proxy to the local JSON API using the same auth credentials.
 	{
-		mcpAPIClient := newMCPAPIClient("http://localhost"+bootstrapCfg.listenAddr, internalToken, logger, cfg.LogVerboseAPI)
+		// Public base URL is the same setting the Boox red-ink-TODO creator
+		// uses to absolute-link its task Details — reused here so search_notes
+		// deep-links survive the trip to a remote LLM consumer (otherwise the
+		// link points at the loopback API URL, which only works on the box).
+		// Empty fallback degrades gracefully — search_notes uses the loopback
+		// URL like before, with the documented "click only works on-host" caveat.
+		publicBaseURL, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyBooxExternalBaseURL)
+		mcpAPIClient := newMCPAPIClient("http://localhost"+bootstrapCfg.listenAddr, publicBaseURL, internalToken, logger, cfg.LogVerboseAPI)
 		mcpServer := mcp.NewServer(&mcp.Implementation{
 			Name:    "ultrabridge-notes",
 			Version: "1.0.0",

@@ -17,22 +17,43 @@ import (
 
 // mcpAPIClient calls UltraBridge's own JSON API endpoints using a
 // persistent internal bearer token for self-authentication.
+//
+// baseURL is the loopback API URL (e.g. "http://localhost:8443") used for
+// the underlying HTTP requests — that's what the binary actually talks to.
+// publicBaseURL is the externally-reachable URL of this deployment
+// (boox_external_base_url setting) — emitted into search_notes deep-links
+// so an LLM/remote consumer rendering the result can click through. When
+// publicBaseURL is empty, formatters fall back to baseURL (works only for
+// callers on the same host).
 type mcpAPIClient struct {
 	baseURL       string
+	publicBaseURL string
 	internalToken string
 	http          *http.Client
 	logger        *slog.Logger
 	verbose       bool
 }
 
-func newMCPAPIClient(baseURL string, internalToken string, logger *slog.Logger, verbose bool) *mcpAPIClient {
+func newMCPAPIClient(baseURL, publicBaseURL, internalToken string, logger *slog.Logger, verbose bool) *mcpAPIClient {
 	return &mcpAPIClient{
 		baseURL:       baseURL,
+		publicBaseURL: publicBaseURL,
 		internalToken: internalToken,
 		http:          &http.Client{},
 		logger:        logger,
 		verbose:       verbose,
 	}
+}
+
+// displayBaseURL returns the URL to use when building deep-links rendered
+// back to a human/LLM consumer. Prefers the public base when set; falls
+// back to the loopback baseURL when not (which means same-host clicks work
+// but remote clicks see localhost).
+func (c *mcpAPIClient) displayBaseURL() string {
+	if c.publicBaseURL != "" {
+		return strings.TrimRight(c.publicBaseURL, "/")
+	}
+	return c.baseURL
 }
 
 func (c *mcpAPIClient) get(ctx context.Context, path string) (*http.Response, error) {
@@ -308,7 +329,7 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		for i, r := range results {
 			sb.WriteString(fmt.Sprintf("--- Result %d ---\n", i+1))
 			sb.WriteString(fmt.Sprintf("Note: %s (page %d)\n", r.Path, r.Page))
-			detailURL := fmt.Sprintf("%s/files?detail=%s", client.baseURL, url.QueryEscape(r.Path))
+			detailURL := fmt.Sprintf("%s/files?detail=%s", client.displayBaseURL(), url.QueryEscape(r.Path))
 			sb.WriteString(fmt.Sprintf("URL: %s\n", detailURL))
 			sb.WriteString(fmt.Sprintf("Text:\n%s\n\n", r.Snippet))
 		}

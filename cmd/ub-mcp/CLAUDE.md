@@ -1,6 +1,6 @@
 # MCP Server (ub-mcp)
 
-Last verified: 2026-05-29 (task tools: ForestNote provenance + URL/Priority/Categories/Comment write surface + purge_deleted_tasks)
+Last verified: 2026-05-30 (search_notes deep-link host: UB_MCP_PUBLIC_URL env + displayBaseURL() helper mirrored across both MCP surfaces; task tools: ForestNote provenance + URL/Priority/Categories/Comment write surface + purge_deleted_tasks)
 
 ## Purpose
 Model Context Protocol server that exposes UltraBridge note search and retrieval
@@ -26,6 +26,18 @@ shapes are mirrored intentionally (the in-process file keeps local
 import `internal/service`). Drift between the two is a contract bug,
 not a refactor opportunity.
 
+This applies to deep-link formatting too: both `apiClient` (sidecar) and
+`mcpAPIClient` (in-process) carry a `publicBaseURL` field plus a
+`displayBaseURL()` helper that returns `publicBaseURL` when set and the
+loopback `baseURL` otherwise. `search_notes` (and any future tool that
+emits a clickable URL into the response stream) must build its
+`detailURL` from `client.displayBaseURL()` — never `client.baseURL` —
+or remote LLM consumers will see a loopback link they can't follow.
+The in-process surface populates `publicBaseURL` from the
+`KeyBooxExternalBaseURL` setting (same value the Boox red-ink-TODO
+creator uses); the standalone surface populates it from
+`UB_MCP_PUBLIC_URL`.
+
 ## Dependencies
 - **Uses**: `github.com/modelcontextprotocol/go-sdk/mcp` (MCP server framework), UltraBridge JSON API (notes: `/api/search`, `/api/notes/pages`, `/api/notes/pages/image`; forestnote: `GET /api/forestnote/text-boxes?notebook=`, `POST /api/forestnote/text-boxes/edit`; tasks: `/api/v1/tasks`, `/api/v1/tasks/{id}`, `/api/v1/tasks/{id}/complete`, `/api/v1/tasks/purge-completed`).
 - **Used by**: AI agents via MCP protocol
@@ -37,7 +49,8 @@ not a refactor opportunity.
 - Dual transport: stdio for Claude Desktop integration, HTTP SSE for network-accessible deployment
 
 ## Config
-- `UB_MCP_API_URL` -- UltraBridge API base URL (default http://localhost:8443)
+- `UB_MCP_API_URL` -- UltraBridge API base URL (default http://localhost:8443). What the binary actually talks to over HTTP.
+- `UB_MCP_PUBLIC_URL` -- Externally-reachable URL of the UltraBridge deployment (e.g. `https://ub.example.com`). Used only for deep-link formatting in tool output (currently `search_notes`); empty falls back to `UB_MCP_API_URL`, which works for same-host clicks but emits a loopback URL that remote LLM consumers can't follow. Set this when the sidecar talks to a loopback or container-internal `UB_MCP_API_URL`. The in-process MCP (`cmd/ultrabridge/main.go`) reads the same value from the `boox_external_base_url` setting instead of an env var — the setting is shared with the Boox red-ink-TODO task creator.
 - `UB_MCP_API_TOKEN` -- DB-backed MCP bearer token (created in UB Settings → MCP Tokens). When set, the API client sends `Authorization: Bearer <token>` and takes precedence over Basic Auth; lets the sidecar run without a plaintext password.
 - `UB_MCP_API_USER` -- Basic Auth username (fallback when no token set)
 - `UB_MCP_API_PASS` -- Basic Auth password (fallback when no token set)

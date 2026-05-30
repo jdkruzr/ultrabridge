@@ -55,7 +55,7 @@ func callTaskTool(t *testing.T, server *mcp.Server, toolName string, input inter
 
 // Builds a server with the task tools registered against a given API base.
 func newTaskTestServer(baseURL string) *mcp.Server {
-	client := newAPIClient(baseURL, "", "", "")
+	client := newAPIClient(baseURL, "", "", "", "")
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
 	registerTools(server, client)
 	return server

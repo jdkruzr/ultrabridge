@@ -401,9 +401,18 @@ type mockSearchService struct {
 
 	embeddingPipelineConfigured bool
 	chatEnabled                 bool
+
+	// lastLimit captures the limit value passed to Search for tests that
+	// want to assert the param plumbing. Zero value when nothing called
+	// Search or when the caller passed 0 (service-default).
+	lastLimit int
 }
 
-func (m *mockSearchService) Search(ctx context.Context, query, folder string, sources []string) ([]service.SearchResult, error) {
+func (m *mockSearchService) Search(ctx context.Context, query, folder string, sources []string, limit int) ([]service.SearchResult, error) {
+	// Tests don't observe limit today; capture it on the mock if a future
+	// test wants to assert it was threaded through (left at zero value
+	// otherwise so existing assertions keep working).
+	m.lastLimit = limit
 	return m.results, nil
 }
 func (m *mockSearchService) Ask(ctx context.Context, question string, sessionID int) (<-chan service.ChatResponse, error) {

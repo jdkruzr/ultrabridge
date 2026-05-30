@@ -41,11 +41,18 @@ func main() {
 	if apiURL == "" {
 		apiURL = "http://localhost:8443"
 	}
+	// UB_MCP_PUBLIC_URL is the externally-reachable host this UltraBridge
+	// deployment is served from (e.g. https://ub.example.com). Used by
+	// search_notes etc. to build deep-links a remote LLM can click. Empty
+	// falls back to apiURL — same-host clicks work, remote clicks see the
+	// loopback bind. Set this when the standalone MCP runs against a
+	// loopback or container-internal apiURL.
+	publicURL := os.Getenv("UB_MCP_PUBLIC_URL")
 	apiToken := os.Getenv("UB_MCP_API_TOKEN")
 	apiUser := os.Getenv("UB_MCP_API_USER")
 	apiPass := os.Getenv("UB_MCP_API_PASS")
 
-	client := newAPIClient(apiURL, apiToken, apiUser, apiPass)
+	client := newAPIClient(apiURL, publicURL, apiToken, apiUser, apiPass)
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "ultrabridge-notes",
@@ -83,22 +90,39 @@ func main() {
 // apiClient is an HTTP client for calling UltraBridge API endpoints.
 type apiClient struct {
 	baseURL string
-	token   string
-	user    string
-	pass    string
-	http    *http.Client
+	// publicBaseURL is the externally-reachable URL of the UltraBridge
+	// deployment. Used by search_notes etc. to build deep-links a remote
+	// LLM consumer can click — baseURL alone may be a loopback that only
+	// works on the host. Empty falls back to baseURL.
+	publicBaseURL string
+	token         string
+	user          string
+	pass          string
+	http          *http.Client
+}
+
+// displayBaseURL returns the host to use when emitting deep-links to a
+// human/LLM caller. Public base when set; baseURL otherwise.
+func (c *apiClient) displayBaseURL() string {
+	if c.publicBaseURL != "" {
+		return strings.TrimRight(c.publicBaseURL, "/")
+	}
+	return c.baseURL
 }
 
 // newAPIClient creates a new API client. When token is non-empty it is sent as
 // a Bearer token (a DB-backed MCP token validated by UltraBridge's auth
 // middleware); otherwise the client falls back to Basic Auth with user/pass.
-func newAPIClient(baseURL, token, user, pass string) *apiClient {
+// publicBaseURL is optional and only feeds the deep-link formatters (see
+// displayBaseURL).
+func newAPIClient(baseURL, publicBaseURL, token, user, pass string) *apiClient {
 	return &apiClient{
-		baseURL: baseURL,
-		token:   token,
-		user:    user,
-		pass:    pass,
-		http:    &http.Client{},
+		baseURL:       baseURL,
+		publicBaseURL: publicBaseURL,
+		token:         token,
+		user:          user,
+		pass:          pass,
+		http:          &http.Client{},
 	}
 }
 
