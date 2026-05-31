@@ -2,12 +2,17 @@ package web
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sysop/ultrabridge/internal/digeststore"
+	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/service"
 )
 
@@ -188,5 +193,42 @@ func TestDigestRender_PDFOrMissingIs404(t *testing.T) {
 		if w.Code != http.StatusNotFound {
 			t.Errorf("GET /digests/%s/render = %d, want 404", id, w.Code)
 		}
+	}
+}
+
+// TestDigestRender_NoteOnDiskRenders confirms a Note digest whose source .note
+// resolves under the SPC file root renders its source page. The handler must use
+// RenderSupernotePage (not RenderPage) so an SPC-server deployment with a Boox
+// source but no filesystem Supernote source doesn't misroute it to Boox.
+func TestDigestRender_NoteOnDiskRenders(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "NOTE/Note"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	abs := filepath.Join(root, "NOTE/Note/trip.note")
+	if err := os.WriteFile(abs, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	notes := &mockNoteService{
+		contents:           make(map[string]interface{}),
+		pipelineConfigured: true,
+		renders:            map[string]io.ReadCloser{abs: io.NopCloser(strings.NewReader("JPEGDATA"))},
+	}
+	h := NewHandler(&mockTaskService{}, notes, &mockSearchService{}, &mockConfigService{},
+		nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
+	h.SetSPCFileRoot(root)
+	h.SetDigestService(&fakeDigestService{
+		items: []service.DigestView{{ID: 9, SourceType: 2, SourcePath: "NOTE/Note/trip.note", NotePage: 0}},
+	})
+
+	req := httptest.NewRequest("GET", "/digests/9/render", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /digests/9/render = %d, want 200", w.Code)
+	}
+	if w.Body.String() != "JPEGDATA" {
+		t.Errorf("render body = %q, want JPEGDATA", w.Body.String())
 	}
 }

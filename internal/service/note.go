@@ -542,6 +542,15 @@ func (s *noteService) RenderPage(ctx context.Context, path string, pageIdx int) 
 	return s.renderSupernotePage(ctx, path, pageIdx)
 }
 
+// RenderSupernotePage renders an absolute .note path through the go-sn renderer
+// directly, skipping isBooxPath. Digest source pages are always Supernote notes
+// but live under the SPC file root and may be requested when no filesystem
+// Supernote source is configured (so s.noteStore is nil) — a state in which
+// isBooxPath's ".note + nil noteStore" heuristic would misroute to Boox.
+func (s *noteService) RenderSupernotePage(ctx context.Context, path string, pageIdx int) (io.ReadCloser, string, error) {
+	return s.renderSupernotePage(ctx, path, pageIdx)
+}
+
 // renderForestNotePage renders a single ForestNote page to JPEG on the fly from
 // its live strokes in the syncstore mirror — no disk cache. The path is
 // forestnote://{notebook_id}/{page_id}; the trailing segment is the page ULID.

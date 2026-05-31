@@ -894,7 +894,10 @@ func (h *Handler) handleDigestRender(w http.ResponseWriter, r *http.Request) {
 	}
 	// NOTE: NotePage is treated as a 0-based ordinal (see service.parseNotePage);
 	// if hardware shows the device numbers pages from 1, subtract one here.
-	stream, contentType, err := h.notes.RenderPage(ctx, abs, d.NotePage)
+	// RenderSupernotePage (not RenderPage) so an SPC-server-only deployment with
+	// a Boox source but no filesystem Supernote source doesn't misroute this
+	// .note to the Boox renderer.
+	stream, contentType, err := h.notes.RenderSupernotePage(ctx, abs, d.NotePage)
 	if err != nil {
 		h.logger.Error("digest render", "id", id, "path", abs, "page", d.NotePage, "error", err)
 		http.Error(w, "render failed", http.StatusInternalServerError)
@@ -1858,6 +1861,7 @@ type detailPage struct {
 	Caption  string
 	BodyText string
 	Source   string
+	Keywords string
 }
 
 type detailAction struct {
@@ -1884,6 +1888,7 @@ func (h *Handler) buildNoteDetail(ctx context.Context, path, title, backURL, ver
 			Caption:  "Page " + strconv.Itoa(p.Page+1),
 			BodyText: p.BodyText,
 			Source:   p.Source,
+			Keywords: p.Keywords,
 		})
 	}
 	return detailView{
@@ -1899,12 +1904,12 @@ func (h *Handler) buildNoteDetail(ctx context.Context, path, title, backURL, ver
 }
 
 // supernoteCrumbs adapts the Supernote relPath breadcrumb chain to []crumb.
-// RelPath is emitted raw (matching the pre-refactor inline template, which did
-// not urlquery it).
+// RelPath is query-escaped (like the pager's path param) so folder names with
+// URL-significant characters — '&', '#', spaces — don't truncate the crumb URL.
 func supernoteCrumbs(bs []breadcrumb) []crumb {
 	out := make([]crumb, 0, len(bs))
 	for _, b := range bs {
-		out = append(out, crumb{Label: b.Label, HxGet: "/files/supernote?path=" + b.RelPath})
+		out = append(out, crumb{Label: b.Label, HxGet: "/files/supernote?path=" + url.QueryEscape(b.RelPath)})
 	}
 	return out
 }
@@ -1961,6 +1966,9 @@ func (h *Handler) validNotePath(path string) bool {
 	cleaned := filepath.Clean(path)
 	if h.notesPathPrefix != "" && strings.HasPrefix(cleaned, h.notesPathPrefix) {
 		return true
+	}
+	if h.booxImportPath != "" && strings.HasPrefix(cleaned, h.booxImportPath) {
+		return true // imported-but-unmigrated Boox notes still live under the import path
 	}
 	if h.booxNotesPath != "" && strings.HasPrefix(cleaned, h.booxNotesPath) {
 		return true

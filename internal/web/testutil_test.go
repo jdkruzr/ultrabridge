@@ -285,6 +285,9 @@ func (m *mockNoteService) GetNotePages(ctx context.Context, path string) ([]serv
 func (m *mockNoteService) RenderPage(ctx context.Context, path string, page int) (io.ReadCloser, string, error) {
 	return m.renders[path], "image/jpeg", nil
 }
+func (m *mockNoteService) RenderSupernotePage(ctx context.Context, path string, page int) (io.ReadCloser, string, error) {
+	return m.renders[path], "image/jpeg", nil
+}
 func (m *mockNoteService) ScanFiles(ctx context.Context) error { return nil }
 func (m *mockNoteService) Enqueue(ctx context.Context, path string, force bool) error {
 	for i := range m.files {

@@ -313,6 +313,12 @@ type NoteService interface {
 	GetContent(ctx context.Context, path string) (interface{}, error)                     // OCR text and page metadata
 	GetNotePages(ctx context.Context, path string) ([]NotePageView, error)                // typed page content for the in-tab detail grid
 	RenderPage(ctx context.Context, path string, page int) (io.ReadCloser, string, error) // image stream, content-type
+	// RenderSupernotePage renders an absolute .note path through the Supernote
+	// (go-sn) renderer unconditionally, bypassing RenderPage's source-detection.
+	// Used for digest source pages, which are always Supernote notes and may need
+	// to render when no filesystem Supernote source is configured (SPC-server-only
+	// deployments) — where RenderPage's heuristics could misroute to Boox.
+	RenderSupernotePage(ctx context.Context, path string, page int) (io.ReadCloser, string, error)
 
 	ScanFiles(ctx context.Context) error
 	Enqueue(ctx context.Context, path string, force bool) error

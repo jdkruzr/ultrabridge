@@ -1,6 +1,6 @@
 # internal/service
 
-Last verified: 2026-05-30 (NoteService.GetNotePages → []NotePageView typed page content backing the in-tab note detail grid (web); DigestService.GetDigest + DigestView detail fields (SourcePath/SourceType/HandwriteInnerName/NotePage) for the digest detail page; TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; PurgeCompleted now returns (int64, error); PurgeDeleted now returns (purged, skipped, error); ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
+Last verified: 2026-05-30 (NoteService.GetNotePages → []NotePageView typed page content backing the in-tab note detail grid (web); NoteService.RenderSupernotePage renders an absolute .note via go-sn directly, bypassing RenderPage's isBooxPath heuristic — for digest source pages that may render with no filesystem Supernote source configured; DigestService.GetDigest + DigestView detail fields (SourcePath/SourceType/HandwriteInnerName/NotePage) for the digest detail page; TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; PurgeCompleted now returns (int64, error); PurgeDeleted now returns (purged, skipped, error); ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
 
 ## Purpose
 
