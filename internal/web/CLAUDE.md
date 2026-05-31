@@ -345,8 +345,10 @@ plain text), the Task note-links (`_task_row.html`, source picked via
 `noteSource`), and the Boox red-ink `taskDetailHTML` links (which already
 emitted `?detail=` URLs). There is no client-side detail state to restore on
 hard-load — `?detail=` is server-rendered, so a CalDAV/bookmark deep link
-Just Works. The web `/files/content` JSON endpoint is now orphaned by the UI
-(its `/api/v1/files/content` sibling remains the headless surface).
+Just Works. (The web `GET /files/content` JSON route was removed once the modal
+went — the in-tab grid renders page content server-side via
+`NoteService.GetNotePages`; the `/api/v1/files/content` headless endpoint, which
+still calls `NoteService.GetContent`, is unaffected.)
 
 ### Design: minimal scope, no OOB
 

@@ -160,15 +160,10 @@ func NewHandler(
 	}
 
 	funcMap := template.FuncMap{
-		"formatDueTime": formatDueTime,
-		"formatCreated": formatCreated,
-		"formatTimestamp": func(ms int64) string {
-			if ms == 0 {
-				return "Never"
-			}
-			return time.UnixMilli(ms).UTC().Format("2006-01-02 15:04")
-		},
-		"fileTypeStr": func(ft string) string { return ft },
+		"formatDueTime":   formatDueTime,
+		"formatCreated":   formatCreated,
+		"formatTimestamp": formatTimestampMs,
+		"fileTypeStr":     func(ft string) string { return ft },
 		"fileRowID": func(path string) string {
 			sum := sha1.Sum([]byte(path))
 			return "file-" + hex.EncodeToString(sum[:])[:12]
@@ -317,7 +312,6 @@ func NewHandler(
 	h.mux.HandleFunc("POST /files/force", h.handleFilesForce)
 	h.mux.HandleFunc("GET /files/status", h.handleFilesStatus)
 	h.mux.HandleFunc("GET /files/history", h.handleFilesHistory)
-	h.mux.HandleFunc("GET /files/content", h.handleFilesContent)
 	h.mux.HandleFunc("GET /files/render", h.handleFilesRender)
 	h.mux.HandleFunc("GET /files/boox/render", h.handleBooxRender)
 	h.mux.HandleFunc("GET /files/boox/versions", h.handleBooxVersions)
@@ -661,7 +655,7 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "notebook not found", http.StatusNotFound)
 			return
 		}
-		data["fnDetail"] = detail
+		data["detail"] = forestNoteDetailView(detail)
 		h.renderTemplate(w, r, "files_forestnote", data)
 		return
 	}
@@ -1605,26 +1599,6 @@ func (h *Handler) handleFilesHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(details)
 }
 
-func (h *Handler) handleFilesContent(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		w.Write([]byte("[]"))
-		return
-	}
-	if !h.validNotePath(path) {
-		w.Write([]byte("[]"))
-		return
-	}
-	docs, err := h.notes.GetContent(r.Context(), path)
-	if err != nil {
-		h.logger.Error("failed to get content", "path", path, "error", err)
-		w.Write([]byte("[]"))
-		return
-	}
-	json.NewEncoder(w).Encode(docs)
-}
-
 func (h *Handler) handleFilesRender(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	pageStr := r.URL.Query().Get("page")
@@ -1866,6 +1840,7 @@ type detailPage struct {
 
 type detailAction struct {
 	Label   string
+	Href    string // link-style action (e.g. a PDF download); renders an <a> instead of a button
 	HxPost  string
 	Vals    string // hx-vals JSON
 	Confirm string
@@ -1901,6 +1876,62 @@ func (h *Handler) buildNoteDetail(ctx context.Context, path, title, backURL, ver
 		VersionsURL: versionsURL,
 		EmptyMsg:    "No indexed content yet — queue this note for OCR to see its pages.",
 	}, nil
+}
+
+// forestNoteDetailView maps a ForestNote notebook detail onto the shared
+// detailView so ForestNote renders through the same _detail_page_grid partial
+// as Supernote/Boox. ForestNote pages render on the fly via
+// /files/forestnote/render; its actions (PDF export, per-notebook Re-OCR with
+// transient feedback, soft-delete) carry the same behavior as the old bespoke
+// template.
+func forestNoteDetailView(d service.ForestNoteNotebookDetail) detailView {
+	folder := "(unfiled)"
+	if len(d.FolderPath) > 0 {
+		folder = strings.Join(d.FolderPath, " / ")
+	}
+	pages := make([]detailPage, 0, len(d.Pages))
+	for _, p := range d.Pages {
+		pages = append(pages, detailPage{
+			ImgURL:   "/files/forestnote/render?path=" + url.QueryEscape(p.Path),
+			Caption:  "Page " + strconv.Itoa(p.Ordinal+1),
+			BodyText: p.BodyText,
+		})
+	}
+	const reocrFeedback = "if(event.detail.successful){ this.textContent='Queued ✓'; this.disabled=true; setTimeout(() => { this.textContent='↻ Re-OCR'; this.disabled=false; }, 2500); updateProcessorStatus(); } else { this.textContent='Failed ✗'; setTimeout(() => { this.textContent='↻ Re-OCR'; }, 2500); }"
+	return detailView{
+		Title:   d.Name,
+		BackURL: "/files/forestnote",
+		Meta: []detailKV{
+			{Label: "Folder", Value: folder},
+			{Label: "Pages", Value: strconv.Itoa(d.PageCount)},
+			{Label: "Created", Value: formatTimestampMs(d.CreatedAt)},
+			{Label: "Modified", Value: formatTimestampMs(d.ModifiedAt)},
+		},
+		Pages: pages,
+		Actions: []detailAction{
+			{Label: "⬇ Download PDF", Href: "/files/forestnote/export?notebook=" + url.QueryEscape(d.NotebookID)},
+			{Label: "↻ Re-OCR", HxPost: "/files/forestnote/reprocess?notebook=" + url.QueryEscape(d.NotebookID), OnAfter: reocrFeedback},
+			{
+				Label:   "✗ Delete",
+				Danger:  true,
+				HxPost:  "/files/forestnote/delete",
+				Vals:    mustJSON(map[string]string{"notebook": d.NotebookID}),
+				Confirm: "Delete “" + d.Name + "” from UltraBridge? This removes it from your library and search index. If the notebook still exists on your device and you edit it again, it will reappear on the next sync — to delete permanently, delete it on the device.",
+				OnAfter: "if(event.detail.successful){window.location='/files/forestnote';}",
+			},
+		},
+		EmptyMsg: "This notebook has no pages yet.",
+	}
+}
+
+// formatTimestampMs formats a millisecond UTC unix timestamp as the UI does
+// ("Never" for 0). Shared by the formatTimestamp template func and Go-side
+// detail builders.
+func formatTimestampMs(ms int64) string {
+	if ms == 0 {
+		return "Never"
+	}
+	return time.UnixMilli(ms).UTC().Format("2006-01-02 15:04")
 }
 
 // supernoteCrumbs adapts the Supernote relPath breadcrumb chain to []crumb.
