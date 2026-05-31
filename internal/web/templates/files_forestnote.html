@@ -4,47 +4,8 @@
     <div class="card" style="border-color: var(--status-text-failed);">
         <p class="text-danger">{{.filesError}}</p>
     </div>
-  {{else if .fnDetail}}
-    {{/* Notebook detail: metadata header + actions + per-page image & OCR text. */}}
-    {{$d := .fnDetail}}
-    <div class="toolbar">
-      <a href="/files/forestnote{{if $d.FolderPath}}?folder={{end}}" hx-get="/files/forestnote" hx-target="#main-content" hx-push-url="true"
-         class="btn-small">← Notebooks</a>
-      <span class="text-bold" style="margin-left: 0.5rem;">{{$d.Name}}</span>
-      <div class="flex-spacer"></div>
-      <a class="btn-small" href="/files/forestnote/export?notebook={{$d.NotebookID}}">⬇ Download PDF</a>
-      <button type="button" class="btn-small"
-              hx-post="/files/forestnote/reprocess?notebook={{$d.NotebookID}}" hx-swap="none"
-              hx-on:htmx:after-request="if(event.detail.successful){ this.textContent='Queued ✓'; this.disabled=true; setTimeout(() => { this.textContent='↻ Re-OCR'; this.disabled=false; }, 2500); updateProcessorStatus(); } else { this.textContent='Failed ✗'; setTimeout(() => { this.textContent='↻ Re-OCR'; }, 2500); }">↻ Re-OCR</button>
-      <button type="button" class="btn-small" style="background: var(--status-text-failed);"
-              hx-post="/files/forestnote/delete"
-              hx-vals='{"notebook": "{{$d.NotebookID}}"}'
-              hx-confirm="Delete “{{$d.Name}}” from UltraBridge? This removes it from your library and search index. If the notebook still exists on your device and you edit it again, it will reappear on the next sync — to delete permanently, delete it on the device."
-              hx-on:htmx:after-request="if(event.detail.successful){window.location='/files/forestnote';}">✗ Delete</button>
-    </div>
-
-    <div class="card">
-      <div class="fn-meta">
-        <span><span class="text-secondary">Folder:</span> {{if $d.FolderPath}}{{range $i, $n := $d.FolderPath}}{{if $i}} / {{end}}{{$n}}{{end}}{{else}}(unfiled){{end}}</span>
-        <span><span class="text-secondary">Pages:</span> {{$d.PageCount}}</span>
-        <span><span class="text-secondary">Created:</span> {{formatTimestamp $d.CreatedAt}}</span>
-        <span><span class="text-secondary">Modified:</span> {{formatTimestamp $d.ModifiedAt}}</span>
-      </div>
-    </div>
-
-    {{if $d.Pages}}
-    <div class="fn-page-grid">
-      {{range $d.Pages}}
-      <figure class="fn-page">
-        <img loading="lazy" src="/files/forestnote/render?path={{.Path}}" alt="Page {{add .Ordinal 1}}">
-        <figcaption class="text-small text-secondary">Page {{add .Ordinal 1}}</figcaption>
-        <div class="fn-page-ocr text-small">{{if .BodyText}}{{.BodyText}}{{else}}<em class="text-secondary">No text recognized.</em>{{end}}</div>
-      </figure>
-      {{end}}
-    </div>
-    {{else}}
-    <div class="card"><p class="text-secondary">This notebook has no pages yet.</p></div>
-    {{end}}
+  {{else if .detail}}
+    {{template "_detail_page_grid" .detail}}
   {{else}}
     {{/* Browse mode: Supernote-style table of folders + notebooks. */}}
     {{template "_files_status_panel" .pipelinePanel}}
@@ -88,12 +49,3 @@
     htmx.ajax('GET', url, {target:'#main-content', pushUrl:true});
   }
 </script>
-
-<style>
-  .fn-meta { display: flex; flex-wrap: wrap; gap: 1.25rem; }
-  .fn-page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem; }
-  .fn-page { margin: 0; border: 1px solid var(--border-color, #ccc); border-radius: 4px; padding: 0.5rem; background: var(--card-bg, #fff); }
-  .fn-page img { width: 100%; height: auto; display: block; background: #fff; }
-  .fn-page figcaption { text-align: center; margin-top: 0.25rem; }
-  .fn-page-ocr { margin-top: 0.4rem; max-height: 8rem; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
-</style>

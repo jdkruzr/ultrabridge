@@ -12,11 +12,15 @@
   <span class="text-bold" style="margin-left: 0.5rem;">{{.Title}}</span>
   <div class="flex-spacer"></div>
   {{range .Actions}}
+  {{if .Href}}
+  <a class="btn-small" href="{{.Href}}">{{.Label}}</a>
+  {{else}}
   <button type="button" class="btn-small"{{if .Danger}} style="background: var(--status-text-failed);"{{end}}
           hx-post="{{.HxPost}}" hx-swap="none"
           {{if .Vals}}hx-vals='{{.Vals}}'{{end}}
           {{if .Confirm}}hx-confirm="{{.Confirm}}"{{end}}
           {{if .OnAfter}}hx-on:htmx:after-request="{{.OnAfter}}"{{end}}>{{.Label}}</button>
+  {{end}}
   {{end}}
 </div>
 
