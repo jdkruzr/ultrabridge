@@ -227,6 +227,17 @@ type mcpTaskForestNote struct {
 	NativeURL    string `json:"native_url,omitempty"`
 }
 
+// mcpAttachment mirrors service.Task's attachment JSON shape (RFC 5545 ATTACH
+// surfaced from the stored blob). Local copy keeps this file decoupled from
+// internal/service; tags match the REST /api/v1/tasks response exactly.
+type mcpAttachment struct {
+	URL      string `json:"url,omitempty"`
+	FmtType  string `json:"fmt_type,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	Inline   bool   `json:"inline,omitempty"`
+}
+
 // mcpTask mirrors service.Task's JSON shape for decoding /api/v1/tasks
 // responses.
 type mcpTask struct {
@@ -243,6 +254,7 @@ type mcpTask struct {
 	Categories  []string           `json:"categories,omitempty"`
 	ForestNote  *mcpTaskForestNote `json:"forestnote,omitempty"`
 	Comment     string             `json:"comment,omitempty"`
+	Attachments []mcpAttachment    `json:"attachments,omitempty"`
 	Deleted     bool               `json:"deleted,omitempty"`
 }
 
@@ -308,7 +320,41 @@ func formatMCPTask(t mcpTask) string {
 	if t.Links != nil && t.Links.FilePath != "" {
 		sb.WriteString(fmt.Sprintf("From note: %s (page %d)\n", t.Links.FilePath, t.Links.Page))
 	}
+	for _, a := range t.Attachments {
+		sb.WriteString("Attachment: " + formatMCPAttachment(a) + "\n")
+	}
 	return sb.String()
+}
+
+// formatMCPAttachment renders one attachment as a compact single-line summary —
+// filename (or "(unnamed)"), optional MIME type + byte size, then the fetch URL
+// (or an inline/no-URL note). Mirrors the standalone ub-mcp sidecar's
+// formatAttachment so both MCP surfaces read identically.
+func formatMCPAttachment(a mcpAttachment) string {
+	name := a.Filename
+	if name == "" {
+		name = "(unnamed)"
+	}
+	var parts []string
+	if a.FmtType != "" {
+		parts = append(parts, a.FmtType)
+	}
+	if a.Size > 0 {
+		parts = append(parts, fmt.Sprintf("%d bytes", a.Size))
+	}
+	meta := ""
+	if len(parts) > 0 {
+		meta = " [" + strings.Join(parts, ", ") + "]"
+	}
+	loc := a.URL
+	if loc == "" {
+		if a.Inline {
+			loc = "(inline binary, no URL yet)"
+		} else {
+			loc = "(no URL)"
+		}
+	}
+	return fmt.Sprintf("%s%s %s", name, meta, loc)
 }
 
 // MCP tool input types
