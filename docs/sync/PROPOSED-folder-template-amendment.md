@@ -1,10 +1,33 @@
-# PROPOSED v1 schema amendment — folder + per-page template sync
+# v1 schema amendment — folder + per-page template sync  ✅ SHIPPED
 
-**Status:** proposal, awaiting UB-side implementation
+**Status:** SHIPPED 2026-05-26 in `c77c754` ("feat(sync): fold folder + per-page-template
+into v1 schema"). Retained as the design record; the live server has since moved two schema
+versions past it (see **Where this stands now**). Implementation matches this proposal exactly:
+`knownCols`/`tableOrder` in `op.go`, `fn_folder` + `ensureColumn` migrations in `schema.go`,
+`upsertFolder`/folder_id/template upserts in `store.go`, the folder/template read paths in
+`inventory.go`, and conformance vectors `13`–`17`.
 **Author:** ForestNote client session (2026-05-26)
 **Affects:** `internal/syncstore/op.go`, `internal/syncstore/schema.go`,
 `docs/sync/forestnote-sync-protocol.md` (§3.1, §6), `docs/sync/vectors/`
 **Companion:** ForestNote client plan (`~/.claude/plans/sync-for-forestnote-via-linear-kurzweil.md`, §A)
+
+## Where this stands now (post-ship reality)
+
+Folder + template shipped as the **v1 baseline** (`9b807dc8…f2fe`), then the schema was bumped
+twice more on top — folder/template are part of every version since:
+
+| version | schema_hash | adds |
+|---|---|---|
+| v1 | `9b807dc88cd0465d171892bb17e65ad94190eda058594e207caad3368eb1f2fe` | folder + template (this doc) — **RETIRED, no longer accepted** |
+| v2 | `bc1953e2b85e766a572329e7023b4582b768094b4d27e28a632e21bedb776874` | `text_box` |
+| v3 | `724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe` | `page_text_from_server` / `page_text_from_client` — **CURRENT live hash** |
+
+`AcceptsSchemaHash` (op.go) accepts **v3 (current) + v2 (grace window)**; **v1 is retired** — a
+client still advertising `9b807dc8…` is now 409'd (`op_test.go` asserts this). A ForestNote
+client adopting folder/template sync must therefore advertise the **v3** hash, not the v1 value
+the "Report back" section below originally named. The remaining work is entirely **FN
+client-side** (Phase 6 of the FN client plan); the server has materialized folder/template ops
+since 2026-05-26.
 
 ## Why
 
@@ -132,7 +155,11 @@ LWW semantics:
 
 Run `python3 docs/sync/vectors/_oracle.py docs/sync/vectors/*.vector.json` after adding.
 
-## Report back
+## Report back  ⚠️ superseded
 
-Once implemented, confirm the live `schema_hash` equals `9b807dc88cd0465d171892bb17e65ad94190eda058594e207caad3368eb1f2fe`.
-That unblocks **Phase 6** of the ForestNote client plan (folder + template sync).
+> **Historical.** This instruction was correct only at v1. The folder + template tables shipped
+> and the server is now at **v3** — see **Where this stands now** above. Do **not** advertise the
+> v1 hash `9b807dc8…` (retired → 409). A ForestNote client adopting folder/template sync should
+> advertise the **current** live hash `724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe`
+> (v3). Server-side folder/template materialization has been live since 2026-05-26; the remaining
+> work is **Phase 6** of the ForestNote client plan (FN-side emit of folder + template ops).
