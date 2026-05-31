@@ -24,10 +24,15 @@ twice more on top — folder/template are part of every version since:
 
 `AcceptsSchemaHash` (op.go) accepts **v3 (current) + v2 (grace window)**; **v1 is retired** — a
 client still advertising `9b807dc8…` is now 409'd (`op_test.go` asserts this). A ForestNote
-client adopting folder/template sync must therefore advertise the **v3** hash, not the v1 value
-the "Report back" section below originally named. The remaining work is entirely **FN
-client-side** (Phase 6 of the FN client plan); the server has materialized folder/template ops
-since 2026-05-26.
+client must therefore advertise the **v3** hash, not the v1 value the "Report back" section below
+originally named.
+
+**This is done on both sides — nothing remains.** The ForestNote client also ships folder +
+template sync (folder/template were baseline v1 columns, so the client's phases 0–5 covered them;
+there was never a separate gated "Phase 6"). On the FN side: `SyncWire.folderCols`/`pageCols`
+encode `parent_folder_id`/`template`/`template_pitch_mm`; `NotebookRepository` enqueues `folder`
+ops on create/rename/move/delete + backfill and decodes them on apply; `SyncProtocol.SCHEMA_HASH`
+is the v3 value `724411eb…`. Validated on-device end-to-end 2026-05-27.
 
 ## Why
 
@@ -159,7 +164,7 @@ Run `python3 docs/sync/vectors/_oracle.py docs/sync/vectors/*.vector.json` after
 
 > **Historical.** This instruction was correct only at v1. The folder + template tables shipped
 > and the server is now at **v3** — see **Where this stands now** above. Do **not** advertise the
-> v1 hash `9b807dc8…` (retired → 409). A ForestNote client adopting folder/template sync should
-> advertise the **current** live hash `724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe`
-> (v3). Server-side folder/template materialization has been live since 2026-05-26; the remaining
-> work is **Phase 6** of the ForestNote client plan (FN-side emit of folder + template ops).
+> v1 hash `9b807dc8…` (retired → 409); the ForestNote client advertises the current live hash
+> `724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe` (v3). Folder + template sync
+> is **live end-to-end on both sides** (server since 2026-05-26 `c77c754`; FN client validated
+> on-device 2026-05-27) — there is no outstanding work.
