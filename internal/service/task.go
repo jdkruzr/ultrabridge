@@ -375,6 +375,19 @@ func mapInternalTask(it taskstore.Task) Task {
 		if meta.Comment != "" {
 			t.Comment = meta.Comment
 		}
+		// ATTACH properties (RFC 5545 §3.8.1.1) — surfaced metadata-only. Inline
+		// binary carries Size/FmtType/Filename but no payload; once de-bloated its
+		// URL is the signed download endpoint (empty only when ATTACH serving is
+		// unconfigured). URI attachments carry the link verbatim.
+		for _, ba := range meta.Attachments {
+			t.Attachments = append(t.Attachments, Attachment{
+				URL:      ba.URI,
+				FmtType:  ba.FmtType,
+				Filename: ba.Filename,
+				Size:     ba.Size,
+				Inline:   ba.Inline,
+			})
+		}
 	}
 
 	return t

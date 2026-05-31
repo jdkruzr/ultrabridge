@@ -31,6 +31,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/mcpauth"
 	"github.com/sysop/ultrabridge/internal/notedb"
 	"github.com/sysop/ultrabridge/internal/service"
+	"github.com/sysop/ultrabridge/internal/taskattach"
 )
 
 //go:embed all:templates
@@ -76,6 +77,14 @@ type Handler struct {
 
 	oauthCodesMu sync.Mutex
 	oauthCodes   map[string]time.Time // code -> expiry
+
+	// Task ATTACH serving (optional; nil until SetTaskAttach is called from
+	// main.go). The download/render handlers these back are mounted on the
+	// top-level mux OUTSIDE the auth wrapper so third-party CalDAV clients can
+	// fetch ATTACH URIs with no credentials — the URL signature is the guard.
+	attachSigner  *taskattach.Signer
+	attachStore   *taskattach.BlobStore
+	attachBaseURL string
 }
 
 func formatDueTime(val interface{}) string {

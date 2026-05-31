@@ -47,6 +47,9 @@ type Task struct {
 	// ForestNote provenance, populated when the task carried X-FORESTNOTE-* properties
 	// on its inbound VTODO. Nil for non-FN clients (Apple Reminders, Tasks.org, etc.).
 	ForestNote *TaskForestNote `json:"forestnote,omitempty"`
+	// Attachments surfaces VTODO ATTACH properties (RFC 5545 §3.8.1.1), parsed
+	// from the ical_blob at response time. Empty for tasks with no attachments.
+	Attachments []Attachment `json:"attachments,omitempty"`
 	// Deleted is true for soft-deleted rows (is_deleted='Y'). Default queries hide
 	// these entirely — only surfaced when the caller opts in via ListIncludingDeleted
 	// / ?include_deleted=true / the equivalent MCP flag. Useful for "what's in the
@@ -58,6 +61,20 @@ type TaskLink struct {
 	AppName  string `json:"app_name"`
 	FilePath string `json:"file_path"`
 	Page     int    `json:"page"`
+}
+
+// Attachment is one VTODO ATTACH (RFC 5545 §3.8.1.1) surfaced on a task. The
+// inline bytes are never embedded here: for an inline-binary attachment the
+// payload is described (Size/FmtType/Filename) and URL is UB's signed download
+// endpoint (set once the attachment has been de-bloated; empty only in a
+// deployment where ATTACH serving is unconfigured). For a URI attachment, URL
+// is the link verbatim.
+type Attachment struct {
+	URL      string `json:"url,omitempty"`
+	FmtType  string `json:"fmt_type,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	Inline   bool   `json:"inline,omitempty"`
 }
 
 // TaskForestNote carries the structured columns extracted from X-FORESTNOTE-*

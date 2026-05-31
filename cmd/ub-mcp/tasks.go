@@ -115,7 +115,16 @@ type task struct {
 	Categories  []string        `json:"categories,omitempty"`
 	ForestNote  *taskForestNote `json:"forestnote,omitempty"`
 	Comment     string          `json:"comment,omitempty"`
+	Attachments []attachment    `json:"attachments,omitempty"`
 	Deleted     bool            `json:"deleted,omitempty"`
+}
+
+type attachment struct {
+	URL      string `json:"url,omitempty"`
+	FmtType  string `json:"fmt_type,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	Inline   bool   `json:"inline,omitempty"`
 }
 
 // formatTask renders a single task as readable text for the agent.
@@ -186,7 +195,41 @@ func formatTask(t task) string {
 	if t.Links != nil && t.Links.FilePath != "" {
 		sb.WriteString(fmt.Sprintf("From note: %s (page %d)\n", t.Links.FilePath, t.Links.Page))
 	}
+	for _, a := range t.Attachments {
+		sb.WriteString("Attachment: " + formatAttachment(a) + "\n")
+	}
 	return sb.String()
+}
+
+// formatAttachment renders one attachment as a compact single-line summary:
+// the filename (or "(unnamed)"), an optional MIME type and byte size, and
+// either the fetch/URI link or an "(inline binary, no URL yet)" note when UB
+// hasn't yet exposed a download endpoint for embedded bytes.
+func formatAttachment(a attachment) string {
+	name := a.Filename
+	if name == "" {
+		name = "(unnamed)"
+	}
+	var parts []string
+	if a.FmtType != "" {
+		parts = append(parts, a.FmtType)
+	}
+	if a.Size > 0 {
+		parts = append(parts, fmt.Sprintf("%d bytes", a.Size))
+	}
+	meta := ""
+	if len(parts) > 0 {
+		meta = " [" + strings.Join(parts, ", ") + "]"
+	}
+	loc := a.URL
+	if loc == "" {
+		if a.Inline {
+			loc = "(inline binary, no URL yet)"
+		} else {
+			loc = "(no URL)"
+		}
+	}
+	return fmt.Sprintf("%s%s %s", name, meta, loc)
 }
 
 // registerTaskTools wires the task-manipulation tools onto an MCP server

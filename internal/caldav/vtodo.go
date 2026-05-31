@@ -3,12 +3,18 @@ package caldav
 import (
 	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	ical "github.com/emersion/go-ical"
+	"github.com/sysop/ultrabridge/internal/fnpath"
+	"github.com/sysop/ultrabridge/internal/taskattach"
 	"github.com/sysop/ultrabridge/internal/taskstore"
 )
 
@@ -309,6 +315,24 @@ type BlobMetadata struct {
 	Categories []string
 	NativeURL  string
 	Comment    string
+	// Attachments surfaces VTODO ATTACH properties (RFC 5545 §3.8.1.1) in
+	// document order. Inline-binary attachments carry metadata only (never the
+	// base64 payload) so the task JSON stays small.
+	Attachments []BlobAttachment
+}
+
+// BlobAttachment is one ATTACH property surfaced from the stored blob. It
+// carries metadata only — never the inline bytes — so a multi-megabyte
+// embedded attachment doesn't bloat the task JSON. For a URI attachment, URI
+// holds the link. For inline binary, URI is empty until UB serves the bytes
+// via a signed endpoint (wired with the side-store/de-bloat path); Size is the
+// decoded byte length and Inline is true.
+type BlobAttachment struct {
+	URI      string // ATTACH value when it is a URI; "" for not-yet-served inline binary
+	FmtType  string // FMTTYPE param (MIME type), if present
+	Filename string // FILENAME / X-FILENAME param, if present
+	Size     int64  // decoded byte length for inline binary; 0 for URI
+	Inline   bool   // true when the source ATTACH was inline BASE64 binary
 }
 
 // ParseBlobMetadata extracts category and native-URL info from a stored
@@ -371,7 +395,248 @@ func ParseBlobMetadata(blob string) BlobMetadata {
 		}
 		out.Comment += c
 	}
+	// ATTACH: RFC 5545 §3.8.1.1 — either a URI (the default value type) or an
+	// inline BASE64 binary (ENCODING=BASE64;VALUE=BINARY). May repeat; we keep
+	// every occurrence in document order. For inline binary we surface metadata
+	// (size/fmttype/filename) but NOT the base64 payload — dumping megabytes of
+	// it into the task JSON would defeat the purpose. The signed fetch URL for
+	// inline attachments is filled in once the side-store/de-bloat path exists.
+	for _, p := range todo.Props.Values(ical.PropAttach) {
+		a := BlobAttachment{
+			FmtType:  p.Params.Get("FMTTYPE"),
+			Filename: attachFilename(&p),
+		}
+		switch {
+		case p.Params.Get("X-UB-INLINE") == "1":
+			// De-bloated inline binary: the value is the signed fetch URL and
+			// the decoded size is recorded in X-UB-SIZE (the bytes live in the
+			// content store, not the blob).
+			a.Inline = true
+			a.URI = p.Value
+			if n, perr := strconv.ParseInt(p.Params.Get("X-UB-SIZE"), 10, 64); perr == nil {
+				a.Size = n
+			}
+		case isInlineBinaryAttach(&p):
+			// Raw inline binary still in the blob (no-deps / pre-de-bloat path):
+			// surface metadata only, never the base64 payload.
+			a.Inline = true
+			a.Size = base64DecodedSize(p.Value)
+		default:
+			a.URI = p.Value
+		}
+		out.Attachments = append(out.Attachments, a)
+	}
 	return out
+}
+
+// isInlineBinaryAttach reports whether an ATTACH property carries inline
+// BASE64 binary content rather than a URI. RFC 5545 §3.8.1.1 signals inline
+// binary with VALUE=BINARY (always paired with ENCODING=BASE64); we accept
+// either marker defensively since some emitters set only one.
+func isInlineBinaryAttach(p *ical.Prop) bool {
+	return p.ValueType() == ical.ValueBinary ||
+		strings.EqualFold(p.Params.Get(ical.ParamEncoding), "BASE64")
+}
+
+// base64DecodedSize returns the decoded byte length of a standard-base64 string
+// without allocating the decoded bytes — cheap even for a multi-MB inline
+// attachment. Falls back to a real decode for malformed (non-multiple-of-4)
+// input, returning 0 if that also fails.
+func base64DecodedSize(s string) int64 {
+	s = strings.TrimSpace(s)
+	n := len(s)
+	if n == 0 {
+		return 0
+	}
+	if n%4 != 0 {
+		if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+			return int64(len(b))
+		}
+		return 0
+	}
+	pad := 0
+	if strings.HasSuffix(s, "==") {
+		pad = 2
+	} else if strings.HasSuffix(s, "=") {
+		pad = 1
+	}
+	return int64(n/4*3 - pad)
+}
+
+// attachFilename returns the human filename hint on an ATTACH property, if any.
+// FILENAME is non-standard but widely emitted (Apple Calendar, and Thunderbird
+// via X-FILENAME); we check the plain form first, then the X- vendor form.
+func attachFilename(p *ical.Prop) string {
+	if v := p.Params.Get("FILENAME"); v != "" {
+		return v
+	}
+	return p.Params.Get("X-FILENAME")
+}
+
+// AttachDeps carries the side-store, signer, and external base URL the CalDAV
+// layer uses to de-bloat inline-binary ATTACH on inbound and reconstruct it on
+// outbound. A zero value (nil Store/Signer) disables the behavior — inline
+// binary then simply stays in the ical_blob, exactly as before.
+type AttachDeps struct {
+	Store   *taskattach.BlobStore
+	Signer  *taskattach.Signer
+	BaseURL string // external origin for absolute fetch URLs; "" → relative path
+}
+
+func (d AttachDeps) enabled() bool { return d.Store != nil && d.Signer != nil }
+
+// downloadURL builds the (absolute when BaseURL is set, else relative) signed
+// fetch URL for de-bloated content, appending cosmetic type/name params the
+// download handler uses for Content-Type / Content-Disposition.
+func (d AttachDeps) downloadURL(sha, fmttype, filename string) string {
+	u := d.Signer.SignedAttachmentPath(sha)
+	if fmttype != "" {
+		u += "&type=" + url.QueryEscape(fmttype)
+	}
+	if filename != "" {
+		u += "&name=" + url.QueryEscape(filename)
+	}
+	if d.BaseURL != "" {
+		return strings.TrimRight(d.BaseURL, "/") + u
+	}
+	return u
+}
+
+// DebloatInlineAttachments rewrites every inline-binary ATTACH in the given
+// VCALENDAR blob into a compact URI reference: the bytes are written to the
+// content store (deduped by sha256) and the property becomes a signed download
+// URL carrying X-UB-INLINE / X-UB-SHA256 / X-UB-ENC / X-UB-SIZE markers plus
+// the original FMTTYPE / FILENAME. This keeps the stored ical_blob (a TEXT
+// column re-encoded on every round-trip) small even when a client embeds
+// megabytes. The bytes are fully recoverable via ReconstructInlineAttachments,
+// so the round-trip stays lossless.
+//
+// Crucially, ComputeETag ignores the blob, so this rewrite does NOT change the
+// CalDAV ETag and never triggers a spurious re-sync.
+//
+// Defensive throughout: a blank/corrupt blob, an undecodable base64 value, or a
+// store-write error leaves that property (or the whole blob) untouched rather
+// than erroring — the worst case degrades to "inline binary stayed in the blob".
+func DebloatInlineAttachments(blob string, deps AttachDeps) string {
+	if blob == "" || !deps.enabled() {
+		return blob
+	}
+	cal, err := ical.NewDecoder(strings.NewReader(blob)).Decode()
+	if err != nil {
+		return blob
+	}
+	todo, err := FindVTODO(cal)
+	if err != nil || todo == nil {
+		return blob
+	}
+	props := todo.Props[ical.PropAttach]
+	changed := false
+	for i := range props {
+		p := &props[i]
+		if p.Params.Get("X-UB-INLINE") == "1" {
+			continue // already de-bloated (idempotent)
+		}
+		if !isInlineBinaryAttach(p) {
+			continue // URI attachment — leave alone
+		}
+		raw, derr := base64.StdEncoding.DecodeString(strings.TrimSpace(p.Value))
+		if derr != nil {
+			continue
+		}
+		sha, size, perr := deps.Store.Put(raw)
+		if perr != nil {
+			continue
+		}
+		fmttype := p.Params.Get("FMTTYPE")
+		filename := attachFilename(p)
+		p.Value = deps.downloadURL(sha, fmttype, filename)
+		p.Params.Del(ical.ParamEncoding)
+		p.Params.Del(ical.ParamValue)
+		p.Params.Set("X-UB-INLINE", "1")
+		p.Params.Set("X-UB-SHA256", sha)
+		p.Params.Set("X-UB-ENC", "BASE64")
+		p.Params.Set("X-UB-SIZE", strconv.FormatInt(size, 10))
+		changed = true
+	}
+	if !changed {
+		return blob
+	}
+	var buf bytes.Buffer
+	if err := ical.NewEncoder(&buf).Encode(cal); err != nil {
+		return blob // keep the original rather than emit garbage
+	}
+	return buf.String()
+}
+
+// ReconstructInlineAttachments restores inline-binary ATTACH properties that
+// DebloatInlineAttachments compacted: it reads the bytes back from the content
+// store and re-embeds them as ENCODING=BASE64;VALUE=BINARY (via Prop.SetBinary)
+// so the consuming CalDAV client receives byte-equivalent content, then drops
+// the X-UB-* markers. Reconstruction is decode-equivalent, not byte-identical:
+// go-ical re-serializes param maps in unspecified order (every PUT already does
+// this). A missing store file leaves the property as its still-fetchable URI
+// form rather than failing the whole response.
+func ReconstructInlineAttachments(cal *ical.Calendar, store *taskattach.BlobStore) {
+	if cal == nil || store == nil {
+		return
+	}
+	todo, err := FindVTODO(cal)
+	if err != nil || todo == nil {
+		return
+	}
+	props := todo.Props[ical.PropAttach]
+	for i := range props {
+		p := &props[i]
+		if p.Params.Get("X-UB-INLINE") != "1" {
+			continue
+		}
+		f, _, oerr := store.Open(p.Params.Get("X-UB-SHA256"))
+		if oerr != nil {
+			continue // leave the URI form intact
+		}
+		raw, rerr := io.ReadAll(f)
+		f.Close()
+		if rerr != nil {
+			continue
+		}
+		p.SetBinary(raw) // sets VALUE=BINARY + ENCODING=BASE64 + base64 value
+		p.Params.Del("X-UB-INLINE")
+		p.Params.Del("X-UB-SHA256")
+		p.Params.Del("X-UB-ENC")
+		p.Params.Del("X-UB-SIZE")
+	}
+}
+
+// AddFNRenderAttach appends an ATTACH pointing at the signed public render of
+// the task's source ForestNote page, so a third-party CalDAV client shows the
+// handwriting page as a tappable attachment. It is SYNTHESIZED at serve time
+// only — never written to the stored blob — so it causes no blob churn and
+// never interacts with de-bloat. Requires a signer + an external base URL
+// (absolute URLs are mandatory for third-party clients) and both FN notebook +
+// page id columns. Idempotent: never emits a second FN-render ATTACH.
+func AddFNRenderAttach(cal *ical.Calendar, t *taskstore.Task, deps AttachDeps) {
+	if cal == nil || deps.Signer == nil || deps.BaseURL == "" {
+		return
+	}
+	if !t.ForestNoteNotebookID.Valid || t.ForestNoteNotebookID.String == "" ||
+		!t.ForestNotePageID.Valid || t.ForestNotePageID.String == "" {
+		return
+	}
+	todo, err := FindVTODO(cal)
+	if err != nil || todo == nil {
+		return
+	}
+	for _, p := range todo.Props.Values(ical.PropAttach) {
+		if p.Params.Get("X-UB-FN-RENDER") == "1" {
+			return // already present — emit at most one
+		}
+	}
+	notePath := fnpath.Page(t.ForestNoteNotebookID.String, t.ForestNotePageID.String)
+	att := ical.NewProp(ical.PropAttach)
+	att.Value = strings.TrimRight(deps.BaseURL, "/") + deps.Signer.SignedFNRenderPath(notePath)
+	att.Params.Set("FMTTYPE", "image/jpeg")
+	att.Params.Set("X-UB-FN-RENDER", "1")
+	todo.Props[ical.PropAttach] = append(todo.Props[ical.PropAttach], *att)
 }
 
 // BuildBlobWithMetadata constructs a minimal VCALENDAR blob carrying only

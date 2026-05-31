@@ -1281,3 +1281,89 @@ func TestBuildBlobWithMetadata_NoSummary(t *testing.T) {
 		t.Errorf("blob should not emit SUMMARY at all (overlay path provides it); got:\n%s", blob)
 	}
 }
+
+// TestParseBlobMetadata_Attachments covers Phase 1 inbound ATTACH exposure:
+// URI attachments surface their link; inline-binary attachments surface
+// metadata (size/fmttype/filename) but NOT the base64 payload; multiple
+// ATTACHs are preserved in document order; a blob with none yields an empty
+// slice.
+func TestParseBlobMetadata_Attachments(t *testing.T) {
+	t.Run("URI attachment surfaces link + params, not inline", func(t *testing.T) {
+		blob := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\n" +
+			"BEGIN:VTODO\r\nUID:t1\r\nDTSTAMP:20260101T000000Z\r\n" +
+			"ATTACH;FMTTYPE=application/pdf;FILENAME=doc.pdf:https://example.com/doc.pdf\r\n" +
+			"END:VTODO\r\nEND:VCALENDAR\r\n"
+		got := ParseBlobMetadata(blob)
+		if len(got.Attachments) != 1 {
+			t.Fatalf("want 1 attachment, got %d (%+v)", len(got.Attachments), got.Attachments)
+		}
+		a := got.Attachments[0]
+		if a.Inline {
+			t.Errorf("URI attachment should not be marked inline")
+		}
+		if a.URI != "https://example.com/doc.pdf" {
+			t.Errorf("URI = %q", a.URI)
+		}
+		if a.FmtType != "application/pdf" {
+			t.Errorf("FmtType = %q", a.FmtType)
+		}
+		if a.Filename != "doc.pdf" {
+			t.Errorf("Filename = %q", a.Filename)
+		}
+		if a.Size != 0 {
+			t.Errorf("URI attachment Size should be 0, got %d", a.Size)
+		}
+	})
+
+	t.Run("inline binary surfaces metadata only, no payload", func(t *testing.T) {
+		// base64("hello attach") = "aGVsbG8gYXR0YWNo" (12 decoded bytes).
+		blob := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\n" +
+			"BEGIN:VTODO\r\nUID:t1\r\nDTSTAMP:20260101T000000Z\r\n" +
+			"ATTACH;FMTTYPE=text/plain;ENCODING=BASE64;VALUE=BINARY:aGVsbG8gYXR0YWNo\r\n" +
+			"END:VTODO\r\nEND:VCALENDAR\r\n"
+		got := ParseBlobMetadata(blob)
+		if len(got.Attachments) != 1 {
+			t.Fatalf("want 1 attachment, got %d", len(got.Attachments))
+		}
+		a := got.Attachments[0]
+		if !a.Inline {
+			t.Errorf("inline binary should be marked inline")
+		}
+		if a.URI != "" {
+			t.Errorf("inline binary must not expose the base64 payload as URI; got %q", a.URI)
+		}
+		if a.Size != 12 {
+			t.Errorf("decoded size = %d, want 12", a.Size)
+		}
+		if a.FmtType != "text/plain" {
+			t.Errorf("FmtType = %q", a.FmtType)
+		}
+	})
+
+	t.Run("multiple attachments preserved in order", func(t *testing.T) {
+		blob := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\n" +
+			"BEGIN:VTODO\r\nUID:t1\r\nDTSTAMP:20260101T000000Z\r\n" +
+			"ATTACH:https://example.com/first\r\n" +
+			"ATTACH:https://example.com/second\r\n" +
+			"END:VTODO\r\nEND:VCALENDAR\r\n"
+		got := ParseBlobMetadata(blob)
+		if len(got.Attachments) != 2 {
+			t.Fatalf("want 2 attachments, got %d", len(got.Attachments))
+		}
+		if got.Attachments[0].URI != "https://example.com/first" ||
+			got.Attachments[1].URI != "https://example.com/second" {
+			t.Errorf("attachment order not preserved: %+v", got.Attachments)
+		}
+	})
+
+	t.Run("no ATTACH yields empty slice", func(t *testing.T) {
+		blob := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\n" +
+			"BEGIN:VTODO\r\nUID:t1\r\nDTSTAMP:20260101T000000Z\r\n" +
+			"SUMMARY:no attachments here\r\n" +
+			"END:VTODO\r\nEND:VCALENDAR\r\n"
+		got := ParseBlobMetadata(blob)
+		if len(got.Attachments) != 0 {
+			t.Errorf("want no attachments, got %+v", got.Attachments)
+		}
+	})
+}

@@ -380,3 +380,34 @@ func EnsureSPCOssSecret(ctx context.Context, db *sql.DB) (string, error) {
 	}
 	return secret, nil
 }
+
+// EnsureTaskAttachSecret returns the persisted CalDAV task-ATTACH signing
+// secret, generating and storing a fresh 32-byte (64 hex char) random value on
+// first boot if none is set. Used to sign the public (no-auth) attachment
+// download + page-render URLs UB embeds in VTODO ATTACH properties; the secret
+// is stable (the signed URLs never expire), so an already-set value (env- or
+// DB-configured) is returned untouched.
+func EnsureTaskAttachSecret(ctx context.Context, db *sql.DB) (string, error) {
+	// An explicit env override wins and is NOT persisted, letting an operator
+	// pin or rotate the secret without touching the DB. notedb.GetSetting reads
+	// the raw table and does not apply env overrides, so we must check here.
+	if env := os.Getenv(envVarForKey[KeyTaskAttachSecret]); env != "" {
+		return env, nil
+	}
+	existing, err := notedb.GetSetting(ctx, db, KeyTaskAttachSecret)
+	if err != nil {
+		return "", err
+	}
+	if existing != "" {
+		return existing, nil
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	secret := hex.EncodeToString(b)
+	if err := notedb.SetSetting(ctx, db, KeyTaskAttachSecret, secret); err != nil {
+		return "", err
+	}
+	return secret, nil
+}

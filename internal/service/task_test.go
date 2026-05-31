@@ -452,6 +452,31 @@ func TestMapInternalTask(t *testing.T) {
 			t.Errorf("ForestNote should be nil from a corrupt blob: %+v", got.ForestNote)
 		}
 	})
+
+	t.Run("ATTACH surfaced from blob (URI + inline-binary metadata)", func(t *testing.T) {
+		// base64("hi") = "aGk=" (2 decoded bytes).
+		blob := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:test\r\n" +
+			"BEGIN:VTODO\r\nUID:id\r\nSUMMARY:T\r\n" +
+			"ATTACH;FMTTYPE=application/pdf;FILENAME=doc.pdf:https://example.com/doc.pdf\r\n" +
+			"ATTACH;FMTTYPE=text/plain;ENCODING=BASE64;VALUE=BINARY:aGk=\r\n" +
+			"END:VTODO\r\nEND:VCALENDAR\r\n"
+		in := taskstore.Task{
+			TaskID:   "id",
+			Title:    sql.NullString{String: "T", Valid: true},
+			Status:   sql.NullString{String: "needsAction", Valid: true},
+			ICalBlob: sql.NullString{String: blob, Valid: true},
+		}
+		got := mapInternalTask(in)
+		if len(got.Attachments) != 2 {
+			t.Fatalf("want 2 attachments, got %d (%+v)", len(got.Attachments), got.Attachments)
+		}
+		if got.Attachments[0].URL != "https://example.com/doc.pdf" || got.Attachments[0].Inline {
+			t.Errorf("URI attachment wrong: %+v", got.Attachments[0])
+		}
+		if !got.Attachments[1].Inline || got.Attachments[1].URL != "" || got.Attachments[1].Size != 2 {
+			t.Errorf("inline attachment should expose metadata-only: %+v", got.Attachments[1])
+		}
+	})
 }
 
 

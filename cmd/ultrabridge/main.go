@@ -47,6 +47,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/spcserver/notify"
 	"github.com/sysop/ultrabridge/internal/spcserver/staging"
 	"github.com/sysop/ultrabridge/internal/synchttp"
+	"github.com/sysop/ultrabridge/internal/taskattach"
 	"github.com/sysop/ultrabridge/internal/taskdb"
 	"github.com/sysop/ultrabridge/internal/web"
 	ubwebdav "github.com/sysop/ultrabridge/internal/webdav"
@@ -510,7 +511,31 @@ func main() {
 		)
 	}
 
+	// Shared CalDAV ATTACH plumbing (signer + content store + public base URL),
+	// consumed by both the CalDAV backend (de-bloat inbound / reconstruct
+	// outbound + emit the FN-render ATTACH) and the web handler (serve the
+	// signed download + render endpoints). The signing secret is stable and
+	// auto-generated on first boot; the content store lives beside the task DB.
+	//
+	// If the secret can't be obtained we leave the whole feature OFF (signer/
+	// store stay nil → no routes mounted, no de-bloat). Proceeding with an empty
+	// secret would make the public, auth-bypassing endpoints trivially forgeable
+	// (the scheme is sha256(parts|secret)), so disabled is the only safe degrade.
+	var attachSigner *taskattach.Signer
+	var attachStore *taskattach.BlobStore
+	var attachBaseURL string
+	if attachSecret, secErr := appconfig.EnsureTaskAttachSecret(context.Background(), noteDB); secErr != nil || attachSecret == "" {
+		logger.Error("CalDAV ATTACH serving disabled: signing secret unavailable", "err", secErr)
+	} else {
+		attachSigner = &taskattach.Signer{Secret: attachSecret}
+		attachStore = &taskattach.BlobStore{Root: envOrDefault("UB_TASK_ATTACH_DIR", "/data/task-attachments")}
+		attachBaseURL, _ = notedb.GetSetting(context.Background(), noteDB, appconfig.KeyBooxExternalBaseURL)
+	}
+
 	backend := ubcaldav.NewBackend(store, "/caldav", cfg.CalDAVCollectionName, cfg.DueTimeMode, taskNotifier)
+	if attachSigner != nil {
+		backend.SetTaskAttach(attachStore, attachSigner, attachBaseURL)
+	}
 	caldavHandler := &gocaldav.Handler{
 		Backend: backend,
 		Prefix:  "/caldav",
@@ -733,6 +758,20 @@ func main() {
 		webHandler = web.NewHandler(taskSvc, noteSvc, searchSvc, configSvc, noteDB, snNotesPath, booxNotesPath, logger, broadcaster)
 		webHandler.SetDigestService(digestSvc)
 		webHandler.SetSPCFileRoot(cfg.SPCFileRoot) // resolves digest source pages for /digests/{id}/render
+
+		// Serve the public signed attachment + FN-render endpoints using the same
+		// signer/store/base URL the CalDAV backend embeds in ATTACH (created above).
+		// Skipped entirely when the feature is disabled (nil signer) so we never
+		// mount auth-bypassing routes without a working signature guard.
+		if attachSigner != nil {
+			webHandler.SetTaskAttach(attachSigner, attachStore, attachBaseURL)
+			// Mounted on the TOP-LEVEL mux so they sit OUTSIDE authMW.Wrap(webHandler):
+			// third-party CalDAV clients fetch these with no auth header, and the URL
+			// signature is the only guard. The literal fn-render path is more specific
+			// than {id}, so the mux routes it unambiguously.
+			mux.HandleFunc("GET /api/v1/attachments/fn-render", webHandler.HandleFNRenderSigned)
+			mux.HandleFunc("GET /api/v1/attachments/{id}", webHandler.HandleAttachmentDownload)
+		}
 
 		// OAuth2 flow for Claude.ai
 		// /authorize requires user auth (browser login)

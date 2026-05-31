@@ -77,6 +77,13 @@ const (
 	// SPC's hardcoded SECRET_KEY — see docs/spc-protocol.md §6.
 	KeySPCOssSecret = "spc_oss_secret"
 
+	// CalDAV task ATTACH signing. KeyTaskAttachSecret signs/verifies the public
+	// (no-auth) attachment-download + page-render URLs UB embeds in VTODO ATTACH
+	// properties for third-party CalDAV clients. Empty default → auto-generated
+	// and persisted on first boot (EnsureTaskAttachSecret). Stable, no TTL: a
+	// synced task keeps the URL indefinitely. See internal/taskattach.
+	KeyTaskAttachSecret = "task_attach_secret"
+
 	// ForestNote device sync (roll-our-own SQLite sync). KeySyncEnabled gates the
 	// /sync/v1 route + syncstore migration (default off). KeySyncBatchLimit caps
 	// relay ops returned per response. See docs/sync/forestnote-sync-protocol.md.
@@ -153,6 +160,7 @@ var envVarForKey = map[string]string{
 	KeySPCFileRoot:          "UB_SPC_FILE_ROOT",
 	KeySPCQuotaBytes:        "UB_SPC_QUOTA_BYTES",
 	KeySPCOssSecret:         "UB_SPC_OSS_SECRET",
+	KeyTaskAttachSecret:     "UB_TASK_ATTACH_SECRET",
 	KeySyncEnabled:          "UB_SYNC_ENABLED",
 	KeySyncBatchLimit:       "UB_SYNC_BATCH_LIMIT",
 }
@@ -222,6 +230,7 @@ var restartRequired = map[string]bool{
 	KeySPCFileRoot:          true,
 	KeySPCQuotaBytes:        true,
 	KeySPCOssSecret:         true,
+	KeyTaskAttachSecret:     true,
 	KeySyncEnabled:          true,
 	KeySyncBatchLimit:       true,
 }

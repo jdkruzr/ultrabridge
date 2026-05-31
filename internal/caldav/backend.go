@@ -10,6 +10,7 @@ import (
 
 	ical "github.com/emersion/go-ical"
 	gocaldav "github.com/emersion/go-webdav/caldav"
+	"github.com/sysop/ultrabridge/internal/taskattach"
 	"github.com/sysop/ultrabridge/internal/taskstore"
 )
 
@@ -41,6 +42,18 @@ type Backend struct {
 	// subsequent PROPFIND responses, without requiring a container restart.
 	nameMu         sync.RWMutex
 	collectionName string
+
+	// attach (optional; zero value disables) de-bloats inline-binary ATTACH on
+	// inbound PUT and reconstructs it on outbound GET. Wired from main.go via
+	// SetTaskAttach.
+	attach AttachDeps
+}
+
+// SetTaskAttach wires the inline-binary ATTACH side-store + signer + base URL.
+// Set from main.go after construction; a zero value (never set) leaves inline
+// binary in the blob as before.
+func (b *Backend) SetTaskAttach(store *taskattach.BlobStore, signer *taskattach.Signer, baseURL string) {
+	b.attach = AttachDeps{Store: store, Signer: signer, BaseURL: strings.TrimRight(baseURL, "/")}
 }
 
 func NewBackend(store TaskStore, prefix, collectionName, dueTimeMode string, notifier SyncNotifier) *Backend {
@@ -168,6 +181,13 @@ func (b *Backend) PutCalendarObject(ctx context.Context, urlPath string, cal *ic
 		return nil, err
 	}
 
+	// De-bloat any inline-binary ATTACH out of the blob into the content store
+	// before persisting (no-op when unwired or when there are none). ETag is
+	// unaffected (ComputeETag ignores the blob), so this never re-syncs.
+	if b.attach.enabled() && task.ICalBlob.Valid && task.ICalBlob.String != "" {
+		task.ICalBlob.String = DebloatInlineAttachments(task.ICalBlob.String, b.attach)
+	}
+
 	taskID := b.taskIDFromPath(urlPath)
 
 	// Check if task exists
@@ -255,6 +275,15 @@ func (b *Backend) collection() gocaldav.Calendar {
 
 func (b *Backend) taskToCalendarObject(t *taskstore.Task) *gocaldav.CalendarObject {
 	cal := TaskToVTODO(t, b.dueTimeMode)
+	// Restore any de-bloated inline-binary ATTACH from the content store so the
+	// client receives byte-equivalent content (no-op when unwired / none).
+	if b.attach.Store != nil {
+		ReconstructInlineAttachments(cal, b.attach.Store)
+	}
+	// Synthesize an ATTACH to the source FN page render for ForestNote tasks so
+	// third-party clients can open the handwriting page (serve-time only, never
+	// stored). No-op without a signer + base URL or for non-FN tasks.
+	AddFNRenderAttach(cal, t, b.attach)
 	return &gocaldav.CalendarObject{
 		Path:    b.prefix + "/user/calendars/tasks/" + t.TaskID + ".ics",
 		ModTime: taskstore.MsToTime(t.LastModified.Int64),
