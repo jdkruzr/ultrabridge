@@ -4,18 +4,10 @@
     <div class="card" style="border-color: var(--status-text-failed);">
         <p class="text-danger">{{.filesError}}</p>
     </div>
+  {{else if .detail}}
+    {{template "_detail_page_grid" .detail}}
   {{else}}
-    <div class="status-panel">
-        <span class="text-bold">Pipeline Status:</span>
-        <span id="proc-status" class="text-small">Loading...</span>
-        <div class="flex-spacer"></div>
-        <form hx-post="/processor/boox/start" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
-            <button type="submit" class="btn-small">▶ Start</button>
-        </form>
-        <form hx-post="/processor/boox/stop" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
-            <button type="submit" class="btn-small" style="background: var(--text-secondary);">⏹ Stop</button>
-        </form>
-    </div>
+    {{template "_files_status_panel" .pipelinePanel}}
 
     <div class="toolbar">
       {{if .BooxImportPath}}
@@ -124,17 +116,7 @@
     </form>
     </div> {{/* end of card */}}
 
-    {{if gt .filesTotalPages 1}}
-    <div style="margin-top:0.75rem; display:flex; align-items:center; gap:0.5rem; font-size:0.9rem;">
-      {{if gt .filesPage 1}}
-        <button class="btn-small" hx-get="/files/boox?page={{sub .filesPage 1}}{{if .booxFolderFilter}}&folder={{.booxFolderFilter | urlquery}}{{end}}{{if .booxDeviceFilter}}&device={{.booxDeviceFilter | urlquery}}{{end}}" hx-target="#main-content" hx-push-url="true">◂ Prev</button>
-      {{end}}
-      <span>Page {{.filesPage}} of {{.filesTotalPages}}</span>
-      {{if lt .filesPage .filesTotalPages}}
-        <button class="btn-small" hx-get="/files/boox?page={{add .filesPage 1}}{{if .booxFolderFilter}}&folder={{.booxFolderFilter | urlquery}}{{end}}{{if .booxDeviceFilter}}&device={{.booxDeviceFilter | urlquery}}{{end}}" hx-target="#main-content" hx-push-url="true">Next ▸</button>
-      {{end}}
-    </div>
-    {{end}}
+    {{template "_files_pagination" .pager}}
   {{end}}
 </div>
 
@@ -214,21 +196,4 @@
                 }
             });
     }
-    {{if .detailPath}}
-    // Stash the detail path in a window global. Two cases call it:
-    //
-    // 1. HTMX swap (clicking a red-ink task's "Open note details" link
-    //    from the Tasks tab): showHistory is already defined; we fire
-    //    immediately below.
-    // 2. Hard browser load (clicking the absolute-URL link in a CalDAV
-    //    client): this script runs while the document is still parsing,
-    //    BEFORE layout.html's script block defines showHistory. The
-    //    layout script reads the global after it defines showHistory
-    //    and fires the call there.
-    window.__ubPendingDetail = "{{.detailPath}}";
-    if (typeof showHistory === 'function') {
-        showHistory(window.__ubPendingDetail);
-        window.__ubPendingDetail = null;
-    }
-    {{end}}
 </script>

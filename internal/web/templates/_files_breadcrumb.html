@@ -1,0 +1,14 @@
+{{define "_files_breadcrumb"}}
+{{/*
+  Shared breadcrumb trail for the hierarchical Files tabs (Supernote,
+  ForestNote). Context: a []crumb where each crumb has
+    Label string
+    HxGet string  — the navigation URL (also used as the href)
+  Boox is flat and does not use this partial.
+*/}}
+<div class="breadcrumb">
+  {{range .}}
+    <a href="{{.HxGet}}" hx-get="{{.HxGet}}" hx-target="#main-content" hx-push-url="true">{{.Label}}</a><span class="sep">/</span>
+  {{end}}
+</div>
+{{end}}

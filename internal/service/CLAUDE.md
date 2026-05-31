@@ -1,6 +1,6 @@
 # internal/service
 
-Last verified: 2026-05-30 (TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; PurgeCompleted now returns (int64, error); PurgeDeleted now returns (purged, skipped, error); ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
+Last verified: 2026-05-30 (NoteService.GetNotePages → []NotePageView typed page content backing the in-tab note detail grid (web); NoteService.RenderSupernotePage renders an absolute .note via go-sn directly, bypassing RenderPage's isBooxPath heuristic — for digest source pages that may render with no filesystem Supernote source configured; DigestService.GetDigest + DigestView detail fields (SourcePath/SourceType/HandwriteInnerName/NotePage) for the digest detail page; TaskService write surface for URL/Priority/Categories/Comment + ForestNote provenance + hard-purge; PurgeCompleted now returns (int64, error); PurgeDeleted now returns (purged, skipped, error); ForestNoteReprocessor.Status + EmbeddingJobStatus.ForestNote; SearchService.Search gained explicit `limit` arg with service-side default/ceiling clamp)
 
 ## Purpose
 
@@ -61,8 +61,11 @@ all implemented by unexported structs and constructed via
   care should pass `0` rather than try to pick a default.
 - **`DigestService`** (`digest.go`) — read + delete surface over
   `digeststore` for the web Digests tab: `ListDigests(group, tag,
-  page, perPage)` + `ListGroups`, plus `DeleteDigest(id)`. All-users
-  reads (single-user instance). Constructed only in SPC server mode;
+  page, perPage)` + `ListGroups`, `GetDigest(id)` (the detail-page read —
+  `DigestView` carries SourcePath/SourceType/HandwriteInnerName plus
+  `NotePage` parsed from the opaque `metadata` JSON's `note_page` key via
+  `parseNotePage`; the 0-vs-1-based convention is a hardware-verify TODO),
+  plus `DeleteDigest(id)`. All-users reads (single-user instance). Constructed only in SPC server mode;
   the web handler holds it via `SetDigestService` (nil ⇒ tab + nav
   entry hide). `DeleteDigest` soft-deletes, de-indexes via an
   injected `DigestDeindexer` (`*digestindex.Bridge`), and pushes a

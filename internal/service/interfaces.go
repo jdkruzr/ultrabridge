@@ -169,6 +169,17 @@ type ForestNoteNotebookDetail struct {
 	Pages      []ForestNotePage `json:"pages"`
 }
 
+// NotePageView is one indexed page of a Supernote/Boox note, surfaced for the
+// in-tab detail page grid. It mirrors the OCR-bearing fields ForestNotePage
+// carries so the three sources share one detail renderer.
+type NotePageView struct {
+	Page      int    `json:"page"`
+	Source    string `json:"source"`     // OCR provenance ("myScript" | "api")
+	BodyText  string `json:"body_text"`  // recognized text for the page
+	Keywords  string `json:"keywords"`   // page-0 keyword annotations, if any
+	TitleText string `json:"title_text"` // page-0 title annotation, if any
+}
+
 // ForestNoteTreeNode is a folder in the ForestNote browse tree, holding its child
 // folders and the notebooks filed directly under it.
 type ForestNoteTreeNode struct {
@@ -207,11 +218,11 @@ type EmbeddingJobStatus struct {
 // in the parent struct when no ForestNote source is wired (server-mode
 // without the FN source, or pre-source-start polls).
 type ForestNoteQueueStatus struct {
-	Pending   int   `json:"pending"`    // pages waiting in the bridge channel
-	InFlight  int   `json:"in_flight"`  // pages currently being OCR'd
-	Processed int64 `json:"processed"`  // pages finished since process start
-	Dropped   int64 `json:"dropped"`    // enqueues lost to channel-full
-	Capacity  int   `json:"capacity"`   // channel buffer size
+	Pending   int   `json:"pending"`   // pages waiting in the bridge channel
+	InFlight  int   `json:"in_flight"` // pages currently being OCR'd
+	Processed int64 `json:"processed"` // pages finished since process start
+	Dropped   int64 `json:"dropped"`   // enqueues lost to channel-full
+	Capacity  int   `json:"capacity"`  // channel buffer size
 }
 
 type ActiveTask struct {
@@ -232,21 +243,21 @@ type ActiveTask struct {
 // can supply alongside the basics. Categories is wholesale (the patch
 // replaces the entire list; partial add/remove would need a richer API).
 type TaskPatch struct {
-	Title       *string    `json:"title,omitempty"`
-	DueAt       *time.Time `json:"due_at,omitempty"`
-	ClearDueAt  bool       `json:"clear_due_at,omitempty"`
-	Detail      *string    `json:"detail,omitempty"`
-	URL         *string    `json:"url,omitempty"`
-	ClearURL    bool       `json:"clear_url,omitempty"`
-	Priority    *string    `json:"priority,omitempty"`
-	ClearPriority bool     `json:"clear_priority,omitempty"`
+	Title         *string    `json:"title,omitempty"`
+	DueAt         *time.Time `json:"due_at,omitempty"`
+	ClearDueAt    bool       `json:"clear_due_at,omitempty"`
+	Detail        *string    `json:"detail,omitempty"`
+	URL           *string    `json:"url,omitempty"`
+	ClearURL      bool       `json:"clear_url,omitempty"`
+	Priority      *string    `json:"priority,omitempty"`
+	ClearPriority bool       `json:"clear_priority,omitempty"`
 	// Categories: nil = leave alone, non-nil (incl. empty slice) = replace.
 	// A nil-vs-empty distinction is expressible in Go JSON decoding via a
 	// pointer, but []string already encodes the same thing — callers send
 	// `"categories": []` to clear, or omit the field to leave unchanged.
-	Categories *[]string `json:"categories,omitempty"`
-	Comment    *string   `json:"comment,omitempty"`
-	ClearComment bool    `json:"clear_comment,omitempty"`
+	Categories   *[]string `json:"categories,omitempty"`
+	Comment      *string   `json:"comment,omitempty"`
+	ClearComment bool      `json:"clear_comment,omitempty"`
 }
 
 // TaskCreate is the input shape for creating a new task via the
@@ -300,7 +311,14 @@ type NoteService interface {
 	GetBooxNote(ctx context.Context, path string) (BooxNoteSummary, error)
 	GetNoteDetails(ctx context.Context, path string) (interface{}, error)                 // history/job info
 	GetContent(ctx context.Context, path string) (interface{}, error)                     // OCR text and page metadata
+	GetNotePages(ctx context.Context, path string) ([]NotePageView, error)                // typed page content for the in-tab detail grid
 	RenderPage(ctx context.Context, path string, page int) (io.ReadCloser, string, error) // image stream, content-type
+	// RenderSupernotePage renders an absolute .note path through the Supernote
+	// (go-sn) renderer unconditionally, bypassing RenderPage's source-detection.
+	// Used for digest source pages, which are always Supernote notes and may need
+	// to render when no filesystem Supernote source is configured (SPC-server-only
+	// deployments) — where RenderPage's heuristics could misroute to Boox.
+	RenderSupernotePage(ctx context.Context, path string, page int) (io.ReadCloser, string, error)
 
 	ScanFiles(ctx context.Context) error
 	Enqueue(ctx context.Context, path string, force bool) error
@@ -415,6 +433,12 @@ type DigestView struct {
 	HasHandwriting bool     `json:"has_handwriting"` // a .mark annotation exists
 	CreatedAt      int64    `json:"created_at"`      // millis UTC
 	ModifiedAt     int64    `json:"modified_at"`     // millis UTC
+
+	// Detail-view fields (surfaced by GetDigest for the digest detail page).
+	SourcePath         string `json:"source_path,omitempty"`          // device-relative source doc, e.g. "NOTE/Note/foo.note"
+	SourceType         int    `json:"source_type,omitempty"`          // 1=PDF, 2=Note
+	HandwriteInnerName string `json:"handwrite_inner_name,omitempty"` // .mark blob filename under <SPCFileRoot>/.digests, if any
+	NotePage           int    `json:"note_page,omitempty"`            // page ordinal the excerpt came from (from metadata.note_page)
 }
 
 // DigestGroupView is a digest group/library, used for the filter pills.
@@ -429,6 +453,9 @@ type DigestGroupView struct {
 type DigestService interface {
 	ListDigests(ctx context.Context, group, tag string, page, perPage int) ([]DigestView, int, error)
 	ListGroups(ctx context.Context) ([]DigestGroupView, error)
+	// GetDigest returns one digest with detail-view fields populated, or the
+	// store's ErrNotFound. Backs the GET /digests/{id} detail page.
+	GetDigest(ctx context.Context, id int64) (DigestView, error)
 	// DeleteDigest soft-deletes a digest and propagates the delete to the device
 	// via a durable DELETE_DIGEST tombstone (D2).
 	DeleteDigest(ctx context.Context, id int64) error

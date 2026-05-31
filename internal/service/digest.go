@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -126,16 +127,62 @@ func toDigestView(d *digeststore.Digest, groupNames map[string]string) DigestVie
 		}
 	}
 	return DigestView{
-		ID:             d.ID,
-		Name:           d.Name,
-		Excerpt:        d.Content,
-		Comment:        d.CommentStr,
-		Tags:           splitTags(d.Tags),
-		Group:          group,
-		SourceLabel:    sourceTypeLabel(d.SourceType),
-		HasHandwriting: d.HandwriteInnerName != "",
-		CreatedAt:      d.CreationTime,
-		ModifiedAt:     d.LastModifiedTime,
+		ID:                 d.ID,
+		Name:               d.Name,
+		Excerpt:            d.Content,
+		Comment:            d.CommentStr,
+		Tags:               splitTags(d.Tags),
+		Group:              group,
+		SourceLabel:        sourceTypeLabel(d.SourceType),
+		HasHandwriting:     d.HandwriteInnerName != "",
+		CreatedAt:          d.CreationTime,
+		ModifiedAt:         d.LastModifiedTime,
+		SourcePath:         d.SourcePath,
+		SourceType:         d.SourceType,
+		HandwriteInnerName: d.HandwriteInnerName,
+		NotePage:           parseNotePage(d.Metadata),
+	}
+}
+
+// GetDigest returns one digest as a DigestView (with the detail-view fields
+// populated), resolving the group name like ListDigests does. Returns the
+// store's ErrNotFound when the id is unknown so the web layer can map to 404.
+func (s *digestService) GetDigest(ctx context.Context, id int64) (DigestView, error) {
+	d, err := s.store.GetItem(ctx, id)
+	if err != nil {
+		return DigestView{}, err
+	}
+	groupNames := map[string]string{}
+	if groups, gerr := s.store.ListGroups(ctx); gerr == nil {
+		for i := range groups {
+			groupNames[groups[i].UniqueIdentifier] = groups[i].Name
+		}
+	}
+	return toDigestView(d, groupNames), nil
+}
+
+// parseNotePage pulls the source page ordinal out of the opaque device metadata
+// JSON (key "note_page"; the device stores it as a string, e.g. {"note_page":"1"}).
+// Returns 0 when absent or unparseable. NOTE: the 0-vs-1-based convention is
+// unconfirmed against a real capture — treated as 0-based here (matching the
+// codebase's page indexing); if hardware shows it's 1-based, subtract one at
+// the render call site.
+func parseNotePage(metadata string) int {
+	if metadata == "" {
+		return 0
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(metadata), &raw); err != nil {
+		return 0
+	}
+	switch v := raw["note_page"].(type) {
+	case string:
+		n, _ := strconv.Atoi(strings.TrimSpace(v))
+		return n
+	case float64:
+		return int(v)
+	default:
+		return 0
 	}
 }
 

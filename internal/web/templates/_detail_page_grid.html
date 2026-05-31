@@ -1,0 +1,70 @@
+{{define "_detail_page_grid"}}
+{{/*
+  Shared in-tab note detail: a back link + title + optional actions, an
+  optional metadata row, a page grid (thumbnail + OCR text per page), and
+  optional collapsible Job Info / Version History panels. Context: a detailView
+  (handler.go). Supernote and Boox render their note detail through this partial
+  (replacing the old #history-modal); ForestNote keeps its own bespoke detail
+  for now but follows the same visual pattern.
+*/}}
+<div class="toolbar">
+  <a class="btn-small" href="{{.BackURL}}" hx-get="{{.BackURL}}" hx-target="#main-content" hx-push-url="true">← Back</a>
+  <span class="text-bold" style="margin-left: 0.5rem;">{{.Title}}</span>
+  <div class="flex-spacer"></div>
+  {{range .Actions}}
+  <button type="button" class="btn-small"{{if .Danger}} style="background: var(--status-text-failed);"{{end}}
+          hx-post="{{.HxPost}}" hx-swap="none"
+          {{if .Vals}}hx-vals='{{.Vals}}'{{end}}
+          {{if .Confirm}}hx-confirm="{{.Confirm}}"{{end}}
+          {{if .OnAfter}}hx-on:htmx:after-request="{{.OnAfter}}"{{end}}>{{.Label}}</button>
+  {{end}}
+</div>
+
+{{if .Meta}}
+<div class="card">
+  <div class="detail-meta">
+    {{range .Meta}}<span><span class="text-secondary">{{.Label}}:</span> {{.Value}}</span>{{end}}
+  </div>
+</div>
+{{end}}
+
+{{if .Pages}}
+<div class="detail-page-grid">
+  {{range .Pages}}
+  <figure class="detail-page">
+    <img loading="lazy" src="{{.ImgURL}}" alt="{{.Caption}}">
+    <figcaption class="text-small text-secondary">{{.Caption}}{{if .Source}} · {{.Source}}{{end}}</figcaption>
+    <div class="detail-page-ocr text-small">{{if .BodyText}}{{.BodyText}}{{else}}<em class="text-secondary">No text recognized.</em>{{end}}</div>
+    {{if .Keywords}}<div class="text-small text-secondary" style="margin-top: 0.25rem;">Keywords: {{.Keywords}}</div>{{end}}
+  </figure>
+  {{end}}
+</div>
+{{else}}
+<div class="card"><p class="text-secondary">{{.EmptyMsg}}</p></div>
+{{end}}
+
+{{if .JobInfoURL}}
+<details class="card" style="margin-top: 1rem;">
+  <summary class="text-small text-secondary" style="cursor: pointer;">Job info</summary>
+  <pre id="detail-jobinfo" class="text-small" style="white-space: pre-wrap; max-height: 200px; overflow-y: auto; margin-top: 0.5rem;">Loading…</pre>
+  <script>ubLoadJobInfo("{{.JobInfoURL}}", "detail-jobinfo");</script>
+</details>
+{{end}}
+
+{{if .VersionsURL}}
+<details class="card" style="margin-top: 0.75rem;">
+  <summary class="text-small text-secondary" style="cursor: pointer;">Version history</summary>
+  <div id="detail-versions" style="margin-top: 0.5rem;">Loading…</div>
+  <script>ubLoadVersions("{{.VersionsURL}}", "detail-versions");</script>
+</details>
+{{end}}
+
+<style>
+  .detail-meta { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+  .detail-page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem; }
+  .detail-page { margin: 0; border: 1px solid var(--border-color, #ccc); border-radius: 4px; padding: 0.5rem; background: var(--card-bg, #fff); }
+  .detail-page img { width: 100%; height: auto; display: block; background: #fff; }
+  .detail-page figcaption { text-align: center; margin-top: 0.25rem; }
+  .detail-page-ocr { margin-top: 0.4rem; max-height: 8rem; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+</style>
+{{end}}

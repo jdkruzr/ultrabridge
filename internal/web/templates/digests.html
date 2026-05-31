@@ -59,16 +59,6 @@
     </div>
     </div>
 
-    {{if gt .filesTotalPages 1}}
-    <div style="margin-top:0.75rem; display:flex; align-items:center; gap:0.5rem; font-size:0.9rem;">
-      {{if gt .filesPage 1}}
-        <button class="btn-small" hx-get="/digests?page={{sub .filesPage 1}}{{if .digestGroupFilter}}&group={{.digestGroupFilter | urlquery}}{{end}}{{if .digestTagFilter}}&tag={{.digestTagFilter | urlquery}}{{end}}" hx-target="#main-content" hx-push-url="true">◂ Prev</button>
-      {{end}}
-      <span>Page {{.filesPage}} of {{.filesTotalPages}}</span>
-      {{if lt .filesPage .filesTotalPages}}
-        <button class="btn-small" hx-get="/digests?page={{add .filesPage 1}}{{if .digestGroupFilter}}&group={{.digestGroupFilter | urlquery}}{{end}}{{if .digestTagFilter}}&tag={{.digestTagFilter | urlquery}}{{end}}" hx-target="#main-content" hx-push-url="true">Next ▸</button>
-      {{end}}
-    </div>
-    {{end}}
+    {{template "_files_pagination" .pager}}
   {{end}}
 </div>

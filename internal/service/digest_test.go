@@ -133,3 +133,36 @@ func TestDeleteDigest_NilDepsNoPanic(t *testing.T) {
 		t.Errorf("soft-delete should happen with nil deps, got %+v", store.softDeleted)
 	}
 }
+
+func TestParseNotePage(t *testing.T) {
+	cases := map[string]int{
+		``:                      0,
+		`{"note_page":"1"}`:     1, // device stores it as a string
+		`{"note_page":3}`:       3, // tolerate a numeric form too
+		`{"note_page":""}`:      0,
+		`{"other":"x"}`:         0,
+		`not json`:              0,
+		`{"note_page":"  5  "}`: 5,
+	}
+	for meta, want := range cases {
+		if got := parseNotePage(meta); got != want {
+			t.Errorf("parseNotePage(%q) = %d, want %d", meta, got, want)
+		}
+	}
+}
+
+func TestToDigestView_ExposesDetailFields(t *testing.T) {
+	store := &fakeDigestStore{item: &digeststore.Digest{
+		ID: 1, UserID: 1, SourceType: 2, SourcePath: "NOTE/Note/x.note",
+		HandwriteInnerName: "abc.mark", Metadata: `{"note_page":"2"}`,
+	}}
+	svc := NewDigestService(store, nil).(*digestService)
+	v, err := svc.GetDigest(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetDigest: %v", err)
+	}
+	if v.SourcePath != "NOTE/Note/x.note" || v.SourceType != 2 ||
+		v.HandwriteInnerName != "abc.mark" || v.NotePage != 2 || !v.HasHandwriting {
+		t.Errorf("detail fields not exposed: %+v", v)
+	}
+}

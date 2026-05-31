@@ -354,6 +354,44 @@ func TestVTODOToTask(t *testing.T) {
 				}
 			},
 		},
+		{
+			// FN emits the standard URL property (the https deep link back to the
+			// source page). Lift it into the links column so REST/MCP surface it
+			// and it round-trips back out via TaskToVTODO (which reads t.Links).
+			name: "URL property lifted to links column",
+			cal: func() *ical.Calendar {
+				cal := ical.NewCalendar()
+				todo := ical.NewComponent("VTODO")
+				todo.Props.Set(&ical.Prop{Name: "UID", Value: "url-1"})
+				todo.Props.Set(&ical.Prop{Name: "STATUS", Value: "NEEDS-ACTION"})
+				todo.Props.Set(&ical.Prop{Name: "SUMMARY", Value: "Has a link"})
+				todo.Props.Set(&ical.Prop{Name: "URL", Value: "https://ub.example.org/files/forestnote?notebook=NB1&page=PG1"})
+				cal.Children = append(cal.Children, todo)
+				return cal
+			}(),
+			dueTimeMode: "preserve",
+			verify: func(t *testing.T, task *taskstore.Task) {
+				want := "https://ub.example.org/files/forestnote?notebook=NB1&page=PG1"
+				if !task.Links.Valid || task.Links.String != want {
+					t.Errorf("URL not lifted to links: %+v", task.Links)
+				}
+			},
+		},
+		{
+			// No URL → links stays NULL (don't manufacture an empty link).
+			name: "absent URL leaves links NULL",
+			cal: createTestCalendar(map[string]string{
+				"UID":     "no-url",
+				"SUMMARY": "No link",
+				"STATUS":  "NEEDS-ACTION",
+			}),
+			dueTimeMode: "preserve",
+			verify: func(t *testing.T, task *taskstore.Task) {
+				if task.Links.Valid {
+					t.Errorf("links should be NULL when no URL: %+v", task.Links)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

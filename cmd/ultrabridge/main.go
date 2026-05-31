@@ -732,6 +732,7 @@ func main() {
 
 		webHandler = web.NewHandler(taskSvc, noteSvc, searchSvc, configSvc, noteDB, snNotesPath, booxNotesPath, logger, broadcaster)
 		webHandler.SetDigestService(digestSvc)
+		webHandler.SetSPCFileRoot(cfg.SPCFileRoot) // resolves digest source pages for /digests/{id}/render
 
 		// OAuth2 flow for Claude.ai
 		// /authorize requires user auth (browser login)

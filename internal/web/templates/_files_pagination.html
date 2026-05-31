@@ -1,0 +1,25 @@
+{{define "_files_pagination"}}
+{{/*
+  Shared Prev/Page N/Next pager for the Files tabs and Digests.
+  Context: a map with keys
+    BaseURL    string             — e.g. "/files/supernote"
+    Page       int                — current 1-based page
+    TotalPages int
+    Params     map[string]string  — preserved (non-page) query params, raw
+                                     values; emitted via urlquery so escaping
+                                     matches the per-tab inline form it replaces.
+  Map keys range in sorted order (deterministic), so the preserved query
+  string is stable across renders.
+*/}}
+{{if gt .TotalPages 1}}
+<div style="margin-top:0.75rem; display:flex; align-items:center; gap:0.5rem; font-size:0.9rem;">
+  {{if gt .Page 1}}
+    <button class="btn-small" hx-get="{{.BaseURL}}?page={{sub .Page 1}}{{range $k, $v := .Params}}&{{$k}}={{$v | urlquery}}{{end}}" hx-target="#main-content" hx-push-url="true">◂ Prev</button>
+  {{end}}
+  <span>Page {{.Page}} of {{.TotalPages}}</span>
+  {{if lt .Page .TotalPages}}
+    <button class="btn-small" hx-get="{{.BaseURL}}?page={{add .Page 1}}{{range $k, $v := .Params}}&{{$k}}={{$v | urlquery}}{{end}}" hx-target="#main-content" hx-push-url="true">Next ▸</button>
+  {{end}}
+</div>
+{{end}}
+{{end}}

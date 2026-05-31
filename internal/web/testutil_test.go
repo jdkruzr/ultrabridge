@@ -169,10 +169,11 @@ func (m *mockTaskService) BulkDelete(ctx context.Context, ids []string) error   
 
 // mockNoteService implements NoteService for testing
 type mockNoteService struct {
-	files    []service.NoteFile
-	docs     map[string][]service.SearchResult
-	contents map[string]interface{}
-	renders  map[string]io.ReadCloser
+	files     []service.NoteFile
+	docs      map[string][]service.SearchResult
+	contents  map[string]interface{}
+	notePages map[string][]service.NotePageView
+	renders   map[string]io.ReadCloser
 
 	processorStarted     bool
 	booxProcessorStarted bool
@@ -278,7 +279,13 @@ func (m *mockNoteService) GetNoteDetails(ctx context.Context, path string) (inte
 func (m *mockNoteService) GetContent(ctx context.Context, path string) (interface{}, error) {
 	return m.contents[path], nil
 }
+func (m *mockNoteService) GetNotePages(ctx context.Context, path string) ([]service.NotePageView, error) {
+	return m.notePages[path], nil
+}
 func (m *mockNoteService) RenderPage(ctx context.Context, path string, page int) (io.ReadCloser, string, error) {
+	return m.renders[path], "image/jpeg", nil
+}
+func (m *mockNoteService) RenderSupernotePage(ctx context.Context, path string, page int) (io.ReadCloser, string, error) {
 	return m.renders[path], "image/jpeg", nil
 }
 func (m *mockNoteService) ScanFiles(ctx context.Context) error { return nil }

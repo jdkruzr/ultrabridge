@@ -1,0 +1,27 @@
+{{define "_files_status_panel"}}
+{{/*
+  Shared pipeline-status panel for the source Files tabs. Context: a
+  pipelinePanel struct
+    Source    string  — slug for the /processor/<source>/{start,stop} routes
+    StartStop bool     — render Start/Stop controls (sources with a worker)
+    Note      string   — shown in place of controls when StartStop is false
+  The live status text is filled in by updateProcessorStatus() (layout.html)
+  into #proc-status. Supernote/Boox run a processor worker (StartStop); the
+  ForestNote sync bridge has no global start/stop, so it passes a Note instead.
+*/}}
+<div class="status-panel">
+    <span class="text-bold">Pipeline Status:</span>
+    <span id="proc-status" class="text-small">Loading...</span>
+    <div class="flex-spacer"></div>
+    {{if .StartStop}}
+    <form hx-post="/processor/{{.Source}}/start" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
+        <button type="submit" class="btn-small">▶ Start</button>
+    </form>
+    <form hx-post="/processor/{{.Source}}/stop" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
+        <button type="submit" class="btn-small" style="background: var(--text-secondary);">⏹ Stop</button>
+    </form>
+    {{else if .Note}}
+    <span class="text-small text-secondary">{{.Note}}</span>
+    {{end}}
+</div>
+{{end}}

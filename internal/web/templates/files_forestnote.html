@@ -47,13 +47,9 @@
     {{end}}
   {{else}}
     {{/* Browse mode: Supernote-style table of folders + notebooks. */}}
+    {{template "_files_status_panel" .pipelinePanel}}
     <div class="card">
-      <div class="breadcrumb">
-        <a href="/files/forestnote" hx-get="/files/forestnote" hx-target="#main-content" hx-push-url="true">Home</a><span class="sep">/</span>
-        {{range .fnCrumbs}}
-          <a href="/files/forestnote?folder={{.FolderID}}" hx-get="/files/forestnote?folder={{.FolderID}}" hx-target="#main-content" hx-push-url="true">{{.Name}}</a><span class="sep">/</span>
-        {{end}}
-      </div>
+      {{template "_files_breadcrumb" .navCrumbs}}
       {{if .fnEntries}}
       <div class="table-container">
       <table class="task-table">

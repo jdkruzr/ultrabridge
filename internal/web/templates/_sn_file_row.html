@@ -37,7 +37,7 @@
       {{else if ne .File.JobStatus "in_progress"}}
         <button type="button" hx-post="/files/skip?path={{.File.Path | urlquery}}&back={{.RelPath | urlquery}}" hx-target="closest tr" hx-swap="outerHTML" class="btn-small">Skip</button>
       {{end}}
-      <button type="button" class="btn-small" onclick="showHistory('{{.File.Path}}')">Details</button>
+      <button type="button" class="btn-small" hx-get="/files/supernote?detail={{.File.Path | urlquery}}&back={{.RelPath | urlquery}}" hx-target="#main-content" hx-push-url="true">Details</button>
     </div>
     {{end}}
   </td>

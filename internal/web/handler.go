@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -67,6 +68,7 @@ type Handler struct {
 	notesPathPrefix string
 	booxNotesPath   string
 	booxImportPath  string
+	spcFileRoot     string // UB-as-SPC file tree root; resolves digest source paths (set via SetSPCFileRoot)
 	tmpl            *template.Template
 	mux             *http.ServeMux
 	logger          *slog.Logger
@@ -305,6 +307,8 @@ func NewHandler(
 	h.mux.HandleFunc("POST /files/forestnote/reprocess", h.handleForestNoteReprocess)
 	h.mux.HandleFunc("GET /files/forestnote/export", h.handleForestNoteExport)
 	h.mux.HandleFunc("GET /digests", h.handleDigests)
+	h.mux.HandleFunc("GET /digests/{id}", h.handleDigestDetail)
+	h.mux.HandleFunc("GET /digests/{id}/render", h.handleDigestRender)
 	h.mux.HandleFunc("DELETE /digests/{id}", h.handleDeleteDigest)
 	h.mux.HandleFunc("GET /search", h.handleSearch)
 	h.mux.HandleFunc("POST /files/queue", h.handleFilesQueue)
@@ -383,6 +387,14 @@ func NewHandler(
 // A setter (not a constructor arg) keeps the many NewHandler call sites stable.
 func (h *Handler) SetDigestService(d service.DigestService) {
 	h.digests = d
+}
+
+// SetSPCFileRoot wires the UB-as-SPC file-tree root used to resolve a digest's
+// device-relative SourcePath into an on-disk note for the digest render route.
+// Set from main alongside SetDigestService (both SPC-server-mode only); a setter
+// keeps the NewHandler call sites stable.
+func (h *Handler) SetSPCFileRoot(root string) {
+	h.spcFileRoot = root
 }
 
 func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, name string, data map[string]interface{}) {
@@ -487,11 +499,24 @@ func (h *Handler) handleFilesSupernote(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	data := map[string]interface{}{"activeTab": "files-supernote"}
-	if detail := r.URL.Query().Get("detail"); detail != "" {
-		data["detailPath"] = detail
-	}
 	if !h.notes.HasSupernoteSource() {
 		data["filesError"] = "No Supernote source configured. Add a source in Settings."
+		h.renderTemplate(w, r, "files_supernote", data)
+		return
+	}
+	if detail := r.URL.Query().Get("detail"); detail != "" {
+		if !h.validNotePath(detail) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		back := r.URL.Query().Get("back")
+		dv, err := h.buildNoteDetail(ctx, detail, filepath.Base(detail),
+			"/files/supernote?path="+url.QueryEscape(back), "", nil)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		data["detail"] = dv
 		h.renderTemplate(w, r, "files_supernote", data)
 		return
 	}
@@ -516,13 +541,18 @@ func (h *Handler) handleFilesSupernote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	data["files"], data["relPath"], data["breadcrumbs"], data["filesTotalFiles"] = files, relPath, buildBreadcrumbs(relPath), total
+	bs := buildBreadcrumbs(relPath)
+	data["files"], data["relPath"], data["breadcrumbs"], data["filesTotalFiles"] = files, relPath, bs, total
+	data["navCrumbs"] = supernoteCrumbs(bs)
 	data["filesPage"], data["filesPerPage"] = page, perPage
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
-	data["filesTotalPages"] = (total + perPage - 1) / perPage
-	if data["filesTotalPages"] == 0 {
-		data["filesTotalPages"] = 1
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
 	}
+	data["filesTotalPages"] = totalPages
+	data["pager"] = pager("/files/supernote", page, totalPages, map[string]string{"path": relPath})
+	data["pipelinePanel"] = pipelinePanel{Source: "supernote", StartStop: true}
 	h.renderTemplate(w, r, "files_supernote", data)
 }
 
@@ -533,11 +563,35 @@ func (h *Handler) handleFilesBoox(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	data := map[string]interface{}{"activeTab": "files-boox"}
-	if detail := r.URL.Query().Get("detail"); detail != "" {
-		data["detailPath"] = detail
-	}
 	if !h.notes.HasBooxSource() {
 		data["filesError"] = "No Boox source configured. Add a source in Settings."
+		h.renderTemplate(w, r, "files_boox", data)
+		return
+	}
+	if detail := r.URL.Query().Get("detail"); detail != "" {
+		if !h.validNotePath(detail) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		title := filepath.Base(detail)
+		if note, err := h.notes.GetBooxNote(ctx, detail); err == nil && note.Title != "" {
+			title = note.Title
+		}
+		delAction := detailAction{
+			Label:   "✗ Delete",
+			Danger:  true,
+			HxPost:  "/files/delete-note",
+			Vals:    mustJSON(map[string]string{"path": detail}),
+			Confirm: "Delete this note, all job records, and cached renders?",
+			OnAfter: "if(event.detail.successful){window.location='/files/boox';}",
+		}
+		dv, err := h.buildNoteDetail(ctx, detail, title, "/files/boox",
+			"/files/boox/versions?path="+url.QueryEscape(detail), []detailAction{delAction})
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		data["detail"] = dv
 		h.renderTemplate(w, r, "files_boox", data)
 		return
 	}
@@ -574,10 +628,13 @@ func (h *Handler) handleFilesBoox(w http.ResponseWriter, r *http.Request) {
 	data["booxDevices"], data["booxDeviceFilter"] = devices, device
 	data["filesPage"], data["filesPerPage"] = page, perPage
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
-	data["filesTotalPages"] = (total + perPage - 1) / perPage
-	if data["filesTotalPages"] == 0 {
-		data["filesTotalPages"] = 1
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
 	}
+	data["filesTotalPages"] = totalPages
+	data["pager"] = pager("/files/boox", page, totalPages, map[string]string{"folder": folder, "device": device})
+	data["pipelinePanel"] = pipelinePanel{Source: "boox", StartStop: true}
 	h.renderTemplate(w, r, "files_boox", data)
 }
 
@@ -617,7 +674,9 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	data["fnEntries"], data["fnCrumbs"], data["fnFolderID"] = entries, crumbs, folderID
+	data["navCrumbs"] = forestNoteCrumbs(crumbs)
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
+	data["pipelinePanel"] = pipelinePanel{Note: "Re-OCR is per-notebook — open a notebook to reprocess it."}
 	h.renderTemplate(w, r, "files_forestnote", data)
 }
 
@@ -741,6 +800,7 @@ func (h *Handler) handleDigests(w http.ResponseWriter, r *http.Request) {
 		totalPages = 1
 	}
 	data["filesTotalPages"] = totalPages
+	data["pager"] = pager("/digests", page, totalPages, map[string]string{"group": group, "tag": tag})
 	h.renderTemplate(w, r, "digests", data)
 }
 
@@ -769,6 +829,102 @@ func (h *Handler) handleDeleteDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.respondEmptyOrRedirect(w, r, "/digests")
+}
+
+// handleDigestDetail renders the in-tab detail page for one digest: full
+// (untruncated) excerpt, the OCR'd handwriting comment, group/tags/dates, and
+// a rendered image of the source page the excerpt came from.
+func (h *Handler) handleDigestDetail(w http.ResponseWriter, r *http.Request) {
+	if h.digests == nil {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad digest id", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	d, err := h.digests.GetDigest(ctx, id)
+	if err != nil {
+		if errors.Is(err, digeststore.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		h.logger.Error("get digest", "id", id, "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	// A source image is available only for Note digests whose source .note we
+	// can resolve under the SPC file root (PDF digests render text-only).
+	hasImage := d.SourceType == 2 && h.digestSourceAbsPath(d.SourcePath) != ""
+	data := map[string]interface{}{
+		"activeTab": "digests",
+		"digest":    d,
+		"hasImage":  hasImage,
+	}
+	h.renderTemplate(w, r, "digest_detail", data)
+}
+
+// handleDigestRender streams the source note page a digest excerpt came from,
+// reusing the Supernote render path. Baseline: Note digests only (the .mark
+// handwriting blob — RATTA_RLE — is not yet decoded; see the Phase 4 plan).
+func (h *Handler) handleDigestRender(w http.ResponseWriter, r *http.Request) {
+	if h.digests == nil {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad digest id", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	d, err := h.digests.GetDigest(ctx, id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	abs := h.digestSourceAbsPath(d.SourcePath)
+	if d.SourceType != 2 || abs == "" {
+		http.NotFound(w, r) // PDF digest, or source not resolvable/present
+		return
+	}
+	// NOTE: NotePage is treated as a 0-based ordinal (see service.parseNotePage);
+	// if hardware shows the device numbers pages from 1, subtract one here.
+	// RenderSupernotePage (not RenderPage) so an SPC-server-only deployment with
+	// a Boox source but no filesystem Supernote source doesn't misroute this
+	// .note to the Boox renderer.
+	stream, contentType, err := h.notes.RenderSupernotePage(ctx, abs, d.NotePage)
+	if err != nil {
+		h.logger.Error("digest render", "id", id, "path", abs, "page", d.NotePage, "error", err)
+		http.Error(w, "render failed", http.StatusInternalServerError)
+		return
+	}
+	defer stream.Close()
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	io.Copy(w, stream)
+}
+
+// digestSourceAbsPath resolves a digest's device-relative SourcePath (e.g.
+// "NOTE/Note/foo.note") to an absolute path under the SPC file root, or "" if
+// the root is unset, the path escapes the root, or the file is missing.
+func (h *Handler) digestSourceAbsPath(sourcePath string) string {
+	if h.spcFileRoot == "" || sourcePath == "" {
+		return ""
+	}
+	rel, ok := safeRelPath(strings.TrimPrefix(sourcePath, "/"))
+	if !ok {
+		return ""
+	}
+	abs := filepath.Join(h.spcFileRoot, rel)
+	if fi, err := os.Stat(abs); err != nil || fi.IsDir() {
+		return ""
+	}
+	return abs
 }
 
 func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -1672,6 +1828,121 @@ func buildBreadcrumbs(p string) []breadcrumb {
 	return res
 }
 
+// crumb is the normalized breadcrumb shape consumed by the shared
+// _files_breadcrumb partial: a display label paired with the navigation URL.
+type crumb struct{ Label, HxGet string }
+
+// pipelinePanel is the context for the shared _files_status_panel partial.
+// Sources with a processor worker (Supernote, Boox) set StartStop and a Source
+// slug; ForestNote (no global worker) sets Note instead.
+type pipelinePanel struct {
+	Source    string
+	StartStop bool
+	Note      string
+}
+
+// detailView and its parts are the context for the shared _detail_page_grid
+// partial — the in-tab note detail that replaced the #history-modal.
+type detailView struct {
+	Title       string
+	BackURL     string
+	Meta        []detailKV
+	Pages       []detailPage
+	Actions     []detailAction
+	JobInfoURL  string // collapsible job-record fetch (/files/history)
+	VersionsURL string // collapsible version-history fetch (Boox only)
+	EmptyMsg    string
+}
+
+type detailKV struct{ Label, Value string }
+
+type detailPage struct {
+	ImgURL   string
+	Caption  string
+	BodyText string
+	Source   string
+	Keywords string
+}
+
+type detailAction struct {
+	Label   string
+	HxPost  string
+	Vals    string // hx-vals JSON
+	Confirm string
+	OnAfter string // hx-on:htmx:after-request body
+	Danger  bool
+}
+
+// buildNoteDetail assembles the in-tab detail for a Supernote/Boox note from
+// its indexed page content. Pages render lazily via /files/render; the job
+// record (and Boox version history) load on demand into collapsibles.
+func (h *Handler) buildNoteDetail(ctx context.Context, path, title, backURL, versionsURL string, actions []detailAction) (detailView, error) {
+	pages, err := h.notes.GetNotePages(ctx, path)
+	if err != nil {
+		return detailView{}, err
+	}
+	dps := make([]detailPage, 0, len(pages))
+	for _, p := range pages {
+		dps = append(dps, detailPage{
+			ImgURL:   "/files/render?path=" + url.QueryEscape(path) + "&page=" + strconv.Itoa(p.Page) + "&v=2",
+			Caption:  "Page " + strconv.Itoa(p.Page+1),
+			BodyText: p.BodyText,
+			Source:   p.Source,
+			Keywords: p.Keywords,
+		})
+	}
+	return detailView{
+		Title:       title,
+		BackURL:     backURL,
+		Meta:        []detailKV{{Label: "Pages", Value: strconv.Itoa(len(pages))}},
+		Pages:       dps,
+		Actions:     actions,
+		JobInfoURL:  "/files/history?path=" + url.QueryEscape(path),
+		VersionsURL: versionsURL,
+		EmptyMsg:    "No indexed content yet — queue this note for OCR to see its pages.",
+	}, nil
+}
+
+// supernoteCrumbs adapts the Supernote relPath breadcrumb chain to []crumb.
+// RelPath is query-escaped (like the pager's path param) so folder names with
+// URL-significant characters — '&', '#', spaces — don't truncate the crumb URL.
+func supernoteCrumbs(bs []breadcrumb) []crumb {
+	out := make([]crumb, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, crumb{Label: b.Label, HxGet: "/files/supernote?path=" + url.QueryEscape(b.RelPath)})
+	}
+	return out
+}
+
+// forestNoteCrumbs adapts the ForestNote folder chain to []crumb, prepending
+// the "Home" root the FN tab shows ahead of its synced folders.
+func forestNoteCrumbs(cs []service.ForestNoteCrumb) []crumb {
+	out := make([]crumb, 0, len(cs)+1)
+	out = append(out, crumb{Label: "Home", HxGet: "/files/forestnote"})
+	for _, c := range cs {
+		out = append(out, crumb{Label: c.Name, HxGet: "/files/forestnote?folder=" + c.FolderID})
+	}
+	return out
+}
+
+// pager builds the context map for the shared _files_pagination partial. params
+// holds the preserved (non-page) query params; empty-valued entries are dropped
+// so the pager never emits a stray "&key=".
+func pager(baseURL string, page, totalPages int, params map[string]string) map[string]any {
+	clean := make(map[string]string, len(params))
+	for k, v := range params {
+		if v != "" {
+			clean[k] = v
+		}
+	}
+	return map[string]any{
+		"BaseURL":    baseURL,
+		"Page":       page,
+		"TotalPages": totalPages,
+		"Params":     clean,
+	}
+}
+
 func safeRelPath(p string) (string, bool) {
 	if p == "" {
 		return "", true
@@ -1695,6 +1966,9 @@ func (h *Handler) validNotePath(path string) bool {
 	cleaned := filepath.Clean(path)
 	if h.notesPathPrefix != "" && strings.HasPrefix(cleaned, h.notesPathPrefix) {
 		return true
+	}
+	if h.booxImportPath != "" && strings.HasPrefix(cleaned, h.booxImportPath) {
+		return true // imported-but-unmigrated Boox notes still live under the import path
 	}
 	if h.booxNotesPath != "" && strings.HasPrefix(cleaned, h.booxNotesPath) {
 		return true

@@ -1,6 +1,6 @@
 # internal/web
 
-Last verified: 2026-05-30 (REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
+Last verified: 2026-05-30 (Files-tab consistency: shared _files_pagination/_files_status_panel/_files_breadcrumb partials back all three Files tabs + Digests; ForestNote now gets a status panel; global status bar uses one symmetric per-source active/actionable rule; in-tab note detail (`_detail_page_grid.html` + `NoteService.GetNotePages`) replaced the `#history-modal`/`showHistory` for Supernote+Boox, and Search/Task/CalDAV deep links now navigate to `?detail=` in-tab; Digests viewer: GET `/digests/{id}` detail + `/digests/{id}/render` (source-page image via `spcFileRoot`+`SetSPCFileRoot`), DigestView gained SourcePath/SourceType/HandwriteInnerName/NotePage. Prior: REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
 
 ## REST v1 task API — write/read surface extensions (2026-05-29)
 
@@ -91,14 +91,16 @@ For tests, `LegacyNewHandler` in `handler_test.go` bridges the old 22-argument s
 | GET | `/settings` | `handleSettings` | Settings page (config + MCP tokens + UB-as-SPC server card) |
 | POST | `/settings/save` | `handleSettingsSave` | Save config changes. Routes by hidden `section` field: `supernote`, `general`, `boox`, `ub-spc` (UB-as-SPC server config — all restart-required; secret fields keep current value when left blank). |
 | GET | `/files` | `handleFiles` | Legacy entry point; 303-redirects to `/files/supernote` or `/files/boox` based on configured sources. Renders an empty-state placeholder when neither is configured. |
-| GET | `/files/supernote` | `handleFilesSupernote` | Supernote file browser (directory tree, breadcrumbs, sort, pagination). Path traversal guarded. |
-| GET | `/files/boox` | `handleFilesBoox` | Boox catalog listing (flat, Title/Folder/Device/NoteType/Pages columns, sort, pagination). |
+| GET | `/files/supernote` | `handleFilesSupernote` | Supernote file browser (directory tree, breadcrumbs, sort, pagination). Path traversal guarded. `?detail=<path>&back=<relPath>` renders the in-tab note detail (page grid) instead of the list — see "In-tab note detail" below. |
+| GET | `/files/boox` | `handleFilesBoox` | Boox catalog listing (flat, Title/Folder/Device/NoteType/Pages columns, sort, pagination). `?detail=<path>` renders the in-tab note detail (page grid + Delete + version history). |
 | GET | `/files/forestnote` | `handleFilesForestNote` | ForestNote browser. Default/`?folder=<id>`: a Supernote-style table (Name/Type/Pages/Created/Modified/Status/Actions) of that folder's subfolders + notebooks, with a breadcrumb trail. `?notebook=<id>`: the enriched detail view (metadata header + per-page thumbnail + OCR text + Delete/Re-OCR/Download actions). Inventory is a live projection of the `fn_*` mirror (no filesystem); created_at is synced, "Modified" is derived MAX(lww_wall_ts) over notebook+pages+strokes. |
 | GET | `/files/forestnote/render` | `handleForestNoteRender` | JPEG for a `forestnote://{nb}/{page}` path, rendered on the fly from strokes (no cache). `Cache-Control: public, max-age=300`. |
 | POST | `/files/forestnote/delete` | `handleForestNoteDelete` | Soft-delete a notebook (UB-local, by `notebook` form value) + de-index its pages. HX: empty 200 (row swaps out); non-HX: 303 to `?folder=<back>`. Device-authoritative source: a re-edited notebook can resurrect on next sync (messaged in UI). |
 | POST | `/files/forestnote/reprocess` | `handleForestNoteReprocess` | Re-enqueue a notebook's pages for re-OCR/re-index (fire-and-forget on the sync bridge). |
 | GET | `/files/forestnote/export` | `handleForestNoteExport` | Stream a notebook's live pages as a single `application/pdf` (images→PDF via `internal/forestpdf`). |
-| GET | `/digests` | `handleDigests` | Digests tab (Phase D2): Supernote "summary" excerpts synced from the device. Flat list + group/tag filter pills. Requires a `DigestService` (set via `SetDigestService`, SPC server mode only); otherwise renders a disabled notice. |
+| GET | `/digests` | `handleDigests` | Digests tab (Phase D2): Supernote "summary" excerpts synced from the device. Flat list + group/tag filter pills; each row links into the detail page. Requires a `DigestService` (set via `SetDigestService`, SPC server mode only); otherwise renders a disabled notice. |
+| GET | `/digests/{id}` | `handleDigestDetail` | In-tab digest detail: full (untruncated) excerpt, OCR'd handwriting comment, group/tags/dates, source path, and — for Note digests whose source `.note` resolves under the SPC file root — a rendered source-page image. 404 on unknown id. |
+| GET | `/digests/{id}/render` | `handleDigestRender` | JPEG of the source note page a digest excerpt came from. Resolves `SourcePath` under `spcFileRoot` (traversal-guarded via `safeRelPath`) and calls `NoteService.RenderSupernotePage` (the source-detection-bypassing variant — a digest `.note` under the SPC root must not misroute to the Boox renderer in an SPC-server-only deployment where no filesystem Supernote source exists). Note digests only — PDF digests, or an unresolvable/missing source, return 404. The `.mark` handwriting blob (RATTA_RLE) is **not** decoded — that's a deferred spike. |
 | POST | `/files/queue` | `handleFilesQueue` | Enqueue file for OCR. Row fragment dispatches by path prefix. |
 | POST | `/files/skip` | `handleFilesSkip` | Mark skipped (manual). |
 | POST | `/files/unskip` | `handleFilesUnskip` | Remove manual skip. |
@@ -299,12 +301,52 @@ Dropped / Capacity). Both fields are `omitempty`, so non-FN / non-Boox
 deployments emit no key for the missing source — JS gate any UI on
 presence, not on zero values. `updateProcessorStatus()` (layout.html)
 renders both the Files-tab proc-status line and the global status bar from
-this single poll; the global bar's visibility gate matches against any
-configured source. Re-OCR buttons in `_fn_note_row.html` and
-`files_forestnote.html` show a transient "Queued ✓" / "Failed ✗" hint and
-call `updateProcessorStatus()` after a successful enqueue so the operator
-sees Pending tick up immediately rather than waiting for the next 5 s
-poll.
+this single poll. The two surfaces split by intent: the **in-tab
+`#proc-status`** line is the detailed view (carries the informational
+counts — done/processed, unmigrated — and the SN running/stopped state);
+the **global bar** uses one symmetric per-source rule — a `Source: …`
+segment appears only when that source has *active or actionable* state
+(in-flight/pending, or failed/dropped), so an idle deployment shows an
+empty (hidden) bar regardless of which sources are configured. Done/
+unmigrated are deliberately kept out of the global bar (they kept the Boox
+segment perpetually visible pre-2026-05-30). Re-OCR buttons in
+`_fn_note_row.html` and `files_forestnote.html` show a transient
+"Queued ✓" / "Failed ✗" hint and call `updateProcessorStatus()` after a
+successful enqueue so the operator sees Pending tick up immediately rather
+than waiting for the next 5 s poll.
+
+The in-tab panel itself is the shared `_files_status_panel.html` partial,
+fed a `pipelinePanel{Source, StartStop, Note}` context: Supernote/Boox set
+`StartStop` + a `Source` slug (→ `/processor/<source>/{start,stop}`);
+ForestNote (no global worker) sets `Note` instead (Re-OCR is per-notebook).
+The shared `_files_pagination.html` (a `pager` map: BaseURL/Page/
+TotalPages/Params) and `_files_breadcrumb.html` (`[]crumb{Label, HxGet}`)
+partials likewise back all three Files tabs + Digests.
+
+### In-tab note detail (2026-05-30) — no modal
+
+All three sources show note detail as an **in-tab page grid** (the old
+`#history-modal` + client-side `showHistory()` are gone). Supernote and Boox
+render the shared `_detail_page_grid.html` partial (a `detailView` context:
+back link, title, optional `Actions`, a `Meta` row, the page grid, and
+collapsible Job Info / Version History panels); ForestNote keeps its own
+bespoke detail template but follows the same visual pattern. The page grid +
+OCR text are **server-rendered** from `NoteService.GetNotePages(path)` (typed
+`[]NotePageView`, mirroring `ForestNotePage`); page images stay lazy via
+`/files/render?path=&page=N` (RenderPage branches by path scheme). The Job
+Info and Version History collapsibles lazy-load their JSON on render via the
+small `ubLoadJobInfo` / `ubLoadVersions` helpers in `layout.html` (hitting the
+still-present `/files/history` and `/files/boox/versions` endpoints).
+
+Every detail entry point is a plain `hx-get` to `/files/{supernote,boox}?detail=`
+with `hx-target="#main-content" hx-push-url="true"` — the row "Details"
+buttons, the Search-result links (`search.html`, SN/Boox only; digest/FN are
+plain text), the Task note-links (`_task_row.html`, source picked via
+`noteSource`), and the Boox red-ink `taskDetailHTML` links (which already
+emitted `?detail=` URLs). There is no client-side detail state to restore on
+hard-load — `?detail=` is server-rendered, so a CalDAV/bookmark deep link
+Just Works. The web `/files/content` JSON endpoint is now orphaned by the UI
+(its `/api/v1/files/content` sibling remains the headless surface).
 
 ### Design: minimal scope, no OOB
 
