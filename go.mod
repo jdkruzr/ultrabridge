@@ -44,4 +44,7 @@ require (
 	modernc.org/token v1.1.0 // indirect
 )
 
-replace github.com/jdkruzr/rhizome/server-go => /home/jtd/rhizome/server-go
+// Vendored in-tree (third_party/) so the creds-free Docker build can resolve this private module
+// from the build context — the source is byte-identical to the published v0.8.0 tag (verified). Only
+// registry/syncstore/hlc/compaction are imported; server-go is pure-stdlib so it adds no deps.
+replace github.com/jdkruzr/rhizome/server-go => ./third_party/rhizome-server-go
