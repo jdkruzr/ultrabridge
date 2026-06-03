@@ -112,7 +112,69 @@ func (s *Source) Start(ctx context.Context) error {
 			logger.Info("forestnote: page-text backfill complete", "authored", n)
 		}
 	}()
+
+	// Relay-log compaction: gated OFF by default (cfg.Compaction) so the first post-cutover deploy
+	// never sweeps the durable sync_ops log until the operator has inspected/backed it up.
+	if s.cfg.Compaction {
+		s.startCompaction(ctx, logger)
+	}
 	return nil
+}
+
+// startCompaction launches a low-frequency background goroutine that periodically reclaims the
+// sync_ops relay log (collapse superseded snapshots + purge tombstones every active device has pulled
+// past). It is gated behind cfg.Compaction. Each pass computes the tombstone watermark from device
+// cursors, then sweeps; stats and stale-device evictions are always logged (no silent reclamation).
+// The goroutine exits when ctx is cancelled (process shutdown / source stop).
+func (s *Source) startCompaction(ctx context.Context, logger *slog.Logger) {
+	intervalSec := s.cfg.CompactionIntervalSec
+	if intervalSec <= 0 {
+		intervalSec = defaultCompactionIntervalSec
+	}
+	horizonSec := s.cfg.CompactionStaleHorizonSec
+	if horizonSec <= 0 {
+		horizonSec = defaultStaleHorizonSec
+	}
+	interval := time.Duration(intervalSec) * time.Second
+	horizonMs := int64(horizonSec) * 1000
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.compactOnce(ctx, horizonMs, logger)
+			}
+		}
+	}()
+	logger.Info("forestnote: relay-log compaction enabled",
+		"interval", interval, "stale_horizon_sec", horizonSec)
+}
+
+// compactOnce performs one watermark + sweep pass, logging the outcome. Errors are logged, not
+// fatal: a failed pass leaves the log intact and the next tick retries.
+func (s *Source) compactOnce(ctx context.Context, staleHorizonMs int64, logger *slog.Logger) {
+	watermark, evicted, err := s.store.ComputeWatermark(ctx, time.Now().UnixMilli(), staleHorizonMs)
+	if err != nil {
+		logger.Warn("forestnote: compaction watermark failed", "err", err)
+		return
+	}
+	if len(evicted) > 0 {
+		logger.Info("forestnote: compaction evicted stale devices from watermark", "sites", evicted)
+	}
+	stats, err := s.store.Compact(ctx, syncstore.TombstoneCols(), watermark)
+	if err != nil {
+		logger.Warn("forestnote: compaction sweep failed", "err", err)
+		return
+	}
+	if stats.CollapsedSuperseded > 0 || stats.PurgedTombstones > 0 {
+		logger.Info("forestnote: compaction reclaimed relay log",
+			"watermark", watermark,
+			"collapsed_superseded", stats.CollapsedSuperseded,
+			"purged_tombstones", stats.PurgedTombstones)
+	}
 }
 
 func (s *Source) Stop() {
