@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/jdkruzr/rhizome/server-go/hlc"
 )
 
 // Store is the stateful sync layer over notedb. All writes go through ApplyBatch
@@ -73,6 +75,16 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 	defer tx.Rollback()
 
 	now := time.Now().UnixMilli()
+	// Durable HLC: read this site's op_ts clock so we can drag it past the greatest incoming op_ts
+	// (clock.ReceiveEvent below). Device ops keep their OWN op_ts (their LWW key) — they are NOT
+	// re-stamped here; advancing UB's clock only guarantees that UB's NEXT authored op (e.g. OCR text
+	// for these strokes) sorts strictly after everything it has observed, even under device clock skew.
+	var lastHlc int64
+	if err := tx.QueryRowContext(ctx, `SELECT last_hlc FROM sync_site WHERE id = 1`).Scan(&lastHlc); err != nil {
+		return res, fmt.Errorf("read last_hlc: %w", err)
+	}
+	var maxIncoming int64
+
 	rejectedSeqs := make(map[int64]bool) // op_seqs permanently rejected for siteID this call
 	reject := func(op Op, reason string) {
 		res.Rejected = append(res.Rejected, RejectedOp{op.SiteID, op.OpSeq, reason})
@@ -82,6 +94,9 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 	}
 
 	for _, op := range ops {
+		if op.WallTS > maxIncoming {
+			maxIncoming = op.WallTS // observe every op's op_ts, even one we go on to reject
+		}
 		if reason := validateOp(op); reason != "" {
 			reject(op, reason)
 			continue
@@ -122,6 +137,16 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 		return res, err
 	}
 	res.AcceptedThrough = accepted
+
+	// Advance and persist the durable HLC past the greatest op_ts we just observed, so a later
+	// AuthorOps issues an op_ts strictly greater (HLC ReceiveEvent — spec/hlc.md). Same single-writer
+	// read-modify-write idiom as last_op_seq; the notedb is MaxOpenConns=1 so this can't race.
+	clock := hlc.New(lastHlc, func() int64 { return now })
+	clock.ReceiveEvent(maxIncoming)
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE sync_site SET last_hlc = ? WHERE id = 1`, clock.Last()); err != nil {
+		return res, fmt.Errorf("persist last_hlc: %w", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return res, fmt.Errorf("commit: %w", err)
@@ -166,9 +191,10 @@ func (s *Store) SiteID(ctx context.Context) (string, error) {
 }
 
 // AuthorOps makes UB a first-class authoring site: it stamps each op with UB's
-// site_id, the next monotonic op_seq, and a single batch wall_ts (server clock —
-// UB is the sync server, so its clock is authoritative and these ops are not
-// subject to any incoming-op skew guard), then merges each into the mirror and
+// site_id, the next monotonic op_seq, and an op_ts from UB's durable HLC
+// (clock.LocalEvent — strictly greater than any op_ts UB has observed, so a
+// server-authored op always sorts after the device ops that triggered it, even
+// under device clock skew), then merges each into the mirror and
 // appends it to the changelog in ONE transaction. Because they land in sync_ops
 // with UB's site_id, the existing relay (OpsSince excludes only the requesting
 // site) carries them to every device on its next pull — the wire needs no change.
@@ -191,20 +217,21 @@ func (s *Store) AuthorOps(ctx context.Context, ops []Op) ([]TablePK, error) {
 	defer tx.Rollback()
 
 	var siteID string
-	var lastOpSeq int64
+	var lastOpSeq, lastHlc int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT site_id, last_op_seq FROM sync_site WHERE id = 1`).Scan(&siteID, &lastOpSeq); err != nil {
+		`SELECT site_id, last_op_seq, last_hlc FROM sync_site WHERE id = 1`).Scan(&siteID, &lastOpSeq, &lastHlc); err != nil {
 		return nil, fmt.Errorf("load authoring site: %w", err)
 	}
 
 	now := time.Now().UnixMilli()
+	clock := hlc.New(lastHlc, func() int64 { return now })
 	seq := lastOpSeq
 	var changedPages []TablePK
 	for _, op := range ops {
 		seq++
 		op.SiteID = siteID
 		op.OpSeq = seq
-		op.WallTS = now
+		op.WallTS = clock.LocalEvent() // op_ts strictly > anything UB has observed (HLC)
 		if reason := validateOp(op); reason != "" {
 			return nil, fmt.Errorf("author op %s/%s invalid: %s", op.Table, op.PK, reason)
 		}
@@ -222,8 +249,8 @@ func (s *Store) AuthorOps(ctx context.Context, ops []Op) ([]TablePK, error) {
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE sync_site SET last_op_seq = ? WHERE id = 1`, seq); err != nil {
-		return nil, fmt.Errorf("persist op_seq: %w", err)
+		`UPDATE sync_site SET last_op_seq = ?, last_hlc = ? WHERE id = 1`, seq, clock.Last()); err != nil {
+		return nil, fmt.Errorf("persist op_seq/last_hlc: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)

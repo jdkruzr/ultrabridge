@@ -6,63 +6,69 @@ package syncstore
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/jdkruzr/rhizome/server-go/registry"
 )
 
 // Op is one full-row UPSERT on the wire (spec §3). Its identity is
 // (SiteID, OpSeq) — globally unique, the dedup key.
+//
+// The ordering key is WallTS, serialized as `op_ts` (the RhizomeSync wire name; the value is an HLC
+// int64 whose high bits are wall-clock ms — see hlc). The Go field keeps the name WallTS and the DB
+// column stays `wall_ts`; only the JSON tag changed at the cutover. UnmarshalJSON also accepts the
+// legacy `wall_ts` key so historical sync_ops payloads (written before the rename) still relay with
+// their timestamp intact.
 type Op struct {
 	Table  string         `json:"table"`
 	PK     string         `json:"pk"`
 	SiteID string         `json:"site_id"`
 	OpSeq  int64          `json:"op_seq"`
-	WallTS int64          `json:"wall_ts"`
+	WallTS int64          `json:"op_ts"`
 	Cols   map[string]any `json:"cols"`
 }
 
-// knownCols lists the materialized columns per table (spec §3.1). It is also the
-// basis for the schema_hash (§6) — see SchemaHash. Keep alphabetical within a
-// table to match the canonical schema string.
-var knownCols = map[string][]string{
-	"folder":   {"created_at", "deleted_at", "name", "parent_folder_id", "sort_order"},
-	"notebook": {"created_at", "deleted_at", "folder_id", "name", "sort_order"},
-	"page":     {"created_at", "deleted_at", "notebook_id", "sort_order", "template", "template_pitch_mm"},
-	// page_text_from_server / page_text_from_client carry per-page recognized text
-	// (schema v3). Identical shape; pk == the page ULID. _from_server is server-authored
-	// (UB's OCR pushed to the device); _from_client is RESERVED for future on-device
-	// recognition (columns counted in the hash now so adopting it needs no second bump).
-	"page_text_from_client": {"created_at", "deleted_at", "model", "ocr_at", "text"},
-	"page_text_from_server": {"created_at", "deleted_at", "model", "ocr_at", "text"},
-	"stroke":                {"color", "created_at", "deleted_at", "page_id", "pen_width_max", "pen_width_min", "points", "z"},
-	"text_box":              {"border_width", "color", "created_at", "deleted_at", "font_name", "font_size", "height", "page_id", "text", "weight", "width", "x", "y", "z"},
-}
-
-// tableOrder is the fixed table order for the canonical schema string (§6). It is
-// kept alphabetical, so the page_text_* tables sit between "page" and "stroke".
-var tableOrder = []string{"folder", "notebook", "page", "page_text_from_client", "page_text_from_server", "stroke", "text_box"}
-
-// canonicalSchema builds the deterministic schema string (spec §6): tables in
-// fixed order, columns alphabetical within each table, `table:col,col;table:...`,
-// no spaces, no trailing newline. knownCols is already alphabetical per table.
-func canonicalSchema() string {
-	parts := make([]string, len(tableOrder))
-	for i, t := range tableOrder {
-		parts[i] = t + ":" + strings.Join(knownCols[t], ",")
+// UnmarshalJSON reads the ordering timestamp from `op_ts` (current wire) and falls back to the
+// legacy `wall_ts` key when `op_ts` is absent — so a sync_ops payload marshaled before the cutover
+// still populates WallTS instead of decoding to 0 (which would make it lose every LWW conflict).
+func (o *Op) UnmarshalJSON(data []byte) error {
+	type opAlias Op // strip methods to avoid recursing into this UnmarshalJSON
+	var v struct {
+		opAlias
+		LegacyWallTS *int64 `json:"wall_ts"`
 	}
-	return strings.Join(parts, ";")
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*o = Op(v.opAlias)
+	if o.WallTS == 0 && v.LegacyWallTS != nil {
+		o.WallTS = *v.LegacyWallTS
+	}
+	return nil
 }
 
-// SchemaHash is the lowercase hex SHA-256 of the canonical schema string (§6),
-// i.e. the CURRENT schema the server advertises. A client whose hash the server
-// does not accept is rejected (409) so it cannot corrupt the mirror. The value is
-// asserted in the tests (schemaHashV2).
-func SchemaHash() string {
-	sum := sha256.Sum256([]byte(canonicalSchema()))
-	return hex.EncodeToString(sum[:])
-}
+// fnReg is the RhizomeSync registry declaration of ForestNote's synced schema, the single source of
+// truth for the wire schema after the Phase 8 cutover. UB's hand-coded knownCols/tableOrder/SHA were
+// replaced by forwards into it; the parity tests pin that it reproduces the live v3 hash byte-for-byte.
+var fnReg = registry.ForestNote()
+
+// knownCols lists the materialized columns per table (spec §3.1), derived from the registry. It
+// drives Normalize/validateOp; the registry guarantees alphabetical order within each table.
+var knownCols = fnReg.KnownCols()
+
+// schemaHashCurrent is the lowercase hex SHA-256 of the canonical schema string (§6) — the CURRENT
+// schema the server advertises — computed once from the registry at init.
+var schemaHashCurrent = fnReg.SchemaHash()
+
+// canonicalSchema returns the deterministic schema string (spec §6) from the registry. Retained as a
+// thin forward for the parity/spec tests that compare it.
+func canonicalSchema() string { return fnReg.Canonical() }
+
+// SchemaHash is the CURRENT schema hash the server advertises. A client whose hash the server does
+// not accept is rejected (409) so it cannot corrupt the mirror (see AcceptsSchemaHash).
+func SchemaHash() string { return schemaHashCurrent }
 
 // schemaHashV1 is the FROZEN historical schema hash (folder/notebook/page/stroke,
 // no text_box). It is hardcoded — not derived — because once knownCols gains a

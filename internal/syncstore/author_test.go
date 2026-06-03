@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 )
 
 // authorNotebookOp builds a full-row notebook upsert for AuthorOps. SiteID/OpSeq/
@@ -13,6 +14,35 @@ func authorNotebookOp(name string, deletedAt any) Op {
 	return Op{
 		Table: "notebook", PK: nb1,
 		Cols: map[string]any{"name": name, "sort_order": float64(0), "created_at": float64(1000), "deleted_at": deletedAt, "folder_id": nil},
+	}
+}
+
+// HLC monotonicity (Phase 8 E): even when a device pushes an op whose op_ts is far in the future
+// (its clock skewed ahead of the server), UB's NEXT authored op must carry an op_ts strictly
+// greater — so a server-authored change (e.g. pushed OCR text) always sorts after the device ops
+// that triggered it. This exercises ApplyBatch's ReceiveEvent (drag the durable clock past the
+// skewed incoming op_ts) feeding AuthorOps' LocalEvent.
+func TestAuthorOps_OpTsStrictlyAfterSkewedDeviceOp(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	ubSite, _ := s.SiteID(ctx)
+
+	future := time.Now().UnixMilli() + 1_000_000_000 // ~11.6 days ahead of the server clock
+	if _, err := s.ApplyBatch(ctx, siteA, []Op{nbInFolder(1, future, nbA, "skewed", "", nil)}); err != nil {
+		t.Fatalf("apply skewed device op: %v", err)
+	}
+
+	if _, err := s.AuthorOps(ctx, []Op{authorNotebookOp("server-authored", nil)}); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+
+	var authored int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT wall_ts FROM sync_ops WHERE site_id = ? ORDER BY seq DESC LIMIT 1`, ubSite).Scan(&authored); err != nil {
+		t.Fatalf("read authored op_ts: %v", err)
+	}
+	if authored <= future {
+		t.Errorf("authored op_ts %d not strictly after skewed device op_ts %d", authored, future)
 	}
 }
 

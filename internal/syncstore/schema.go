@@ -19,13 +19,16 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		`INSERT OR IGNORE INTO sync_seq (id, last_seq) VALUES (1, 0)`,
 
 		// sync_site holds UB's OWN authoring identity: a persistent ULID site_id
-		// (so server-authored ops are wire-legal — see newULID/AuthorOps) and a
-		// monotonic per-site op_seq counter. Seeded once below; the ULID survives
-		// restarts so the device sees a stable origin for UB's ops.
+		// (so server-authored ops are wire-legal — see newULID/AuthorOps), a
+		// monotonic per-site op_seq counter, and last_hlc, the durable op_ts Hybrid
+		// Logical Clock (spec/hlc.md) seeded from max(last_hlc, max sync_ops.wall_ts)
+		// below. Seeded once; the ULID survives restarts so the device sees a stable
+		// origin for UB's ops.
 		`CREATE TABLE IF NOT EXISTS sync_site (
 			id          INTEGER PRIMARY KEY CHECK (id = 1),
 			site_id     TEXT    NOT NULL,
-			last_op_seq INTEGER NOT NULL DEFAULT 0
+			last_op_seq INTEGER NOT NULL DEFAULT 0,
+			last_hlc    INTEGER NOT NULL DEFAULT 0
 		)`,
 
 		`CREATE TABLE IF NOT EXISTS sync_ops (
@@ -186,10 +189,21 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		{"fn_notebook", "folder_id", "TEXT"},
 		{"fn_page", "template", "TEXT"},
 		{"fn_page", "template_pitch_mm", "INTEGER"},
+		// Phase 8 cutover: the durable op_ts HLC on the authoring-site row.
+		{"sync_site", "last_hlc", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := ensureColumn(ctx, db, a.table, a.col, a.decl); err != nil {
 			return fmt.Errorf("syncstore migrate: %w", err)
 		}
+	}
+
+	// Seed the HLC so it never starts below an op_ts already on the wire: on a DB that predates the
+	// column, sync_ops may already hold device wall_ts values while last_hlc defaults to 0. Floor it
+	// at the greatest recorded wall_ts so UB's first authored op after the cutover still sorts after
+	// everything relayed so far. Runtime ReceiveEvent/LocalEvent maintain the invariant thereafter.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE sync_site SET last_hlc = MAX(last_hlc, (SELECT COALESCE(MAX(wall_ts), 0) FROM sync_ops)) WHERE id = 1`); err != nil {
+		return fmt.Errorf("syncstore migrate: seed last_hlc: %w", err)
 	}
 
 	// Index on the notebook→folder edge; created after the column is guaranteed.
