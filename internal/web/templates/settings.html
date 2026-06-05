@@ -300,6 +300,19 @@
         <input id="sync-batch-limit" type="number" name="sync_batch_limit" value="{{.Config.SyncBatchLimit}}">
       </div>
 
+      {{if .ForestNoteSourceActive}}
+      <div class="form-group">
+        <label><input type="checkbox" name="sync_compaction"{{if .ForestNoteCompaction}} checked{{end}}> Relay-log compaction</label>
+        <p class="device-info" style="margin-top: 0.5rem;">
+          Periodically reclaims the device-sync relay log (<code>sync_ops</code>): collapses superseded
+          full-row snapshots and purges tombstones every device has already pulled past. The log otherwise
+          grows by one row per edit. Off by default so the operator can inspect/back up the log first.
+          Sweeps every 6h with a 30-day stale-device horizon (devices unseen longer are excluded from the
+          watermark). Safe — it reclaims only the relay log, never the note mirror. Takes effect after a restart.
+        </p>
+      </div>
+      {{end}}
+
       <div class="form-group">
         <label for="forestnote-ocr-prompt">OCR Prompt</label>
         <p class="device-info" style="margin-bottom: 0.5rem;">Prompt sent to the vision model when transcribing synced ForestNote pages. Leave empty for the built-in default. Applies without restart.</p>

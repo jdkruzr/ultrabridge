@@ -31,6 +31,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/mcpauth"
 	"github.com/sysop/ultrabridge/internal/notedb"
 	"github.com/sysop/ultrabridge/internal/service"
+	"github.com/sysop/ultrabridge/internal/source"
 	"github.com/sysop/ultrabridge/internal/taskattach"
 )
 
@@ -957,6 +958,62 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 	h.renderTemplate(w, r, "logs", nil)
 }
 
+// forestNoteSourceRow returns the (first) ForestNote source row, if one is configured. The
+// relay-log compaction toggle lives in this row's config_json (the source reads it at Start),
+// so both the Settings prefill and the save path need it. ok=false when no ForestNote source
+// exists yet (the toggle is hidden — there's nothing to compact).
+func (h *Handler) forestNoteSourceRow(ctx context.Context) (source.SourceRow, bool) {
+	listed, err := h.config.ListSources(ctx)
+	if err != nil {
+		return source.SourceRow{}, false
+	}
+	rows, ok := listed.([]source.SourceRow)
+	if !ok {
+		return source.SourceRow{}, false
+	}
+	for _, row := range rows {
+		if row.Type == "forestnote" {
+			return row, true
+		}
+	}
+	return source.SourceRow{}, false
+}
+
+// sourceConfigBool reads a named bool key out of a source config_json blob, defaulting to false
+// when the blob is empty, unparseable, or the key is absent/non-bool. Used to prefill the
+// compaction toggle from the ForestNote source row without imposing the source's Config struct.
+func sourceConfigBool(configJSON, key string) bool {
+	if configJSON == "" {
+		return false
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(configJSON), &m); err != nil {
+		return false
+	}
+	b, _ := m[key].(bool)
+	return b
+}
+
+// setSourceConfigBool merges key=val into the source row's config_json — preserving every other
+// key (batch_limit, compaction_interval_sec, …) by round-tripping through a map — and persists it
+// via UpdateSource (which flags RestartRequired). The running source re-reads config_json only at
+// Start, so the change takes effect on the next app restart.
+func (h *Handler) setSourceConfigBool(ctx context.Context, row source.SourceRow, key string, val bool) error {
+	m := map[string]any{}
+	if row.ConfigJSON != "" {
+		if err := json.Unmarshal([]byte(row.ConfigJSON), &m); err != nil {
+			return fmt.Errorf("parse config_json: %w", err)
+		}
+	}
+	m[key] = val
+	b, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal config_json: %w", err)
+	}
+	row.ConfigJSON = string(b)
+	return h.config.UpdateSource(ctx, fmt.Sprint(row.ID), &row)
+}
+
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cfg, _ := h.config.GetConfig(ctx)
@@ -975,6 +1032,13 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		data["BooxActive"] = h.notes != nil && h.notes.HasBooxSource()
 		fnOCRPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyForestNoteOCRPrompt)
 		data["ForestNoteOCRPrompt"] = fnOCRPrompt
+		// Relay-log compaction lives in the ForestNote source row's config_json (not appconfig);
+		// surface whether a source row exists (to gate the checkbox) and its current state (to
+		// prefill it). Read here so the save handler doesn't have to round-trip on every render.
+		if row, ok := h.forestNoteSourceRow(ctx); ok {
+			data["ForestNoteSourceActive"] = true
+			data["ForestNoteCompaction"] = sourceConfigBool(row.ConfigJSON, "compaction")
+		}
 		ocrPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxOCRPrompt)
 		todoEnabled, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoEnabled)
 		todoPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoPrompt)
@@ -1203,6 +1267,16 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		// store it directly like the Boox prompt.
 		if h.noteDB != nil {
 			_ = notedb.SetSetting(r.Context(), h.noteDB, appconfig.KeyForestNoteOCRPrompt, r.FormValue("forestnote_ocr_prompt"))
+		}
+		// Relay-log compaction is read from the ForestNote SOURCE row's config_json at source Start
+		// (NOT appconfig — unlike SyncBatchLimit above, which only seeds a brand-new row and is a
+		// no-op for an already-seeded one). Merge the flag into the row's config_json so batch_limit
+		// and any other keys survive; UpdateSource flags the RestartRequired banner. Skipped silently
+		// when no ForestNote source row exists (nothing to compact).
+		if row, ok := h.forestNoteSourceRow(r.Context()); ok {
+			if err := h.setSourceConfigBool(r.Context(), row, "compaction", r.FormValue("sync_compaction") == "true"); err != nil {
+				h.logger.Warn("forestnote compaction toggle save failed", "err", err)
+			}
 		}
 	case "general":
 		cfg.EmbedEnabled = r.FormValue("embed_enabled") == "true"
