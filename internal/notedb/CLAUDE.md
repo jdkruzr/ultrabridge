@@ -1,6 +1,6 @@
 # Note Database
 
-Last verified: 2026-05-26
+Last verified: 2026-06-07
 
 ## Purpose
 Opens and migrates the SQLite database used by the Supernote pipeline, Boox pipeline, RAG embeddings, and chat subsystem.
@@ -8,7 +8,7 @@ Centralizes schema ownership so all packages share one DB connection.
 
 ## Contracts
 - **Exposes**: `Open(ctx, path) (*sql.DB, error)` -- opens/creates SQLite DB, applies migrations, returns pool.
-- **Guarantees**: WAL mode and foreign keys enabled. Schema is idempotent (safe to call on existing DB). MaxOpenConns=1 (SQLite single-writer).
+- **Guarantees**: WAL mode and foreign keys enabled. Schema is idempotent (safe to call on existing DB). On-disk DBs use a read pool (MaxOpenConns=8, busy_timeout=5000) so reads do not serialize behind writes; in-memory DBs pin to MaxOpenConns=1 (per-connection).
 - **Expects**: Writable filesystem path. Context for cancellation.
 
 ## Dependencies
