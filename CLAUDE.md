@@ -162,7 +162,7 @@ All other configuration (auth, OCR, sources, logging, RAG, chat) is configured v
 
 ### Notes Pipeline (SQLite)
 - Two databases: SQLite for tasks (taskdb), SQLite for notes pipeline (notedb). (The MariaDB SPC catalog write-through was removed with the legacy client 2026-05-25; the UB-as-SPC server derives file size from os.Stat and md5 lazily via `spc_file_ids`, so no catalog sync is needed.)
-- SQLite in WAL mode, MaxOpenConns=1 (single-writer)
+- SQLite in WAL mode; on-disk DBs pool reads (MaxOpenConns=8, busy_timeout=5000) so reads do not serialize behind writes; in-memory DBs pin to MaxOpenConns=1
 - Job statuses: pending -> in_progress -> done|failed|skipped
 - Backup before modification: original .note copied to backup tree, never overwritten
 - OCR source tracking: "myScript" (device RECOGNTEXT) vs "api" (vision API result)
