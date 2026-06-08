@@ -251,6 +251,20 @@ func seedTextBoxOnExistingPage(t *testing.T, s *syncstore.Store, text string) {
 	}
 }
 
+func seedClientPageText(t *testing.T, s *syncstore.Store, text string) {
+	t.Helper()
+	_, err := s.ApplyBatch(context.Background(), siteA, []syncstore.Op{
+		{Table: "page_text_from_client", PK: pg1, SiteID: siteA, OpSeq: 20, WallTS: 1200,
+			Cols: map[string]any{
+				"text": text, "ocr_at": float64(1200), "model": "mlkit-digital-ink:en-US",
+				"created_at": float64(1200), "deleted_at": nil,
+			}},
+	})
+	if err != nil {
+		t.Fatalf("seed client page text: %v", err)
+	}
+}
+
 // seedDistantTextBox seeds a text box positioned far from seedPageWithStroke's
 // strokes (~10..60) so that drawing it into the rendered JPEG would expand the
 // bounding box dramatically. Used by TestProcessPage_OCRJPEGOmitsTextBoxes —
@@ -345,6 +359,36 @@ func TestProcessPage_BoxTextAppendedToOCR(t *testing.T) {
 	}
 }
 
+func TestProcessPage_ClientOCRAppendedOnlyToIndexBody(t *testing.T) {
+	s := newStore(t)
+	seedPageWithStroke(t, s)
+	seedClientPageText(t, s, "device words")
+	fi := &fakeIndexer{}
+	b := New(s, Deps{Indexer: fi, OCR: fakeOCR{text: "server words"}}, nil)
+
+	b.processPage(context.Background(), pg1)
+
+	if fi.count() != 1 {
+		t.Fatalf("want 1 index call, got %d", fi.count())
+	}
+	if fi.calls[0].body != "server words\ndevice words" {
+		t.Errorf("index body = %q, want server+client text", fi.calls[0].body)
+	}
+	ops, _, _, err := s.OpsSince(context.Background(), 0, siteA, 100)
+	if err != nil {
+		t.Fatalf("ops since: %v", err)
+	}
+	var serverText any
+	for _, op := range ops {
+		if op.Table == "page_text_from_server" && op.PK == pg1 {
+			serverText = op.Cols["text"]
+		}
+	}
+	if serverText != "server words" {
+		t.Errorf("server row text = %v, want only server words", serverText)
+	}
+}
+
 func TestProcessPage_NilOCRIndexesEmptyText(t *testing.T) {
 	s := newStore(t)
 	seedPageWithStroke(t, s)
@@ -375,7 +419,6 @@ func TestBridge_StartPagesChangedStop(t *testing.T) {
 		t.Fatal("bridge did not process the page within 2s")
 	}
 }
-
 
 // TestStatus_TracksProcessAndQueueLifecycle confirms the new Status counters
 // move in the right directions: Pending matches channel depth, Processed

@@ -370,11 +370,16 @@ func mergeRow(ctx context.Context, tx *sql.Tx, n Op) (changed bool, pagePK strin
 		var pid string
 		pid, err = upsertTextBox(ctx, tx, n)
 		pagePK = pid
-	case "page_text_from_server", "page_text_from_client":
-		// Recognized-text rows are NOT page render input — leave pagePK empty so they
-		// never enter ChangedPages. (If they did, authoring page text from the bridge
-		// would re-enqueue the page and loop OCR→author→render forever.)
+	case "page_text_from_server":
+		// Server recognized text is NOT page render input — leave pagePK empty so it
+		// never enters ChangedPages. If it did, authoring page text from the bridge
+		// would re-enqueue the page and loop OCR→author→render forever.
 		err = upsertPageText(ctx, tx, n)
+	case "page_text_from_client":
+		// Device recognized text is search/RAG input. Its pk is the page id, so report
+		// that page as changed after materializing the row.
+		err = upsertPageText(ctx, tx, n)
+		pagePK = n.PK
 	}
 	if err != nil {
 		return false, "", err

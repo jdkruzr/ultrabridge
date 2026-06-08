@@ -90,11 +90,11 @@ type Bridge struct {
 // UI's "N done" label conveys conventionally. If a future caller needs to
 // distinguish OCR-vs-prune, split into separate counters at that time.
 type Status struct {
-	Pending   int   `json:"pending"`    // pages waiting in the channel right now
-	InFlight  int   `json:"in_flight"`  // pages currently being processed
-	Processed int64 `json:"processed"`  // pages handled to any terminal state since start (see type doc)
-	Dropped   int64 `json:"dropped"`    // PagesChanged enqueues lost to queue-full
-	Capacity  int   `json:"capacity"`   // channel buffer size (for "queue is X% full")
+	Pending   int   `json:"pending"`   // pages waiting in the channel right now
+	InFlight  int   `json:"in_flight"` // pages currently being processed
+	Processed int64 `json:"processed"` // pages handled to any terminal state since start (see type doc)
+	Dropped   int64 `json:"dropped"`   // PagesChanged enqueues lost to queue-full
+	Capacity  int   `json:"capacity"`  // channel buffer size (for "queue is X% full")
 }
 
 func New(store *syncstore.Store, deps Deps, logger *slog.Logger) *Bridge {
@@ -202,6 +202,11 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 		b.logger.Error("syncbridge: text box read failed", "page", pagePK, "err", err)
 		return
 	}
+	clientText, hasClientText, err := b.store.LivePageTextFromClient(ctx, pagePK)
+	if err != nil {
+		b.logger.Error("syncbridge: client OCR read failed", "page", pagePK, "err", err)
+		return
+	}
 	if len(strokes) == 0 && len(boxes) == 0 {
 		// All strokes erased and no text boxes → the page is now blank; drop it.
 		b.dropPage(ctx, pagePK, path)
@@ -244,16 +249,23 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 	// is rendered WITHOUT text boxes (boxes=nil) so OCR never sees them; this append
 	// is now the canonical (single) source of text-box content in the body — no
 	// round-trip duplication into the dialog.
-	body := text
+	serverBody := text
 	if bt := joinTextBoxes(boxes); bt != "" {
-		if body != "" {
-			body += "\n"
+		if serverBody != "" {
+			serverBody += "\n"
 		}
-		body += bt
+		serverBody += bt
+	}
+	indexBody := serverBody
+	if hasClientText && strings.TrimSpace(clientText.Text) != "" {
+		if indexBody != "" {
+			indexBody += "\n"
+		}
+		indexBody += clientText.Text
 	}
 
 	if b.deps.Indexer != nil {
-		if err := b.deps.Indexer.IndexPage(ctx, path, 0, "forestnote", body, "", ""); err != nil {
+		if err := b.deps.Indexer.IndexPage(ctx, path, 0, "forestnote", indexBody, "", ""); err != nil {
 			b.logger.Warn("syncbridge: index failed", "page", pagePK, "err", err)
 		}
 	}
@@ -262,16 +274,16 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 	// that OCR'd to nothing (and has no text boxes), tombstone instead so stale text
 	// does not linger on-device. Best-effort: a failure here must not stall the bridge.
 	// model is "" because the narrow OCR interface does not expose one (v1).
-	if body != "" {
-		if err := b.store.AuthorPageText(ctx, pagePK, body, time.Now().UnixMilli(), ""); err != nil {
+	if serverBody != "" {
+		if err := b.store.AuthorPageText(ctx, pagePK, serverBody, time.Now().UnixMilli(), ""); err != nil {
 			b.logger.Warn("syncbridge: page text author failed", "page", pagePK, "err", err)
 		}
 	} else if err := b.store.AuthorPageTextTombstone(ctx, pagePK); err != nil {
 		b.logger.Warn("syncbridge: page text tombstone failed", "page", pagePK, "err", err)
 	}
 
-	if body != "" && b.deps.Embedder != nil && b.deps.EmbedStore != nil {
-		rag.EmbedAndStorePage(ctx, b.deps.Embedder, b.deps.EmbedStore, path, 0, body, b.deps.EmbedModel, b.logger)
+	if indexBody != "" && b.deps.Embedder != nil && b.deps.EmbedStore != nil {
+		rag.EmbedAndStorePage(ctx, b.deps.Embedder, b.deps.EmbedStore, path, 0, indexBody, b.deps.EmbedModel, b.logger)
 	}
 }
 

@@ -458,3 +458,18 @@ func TestAuthorPageText_ReportsNoChangedPages(t *testing.T) {
 		t.Errorf("page_text author reported changed pages %+v, want none (loop-safety)", changed)
 	}
 }
+
+func TestAuthorPageTextFromClient_ReportsChangedPage(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	changed, err := s.ApplyBatch(ctx, siteA, []Op{{
+		Table: "page_text_from_client", PK: pgA, SiteID: siteA, OpSeq: 1, WallTS: 1000,
+		Cols: pageTextCols("device words", 1000, 1000, "mlkit-digital-ink:en-US", nil),
+	}})
+	if err != nil {
+		t.Fatalf("apply client text: %v", err)
+	}
+	if len(changed.ChangedPages) != 1 || changed.ChangedPages[0].PK != pgA {
+		t.Errorf("client page text ChangedPages = %+v, want page %s", changed.ChangedPages, pgA)
+	}
+}

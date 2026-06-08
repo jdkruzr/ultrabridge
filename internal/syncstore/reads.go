@@ -32,6 +32,11 @@ type TextBoxData struct {
 	Z                   int64
 }
 
+type PageTextData struct {
+	Text  string
+	Model string
+}
+
 // LivePage reports a page's parent notebook and whether it is live (exists and
 // not soft-deleted). A missing or deleted page returns live=false — the bridge
 // then skips rendering it.
@@ -91,4 +96,20 @@ func (s *Store) LivePageTextBoxes(ctx context.Context, pagePK string) ([]TextBox
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// LivePageTextFromClient returns the latest non-deleted device OCR row for a page, if any.
+func (s *Store) LivePageTextFromClient(ctx context.Context, pagePK string) (PageTextData, bool, error) {
+	var d PageTextData
+	err := s.db.QueryRowContext(ctx,
+		`SELECT text, COALESCE(model, '') FROM fn_page_text_from_client WHERE id = ? AND deleted_at IS NULL`,
+		pagePK).Scan(&d.Text, &d.Model)
+	switch err {
+	case nil:
+		return d, true, nil
+	case sql.ErrNoRows:
+		return PageTextData{}, false, nil
+	default:
+		return PageTextData{}, false, fmt.Errorf("live client page text: %w", err)
+	}
 }
