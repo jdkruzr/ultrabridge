@@ -665,7 +665,7 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "notebook not found", http.StatusNotFound)
 			return
 		}
-		data["detail"] = forestNoteDetailView(detail)
+		data["detail"] = forestNoteDetailView(detail, r.URL.Query().Get("page"))
 		h.renderTemplate(w, r, "files_forestnote", data)
 		return
 	}
@@ -1914,11 +1914,13 @@ type detailView struct {
 type detailKV struct{ Label, Value string }
 
 type detailPage struct {
+	PageID   string
 	ImgURL   string
 	Caption  string
 	BodyText string
 	Source   string
 	Keywords string
+	Target   bool
 }
 
 type detailAction struct {
@@ -1967,7 +1969,7 @@ func (h *Handler) buildNoteDetail(ctx context.Context, path, title, backURL, ver
 // /files/forestnote/render; its actions (PDF export, per-notebook Re-OCR with
 // transient feedback, soft-delete) carry the same behavior as the old bespoke
 // template.
-func forestNoteDetailView(d service.ForestNoteNotebookDetail) detailView {
+func forestNoteDetailView(d service.ForestNoteNotebookDetail, targetPageID string) detailView {
 	folder := "(unfiled)"
 	if len(d.FolderPath) > 0 {
 		folder = strings.Join(d.FolderPath, " / ")
@@ -1975,9 +1977,11 @@ func forestNoteDetailView(d service.ForestNoteNotebookDetail) detailView {
 	pages := make([]detailPage, 0, len(d.Pages))
 	for _, p := range d.Pages {
 		pages = append(pages, detailPage{
+			PageID:   p.PageID,
 			ImgURL:   "/files/forestnote/render?path=" + url.QueryEscape(p.Path),
 			Caption:  "Page " + strconv.Itoa(p.Ordinal+1),
 			BodyText: p.BodyText,
+			Target:   targetPageID != "" && p.PageID == targetPageID,
 		})
 	}
 	const reocrFeedback = "if(event.detail.successful){ this.textContent='Queued ✓'; this.disabled=true; setTimeout(() => { this.textContent='↻ Re-OCR'; this.disabled=false; }, 2500); updateProcessorStatus(); } else { this.textContent='Failed ✗'; setTimeout(() => { this.textContent='↻ Re-OCR'; }, 2500); }"

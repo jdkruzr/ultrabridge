@@ -74,6 +74,31 @@ func TestForestNoteTab_NotebookDetail(t *testing.T) {
 	}
 }
 
+func TestForestNoteTab_NotebookDetailTargetsPageQuery(t *testing.T) {
+	notes := &mockNoteService{
+		forestNoteEnabled: true,
+		fnDetail: service.ForestNoteNotebookDetail{
+			NotebookID: "n1", Name: "Journal", PageCount: 2,
+			Pages: []service.ForestNotePage{
+				{PageID: "pgA", Path: "forestnote://n1/pgA", Ordinal: 0},
+				{PageID: "pgB", Path: "forestnote://n1/pgB", Ordinal: 1, BodyText: "source page"},
+			},
+		},
+	}
+	w := httptest.NewRecorder()
+	fnTestHandler(notes).ServeHTTP(w, httptest.NewRequest("GET", "/files/forestnote?notebook=n1&page=pgB", nil))
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`id="fn-page-pgB"`, `detail-page-target`, `source page`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("detail body missing %q\n---\n%s", want, body)
+		}
+	}
+}
+
 func TestForestNoteTab_EmptyStateWhenNoSource(t *testing.T) {
 	w := httptest.NewRecorder()
 	fnTestHandler(&mockNoteService{forestNoteEnabled: false}).ServeHTTP(w, httptest.NewRequest("GET", "/files/forestnote", nil))

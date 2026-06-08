@@ -35,7 +35,7 @@
 {{if .Pages}}
 <div class="detail-page-grid">
   {{range .Pages}}
-  <figure class="detail-page">
+  <figure class="detail-page{{if .Target}} detail-page-target{{end}}"{{if .PageID}} id="fn-page-{{.PageID}}"{{end}}>
     <img loading="lazy" src="{{.ImgURL}}" alt="{{.Caption}}">
     <figcaption class="text-small text-secondary">{{.Caption}}{{if .Source}} · {{.Source}}{{end}}</figcaption>
     <div class="detail-page-ocr text-small">{{if .BodyText}}{{.BodyText}}{{else}}<em class="text-secondary">No text recognized.</em>{{end}}</div>
@@ -67,8 +67,15 @@
   .detail-meta { display: flex; flex-wrap: wrap; gap: 1.25rem; }
   .detail-page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem; }
   .detail-page { margin: 0; border: 1px solid var(--border-color, #ccc); border-radius: 4px; padding: 0.5rem; background: var(--card-bg, #fff); }
+  .detail-page-target { border-color: var(--brand-color, #2563eb); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18); }
   .detail-page img { width: 100%; height: auto; display: block; background: #fff; }
   .detail-page figcaption { text-align: center; margin-top: 0.25rem; }
   .detail-page-ocr { margin-top: 0.4rem; max-height: 8rem; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
 </style>
+<script>
+  (function() {
+    var target = document.querySelector('.detail-page-target');
+    if (target) target.scrollIntoView({block: 'center', behavior: 'auto'});
+  })();
+</script>
 {{end}}
