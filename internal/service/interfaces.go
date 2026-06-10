@@ -480,6 +480,46 @@ type DigestService interface {
 	SetTombstoneQueue(q DigestTombstoneQueue)
 }
 
+// SyncDevice is one registered ForestNote sync device for the management UI
+// and API (a view over syncstore.DeviceRow; redeclared with JSON tags so the
+// web contract doesn't leak the syncstore package, mirroring
+// ForestNoteQueueStatus).
+type SyncDevice struct {
+	SiteID string `json:"site_id"`
+	Name   string `json:"name"` // "" if the device never sent a device_name
+	// FirstSeen is decoded from the site_id ULID's embedded timestamp (when the
+	// install minted it); 0 for synthetic/test ids. LastSeen is the registry
+	// row's updated_at. Both millisecond UTC.
+	FirstSeen   int64 `json:"first_seen"`
+	LastSeen    int64 `json:"last_seen"`
+	LastPullSeq int64 `json:"last_pull_seq"`
+	AckedOpSeq  int64 `json:"acked_op_seq"`
+	PendingOps  int64 `json:"pending_ops"`
+	Stale       bool  `json:"stale"`
+	// PinsWatermark marks the active laggard currently holding tombstone
+	// compaction back behind another active device.
+	PinsWatermark bool `json:"pins_watermark"`
+}
+
+// SyncCompactResult is one manual relay-log compaction pass's outcome.
+type SyncCompactResult struct {
+	Watermark           int64    `json:"watermark"`
+	CollapsedSuperseded int      `json:"collapsed_superseded"`
+	PurgedTombstones    int      `json:"purged_tombstones"`
+	EvictedSites        []string `json:"evicted_sites"`
+}
+
+// SyncDeviceService is the device-management surface over the ForestNote sync
+// source: list registered devices, prune one (cleanup-only delete of its
+// registry row — spec §4.3), and run a relay-log compaction pass on demand.
+// Constructed only when a ForestNote source is active; nil hides the UI card.
+type SyncDeviceService interface {
+	ListSyncDevices(ctx context.Context) ([]SyncDevice, error)
+	// PruneSyncDevice returns ErrSyncDeviceNotFound when no such device exists.
+	PruneSyncDevice(ctx context.Context, siteID string) error
+	CompactNow(ctx context.Context) (SyncCompactResult, error)
+}
+
 // ConfigService manages system configuration and sources.
 type ConfigService interface {
 	GetConfig(ctx context.Context) (interface{}, error)
