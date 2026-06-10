@@ -3,6 +3,7 @@ package forestrender
 import (
 	"encoding/binary"
 	"image"
+	"math"
 	"testing"
 )
 
@@ -104,6 +105,46 @@ func TestRenderPage_DrawsStroke(t *testing.T) {
 	if img.Bounds().Dx() != want || img.Bounds().Dy() != want {
 		t.Errorf("canvas = %dx%d, want %dx%d", img.Bounds().Dx(), img.Bounds().Dy(), want, want)
 	}
+}
+
+func TestRenderPage_HighlighterRendersBehindInk(t *testing.T) {
+	black := Stroke{
+		Color: 0xFF000000, PenWidthMin: 14, PenWidthMax: 14, Z: 1,
+		Points: buildPoints([3]int32{10, 50, 4095}, [3]int32{90, 50, 4095}),
+	}
+	highlighter := Stroke{
+		Color: int64(forestNoteHighlighterGray), PenWidthMin: 40, PenWidthMax: 40, Z: 2,
+		Points: buildPoints([3]int32{50, 10, 4095}, [3]int32{50, 90, 4095}),
+	}
+	img, err := RenderPage([]Stroke{black, highlighter}, nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	x := int(math.Round(float64(margin+50) * renderScale))
+	y := int(math.Round(float64(margin+50) * renderScale))
+	darkest := uint32(255)
+	for yy := y - 3; yy <= y+3; yy++ {
+		for xx := x - 3; xx <= x+3; xx++ {
+			r, g, b, _ := img.At(xx, yy).RGBA()
+			if v := max8(r>>8, g>>8, b>>8); v < darkest {
+				darkest = v
+			}
+		}
+	}
+	if darkest > 40 {
+		t.Fatalf("intersection neighborhood darkest channel = %d, want black ink over highlighter", darkest)
+	}
+}
+
+func max8(a, b, c uint32) uint32 {
+	if b > a {
+		a = b
+	}
+	if c > a {
+		a = c
+	}
+	return a
 }
 
 func TestPressureToWidth(t *testing.T) {

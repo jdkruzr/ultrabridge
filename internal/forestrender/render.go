@@ -32,6 +32,12 @@ const (
 	// minVisibleWidth keeps thin/zero-pressure strokes legible for OCR.
 	minVisibleWidth = 1.0
 
+	// forestNoteHighlighterGray matches PenParams.HIGHLIGHTER_GRAY in ForestNote.
+	// The Android app draws this color with DST_OVER so highlighter strokes sit
+	// behind normal ink even when their z is later. The server renderer emulates
+	// that by painting highlighter strokes before other strokes.
+	forestNoteHighlighterGray = uint32(0xFFDCDCDC)
+
 	// margin pads the rendered bounding box (px). ForestNote has no page
 	// width/height yet, so v1 renders from the stroke extent (§9 open item).
 	margin = 24
@@ -126,6 +132,7 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 		pts      []Point
 		min, max int64
 		r, g, b  float64
+		behind   bool
 	}
 	// Draw in Z order so later strokes paint over earlier ones. Copy first to
 	// avoid mutating the caller's slice.
@@ -158,7 +165,7 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 			continue // a single point draws nothing legible; skip (matches booxrender)
 		}
 		r, g, b, _ := decodeARGB(int32(s.Color))
-		ds = append(ds, decoded{pts: pts, min: s.PenWidthMin, max: s.PenWidthMax, r: r, g: g, b: b})
+		ds = append(ds, decoded{pts: pts, min: s.PenWidthMin, max: s.PenWidthMax, r: r, g: g, b: b, behind: isHighlighterColor(s.Color)})
 		for _, p := range pts {
 			grow(p.X, p.Y)
 		}
@@ -195,7 +202,7 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 		}
 	}
 
-	for _, d := range ds {
+	drawStroke := func(d decoded) {
 		dc.SetRGB(d.r, d.g, d.b)
 		for i := 0; i < len(d.pts)-1; i++ {
 			p0, p1 := d.pts[i], d.pts[i+1]
@@ -204,6 +211,17 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 			dc.MoveTo(float64(p0.X)+offX, float64(p0.Y)+offY)
 			dc.LineTo(float64(p1.X)+offX, float64(p1.Y)+offY)
 			dc.Stroke()
+		}
+	}
+
+	for _, d := range ds {
+		if d.behind {
+			drawStroke(d)
+		}
+	}
+	for _, d := range ds {
+		if !d.behind {
+			drawStroke(d)
 		}
 	}
 
@@ -273,4 +291,8 @@ func clampCanvas(v int) int {
 		return maxCanvas
 	}
 	return v
+}
+
+func isHighlighterColor(color int64) bool {
+	return uint32(int32(color)) == forestNoteHighlighterGray
 }
