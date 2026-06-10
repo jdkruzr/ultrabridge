@@ -11,6 +11,7 @@ import (
 
 	"github.com/sysop/ultrabridge/internal/auth"
 	"github.com/sysop/ultrabridge/internal/service"
+	"github.com/sysop/ultrabridge/internal/syncstore"
 	"github.com/sysop/ultrabridge/internal/taskstore"
 )
 
@@ -66,6 +67,12 @@ func (h *Handler) RegisterAPIv1() {
 	h.mux.HandleFunc("GET /api/v1/config", h.handleV1GetConfig)
 	h.mux.HandleFunc("PUT /api/v1/config", h.handleV1UpdateConfig)
 	h.mux.HandleFunc("POST /api/v1/client-error", h.handleV1ClientError)
+
+	// ForestNote sync device management. Handlers 404 when no SyncDeviceService
+	// is wired (no ForestNote source configured).
+	h.mux.HandleFunc("GET /api/v1/sync/devices", h.handleV1ListSyncDevices)
+	h.mux.HandleFunc("DELETE /api/v1/sync/devices/{id}", h.handleV1PruneSyncDevice)
+	h.mux.HandleFunc("POST /api/v1/sync/compact", h.handleV1SyncCompact)
 }
 
 // --- Tasks ---
@@ -324,6 +331,72 @@ func (h *Handler) handleV1PurgeDeleted(w http.ResponseWriter, r *http.Request) {
 	h.auditMutation(r, "purge_deleted", "older_than_days", days, "deleted", purged, "skipped", skipped)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]int64{"deleted": purged, "skipped": skipped})
+}
+
+// handleV1ListSyncDevices lists ForestNote sync devices (the sync_cursors
+// registry + derived health fields). 404 when no ForestNote source is active.
+func (h *Handler) handleV1ListSyncDevices(w http.ResponseWriter, r *http.Request) {
+	if h.syncDevices == nil {
+		apiError(w, http.StatusNotFound, "no ForestNote sync source configured")
+		return
+	}
+	devices, err := h.syncDevices.ListSyncDevices(r.Context())
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "failed to list sync devices")
+		return
+	}
+	if devices == nil {
+		devices = []service.SyncDevice{} // emit [] not null
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"devices": devices})
+}
+
+// handleV1PruneSyncDevice deletes a device's sync registry row (spec §4.3
+// prune). Cleanup only: the device's authored ops are retained, and a
+// still-alive device re-registers on its next sync.
+func (h *Handler) handleV1PruneSyncDevice(w http.ResponseWriter, r *http.Request) {
+	if h.syncDevices == nil {
+		apiError(w, http.StatusNotFound, "no ForestNote sync source configured")
+		return
+	}
+	siteID := r.PathValue("id")
+	if !syncstore.IsULID(siteID) {
+		apiError(w, http.StatusBadRequest, "device id must be a 26-char ULID")
+		return
+	}
+	if err := h.syncDevices.PruneSyncDevice(r.Context(), siteID); err != nil {
+		if errors.Is(err, service.ErrSyncDeviceNotFound) {
+			apiError(w, http.StatusNotFound, "no such device")
+			return
+		}
+		apiError(w, http.StatusInternalServerError, "failed to prune device")
+		return
+	}
+	h.auditMutation(r, "sync_device_prune", "site_id", siteID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"site_id": siteID, "pruned": true})
+}
+
+// handleV1SyncCompact runs one relay-log compaction pass on demand (typically
+// right after pruning a dead device, to reclaim the history it pinned).
+func (h *Handler) handleV1SyncCompact(w http.ResponseWriter, r *http.Request) {
+	if h.syncDevices == nil {
+		apiError(w, http.StatusNotFound, "no ForestNote sync source configured")
+		return
+	}
+	result, err := h.syncDevices.CompactNow(r.Context())
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "compaction failed")
+		return
+	}
+	h.auditMutation(r, "sync_compact",
+		"watermark", result.Watermark,
+		"collapsed_superseded", result.CollapsedSuperseded,
+		"purged_tombstones", result.PurgedTombstones,
+		"evicted", len(result.EvictedSites))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func (h *Handler) handleV1CreateTask(w http.ResponseWriter, r *http.Request) {

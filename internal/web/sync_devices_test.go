@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -150,5 +151,102 @@ func TestSyncDeviceCompact(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest("POST", "/settings/sync-devices/compact", nil))
 	if w.Code != http.StatusSeeOther || !strings.Contains(w.Header().Get("Location"), "#sync-devices") {
 		t.Errorf("non-HX compact = %d → %q, want 303 → /settings#sync-devices", w.Code, w.Header().Get("Location"))
+	}
+}
+
+func TestAPIv1SyncDevices(t *testing.T) {
+	h := newTestHandler()
+	fake := &fakeSyncDeviceService{devices: []service.SyncDevice{
+		{SiteID: testSiteID, Name: "Tablet", LastSeen: 1700000000000, PendingOps: 2, Stale: true},
+	}}
+	h.SetSyncDeviceService(fake)
+
+	t.Run("list", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/sync/devices", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		var got struct {
+			Devices []service.SyncDevice `json:"devices"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(got.Devices) != 1 || got.Devices[0].SiteID != testSiteID || !got.Devices[0].Stale {
+			t.Errorf("devices = %+v", got.Devices)
+		}
+	})
+
+	t.Run("list empty is [] not null", func(t *testing.T) {
+		fake.devices = nil
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/sync/devices", nil))
+		if !strings.Contains(w.Body.String(), `"devices":[]`) {
+			t.Errorf("empty list body = %s, want \"devices\":[]", w.Body.String())
+		}
+	})
+
+	t.Run("prune", func(t *testing.T) {
+		fake.pruneErr = nil
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/sync/devices/"+testSiteID, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		if len(fake.pruned) != 1 || fake.pruned[0] != testSiteID {
+			t.Errorf("prune passthrough: %v", fake.pruned)
+		}
+		if !strings.Contains(w.Body.String(), `"pruned":true`) {
+			t.Errorf("prune body = %s", w.Body.String())
+		}
+	})
+
+	t.Run("prune invalid id", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/sync/devices/nope", nil))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status=%d, want 400", w.Code)
+		}
+	})
+
+	t.Run("prune missing device", func(t *testing.T) {
+		fake.pruneErr = service.ErrSyncDeviceNotFound
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/sync/devices/"+testSiteID, nil))
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status=%d, want 404", w.Code)
+		}
+	})
+
+	t.Run("compact", func(t *testing.T) {
+		fake.compactRes = service.SyncCompactResult{Watermark: 9, CollapsedSuperseded: 1, PurgedTombstones: 4, EvictedSites: []string{}}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/sync/compact", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		var got service.SyncCompactResult
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Watermark != 9 || got.PurgedTombstones != 4 || got.EvictedSites == nil {
+			t.Errorf("compact result = %+v", got)
+		}
+	})
+}
+
+func TestAPIv1SyncRoutes404WhenUnwired(t *testing.T) {
+	h := newTestHandler()
+	for _, c := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/sync/devices"},
+		{http.MethodDelete, "/api/v1/sync/devices/" + testSiteID},
+		{http.MethodPost, "/api/v1/sync/compact"},
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(c.method, c.path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s %s with no service = %d, want 404", c.method, c.path, w.Code)
+		}
 	}
 }

@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Last verified: 2026-05-29 (taskdb gained ForestNote provenance columns + hard-purge; REST v1 + MCP task surfaces extended with URL/Priority/Categories/Comment writes and purge-deleted)
+Last verified: 2026-06-10 (ForestNote sync device management: /sync/v1 gained an optional `device_name` envelope field; Settings "Sync Devices" card + /api/v1/sync/{devices,compact} list/prune devices and trigger relay-log compaction on demand; prune = cleanup-only delete of the sync_cursors row — spec §4.3)
 
 Platform-neutral note management and task synchronization service supporting Supernote (via Supernote Private Cloud) and Onyx Boox devices. Six subsystems:
 1. **CalDAV task sync** -- CalDAV VTODO over local SQLite task store
@@ -159,6 +159,12 @@ All other configuration (auth, OCR, sources, logging, RAG, chat) is configured v
 - STARTSYNC push: `internal/spcserver/notify` over the server's own Socket.IO registry (server mode only); a no-op notifier otherwise.
 - Config: Settings → "UB-as-SPC Device Sync Server" (DB-backed; `UB_SPC_*` env overrides). Task DB path: UB_TASK_DB_PATH (SQLite).
 - The legacy SPC *client* (REST pull via `internal/tasksync`, Engine.IO `internal/sync`, MariaDB `internal/db`) was removed 2026-05-25 — UB no longer connects out to a real SPC.
+
+### Device Sync (ForestNote /sync/v1) — device management
+- A device's identity is its client-minted `site_id` ULID; registration is implicit (first sync creates the `sync_cursors` row). A reinstall/factory-reset mints a NEW site_id, orphaning the old row. Optional `device_name` envelope field labels devices (absent/empty preserves the stored name); "first seen" decodes from the ULID timestamp (`syncstore.ULIDTime`).
+- Management surface: Settings → "Sync Devices" card + `GET /api/v1/sync/devices`, `DELETE /api/v1/sync/devices/{id}`, `POST /api/v1/sync/compact` (via `service.SyncDeviceService` over `*forestnote.Source`; nil when no FN source).
+- **Prune is cleanup-only** (spec §4.3): deletes the cursor row, never the device's authored `sync_ops` (they're content). A pruned-but-alive device re-registers on next sync — `ApplyBatch` reseeds its `accepted_through` from the pre-batch changelog `MAX(op_seq)` so compaction holes can't wedge it below the device's high-water.
+- Manual "Compact now" runs even when periodic compaction is off (the press is the operator opt-in); the prune→compact loop reclaims history a dead device was pinning.
 
 ### Notes Pipeline (SQLite)
 - Two databases: SQLite for tasks (taskdb), SQLite for notes pipeline (notedb). (The MariaDB SPC catalog write-through was removed with the legacy client 2026-05-25; the UB-as-SPC server derives file size from os.Stat and md5 lazily via `spc_file_ids`, so no catalog sync is needed.)
