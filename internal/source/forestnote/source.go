@@ -131,12 +131,7 @@ func (s *Source) startCompaction(ctx context.Context, logger *slog.Logger) {
 	if intervalSec <= 0 {
 		intervalSec = defaultCompactionIntervalSec
 	}
-	horizonSec := s.cfg.CompactionStaleHorizonSec
-	if horizonSec <= 0 {
-		horizonSec = defaultStaleHorizonSec
-	}
 	interval := time.Duration(intervalSec) * time.Second
-	horizonMs := int64(horizonSec) * 1000
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -145,35 +140,59 @@ func (s *Source) startCompaction(ctx context.Context, logger *slog.Logger) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				s.compactOnce(ctx, horizonMs, logger)
+				if outcome, err := s.compactOnce(ctx); err != nil {
+					logger.Warn("forestnote: compaction pass failed", "err", err)
+				} else {
+					logCompactOutcome(logger, outcome)
+				}
 			}
 		}
 	}()
 	logger.Info("forestnote: relay-log compaction enabled",
-		"interval", interval, "stale_horizon_sec", horizonSec)
+		"interval", interval, "stale_horizon_sec", s.staleHorizonMs()/1000)
 }
 
-// compactOnce performs one watermark + sweep pass, logging the outcome. Errors are logged, not
-// fatal: a failed pass leaves the log intact and the next tick retries.
-func (s *Source) compactOnce(ctx context.Context, staleHorizonMs int64, logger *slog.Logger) {
-	watermark, evicted, err := s.store.ComputeWatermark(ctx, time.Now().UnixMilli(), staleHorizonMs)
-	if err != nil {
-		logger.Warn("forestnote: compaction watermark failed", "err", err)
-		return
+// staleHorizonMs is the configured (or default) compaction stale horizon in
+// milliseconds — shared by the periodic ticker, CompactNow, and Devices so the
+// UI's "stale" badge agrees with what a compaction pass would actually evict.
+func (s *Source) staleHorizonMs() int64 {
+	horizonSec := s.cfg.CompactionStaleHorizonSec
+	if horizonSec <= 0 {
+		horizonSec = defaultStaleHorizonSec
 	}
-	if len(evicted) > 0 {
-		logger.Info("forestnote: compaction evicted stale devices from watermark", "sites", evicted)
+	return int64(horizonSec) * 1000
+}
+
+// compactOnce performs one watermark + sweep pass. Errors leave the log intact
+// (the next tick or manual trigger retries).
+func (s *Source) compactOnce(ctx context.Context) (syncstore.CompactOutcome, error) {
+	watermark, evicted, err := s.store.ComputeWatermark(ctx, time.Now().UnixMilli(), s.staleHorizonMs())
+	if err != nil {
+		return syncstore.CompactOutcome{}, fmt.Errorf("compaction watermark: %w", err)
 	}
 	stats, err := s.store.Compact(ctx, syncstore.TombstoneCols(), watermark)
 	if err != nil {
-		logger.Warn("forestnote: compaction sweep failed", "err", err)
-		return
+		return syncstore.CompactOutcome{}, fmt.Errorf("compaction sweep: %w", err)
 	}
-	if stats.CollapsedSuperseded > 0 || stats.PurgedTombstones > 0 {
+	return syncstore.CompactOutcome{
+		Watermark:           watermark,
+		Evicted:             evicted,
+		CollapsedSuperseded: stats.CollapsedSuperseded,
+		PurgedTombstones:    stats.PurgedTombstones,
+	}, nil
+}
+
+// logCompactOutcome keeps the ticker path's logging contract: evictions are
+// never silent, and reclamation is logged only when something was reclaimed.
+func logCompactOutcome(logger *slog.Logger, o syncstore.CompactOutcome) {
+	if len(o.Evicted) > 0 {
+		logger.Info("forestnote: compaction evicted stale devices from watermark", "sites", o.Evicted)
+	}
+	if o.CollapsedSuperseded > 0 || o.PurgedTombstones > 0 {
 		logger.Info("forestnote: compaction reclaimed relay log",
-			"watermark", watermark,
-			"collapsed_superseded", stats.CollapsedSuperseded,
-			"purged_tombstones", stats.PurgedTombstones)
+			"watermark", o.Watermark,
+			"collapsed_superseded", o.CollapsedSuperseded,
+			"purged_tombstones", o.PurgedTombstones)
 	}
 }
 
@@ -252,6 +271,47 @@ func (s *Source) ReprocessNotebook(ctx context.Context, notebookID string) error
 		}
 	}()
 	return nil
+}
+
+// Devices lists the registered sync devices with staleness judged against the
+// same horizon the compaction watermark uses. Errors if the source isn't
+// started (mirrors EditTextBox's guard).
+func (s *Source) Devices(ctx context.Context) ([]syncstore.DeviceRow, error) {
+	if s == nil || s.store == nil {
+		return nil, fmt.Errorf("forestnote source not started")
+	}
+	return s.store.ListDevices(ctx, time.Now().UnixMilli(), s.staleHorizonMs())
+}
+
+// PruneDevice deletes a device's registry row (spec §4.3 prune: cleanup only —
+// its authored ops stay, and a still-alive device re-registers on next sync).
+// Returns whether the device existed.
+func (s *Source) PruneDevice(ctx context.Context, siteID string) (bool, error) {
+	if s == nil || s.store == nil {
+		return false, fmt.Errorf("forestnote source not started")
+	}
+	return s.store.DeleteDevice(ctx, siteID)
+}
+
+// CompactNow runs one watermark + sweep pass on demand. Deliberately NOT gated
+// on cfg.Compaction: the periodic gate exists so a deploy never sweeps before
+// the operator has inspected the log, and an explicit button press IS that
+// operator opting in — the driving scenario is prune-dead-device → reclaim the
+// history it pinned.
+func (s *Source) CompactNow(ctx context.Context) (syncstore.CompactOutcome, error) {
+	if s == nil || s.store == nil {
+		return syncstore.CompactOutcome{}, fmt.Errorf("forestnote source not started")
+	}
+	outcome, err := s.compactOnce(ctx)
+	if err != nil {
+		return syncstore.CompactOutcome{}, err
+	}
+	logger := s.deps.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logCompactOutcome(logger, outcome)
+	return outcome, nil
 }
 
 // Status returns the bridge's processing snapshot. Zero value when the
