@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/sysop/ultrabridge/internal/syncstore"
 )
@@ -24,13 +25,20 @@ var (
 	ErrUnsupportedVersion = errors.New("unsupported protocol version") // 409
 )
 
+// MaxDeviceNameLen caps the stored device_name (in runes). Over-long names are
+// truncated, never rejected — a cosmetic label must not be able to brick sync.
+const MaxDeviceNameLen = 128
+
 // Request / Response are the /sync/v1 wire envelope (spec §4).
 type Request struct {
-	ProtocolVersion int            `json:"protocol_version"`
-	SchemaHash      string         `json:"schema_hash"`
-	SiteID          string         `json:"site_id"`
-	Cursor          int64          `json:"cursor"`
-	Ops             []syncstore.Op `json:"ops"`
+	ProtocolVersion int    `json:"protocol_version"`
+	SchemaHash      string `json:"schema_hash"`
+	SiteID          string `json:"site_id"`
+	// DeviceName is an OPTIONAL human-readable label (spec §4) shown in the
+	// device-management UI. Absent/empty preserves any stored name.
+	DeviceName string         `json:"device_name,omitempty"`
+	Cursor     int64          `json:"cursor"`
+	Ops        []syncstore.Op `json:"ops"`
 }
 
 type Response struct {
@@ -46,7 +54,7 @@ type Response struct {
 type Store interface {
 	ApplyBatch(ctx context.Context, siteID string, ops []syncstore.Op) (syncstore.ApplyResult, error)
 	OpsSince(ctx context.Context, cursor int64, excludeSite string, limit int) ([]syncstore.Op, int64, bool, error)
-	RecordCursor(ctx context.Context, siteID string, lastPullSeq int64) error
+	RecordCursor(ctx context.Context, siteID string, lastPullSeq int64, deviceName string) error
 }
 
 // Bridge is notified of pages whose live content changed, so it can re-render →
@@ -100,7 +108,7 @@ func (s *Service) Sync(ctx context.Context, req Request) (Response, error) {
 	}
 
 	// Best-effort bookkeeping; the wire is client-driven so a failure is non-fatal.
-	if err := s.store.RecordCursor(ctx, req.SiteID, newCursor); err != nil {
+	if err := s.store.RecordCursor(ctx, req.SiteID, newCursor, normalizeDeviceName(req.DeviceName)); err != nil {
 		s.logger.Warn("sync: record cursor failed", "site", req.SiteID, "err", err)
 	}
 
@@ -125,4 +133,16 @@ func (s *Service) Sync(ctx context.Context, req Request) (Response, error) {
 		Cursor:          newCursor,
 		HasMore:         hasMore,
 	}, nil
+}
+
+// normalizeDeviceName trims the optional envelope label and truncates it to
+// MaxDeviceNameLen runes (rune-wise so a multibyte name is never cut mid-
+// character). Returns "" for an absent/blank name, which RecordCursor treats
+// as "preserve the stored name".
+func normalizeDeviceName(name string) string {
+	name = strings.TrimSpace(name)
+	if r := []rune(name); len(r) > MaxDeviceNameLen {
+		return string(r[:MaxDeviceNameLen])
+	}
+	return name
 }

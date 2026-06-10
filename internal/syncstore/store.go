@@ -83,6 +83,31 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 	if err := tx.QueryRowContext(ctx, `SELECT last_hlc FROM sync_site WHERE id = 1`).Scan(&lastHlc); err != nil {
 		return res, fmt.Errorf("read last_hlc: %w", err)
 	}
+
+	// Read the device's persisted accepted_through BEFORE this batch's inserts.
+	// On a missing cursor row — a genuinely new device, or one whose row was
+	// pruned (device management) and is now re-registering — seed from the
+	// pre-batch MAX(op_seq) in the changelog. Walking from 0 would wedge below a
+	// pruned device's real high-water at the first op_seq hole: compaction
+	// reclaims sync_ops rows and historic rejections leave gaps, and the client
+	// has already discarded acked outbox ops so it can never refill them.
+	// Everything at or below the pre-batch MAX was settled (applied, since
+	// compacted, or rejected). Reading it pre-insert keeps the gap-capping
+	// semantics for THIS batch: an op the device skips in its first contact must
+	// still cap the water so the device resends it.
+	var acked int64
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT acked_op_seq FROM sync_cursors WHERE site_id = ?`, siteID).Scan(&acked); err {
+	case nil:
+	case sql.ErrNoRows:
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(op_seq), 0) FROM sync_ops WHERE site_id = ?`, siteID).Scan(&acked); err != nil {
+			return res, fmt.Errorf("reseed acked_op_seq: %w", err)
+		}
+	default:
+		return res, fmt.Errorf("read acked_op_seq: %w", err)
+	}
+
 	var maxIncoming int64
 
 	rejectedSeqs := make(map[int64]bool) // op_seqs permanently rejected for siteID this call
@@ -132,7 +157,7 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 		}
 	}
 
-	accepted, err := advanceAccepted(ctx, tx, siteID, rejectedSeqs, now)
+	accepted, err := advanceAccepted(ctx, tx, siteID, acked, rejectedSeqs, now)
 	if err != nil {
 		return res, err
 	}
@@ -291,18 +316,13 @@ func wireNullStr(s sql.NullString) any {
 // advanceAccepted computes and persists siteID's contiguous accepted_through
 // (spec §4.1): the greatest N such that every op_seq 1..N is durably settled —
 // present in sync_ops (applied or deduped from any call) OR permanently rejected
-// this call. Walking from the persisted high-water means a rejected op is counted
-// once (here), advanced past, and never revisited — so a poison op neither wedges
-// the water nor is silently lost.
-func advanceAccepted(ctx context.Context, tx *sql.Tx, siteID string, rejectedSeqs map[int64]bool, now int64) (int64, error) {
-	var h int64
-	switch err := tx.QueryRowContext(ctx,
-		`SELECT acked_op_seq FROM sync_cursors WHERE site_id = ?`, siteID).Scan(&h); err {
-	case nil, sql.ErrNoRows:
-		// h is 0 on ErrNoRows (Scan leaves it zero)
-	default:
-		return 0, fmt.Errorf("read acked_op_seq: %w", err)
-	}
+// this call. acked is the walk's starting point, read by ApplyBatch BEFORE the
+// batch's inserts: the persisted high-water, or the pre-batch changelog MAX when
+// the cursor row is missing (see the reseed comment there). Walking from the
+// high-water means a rejected op is counted once (here), advanced past, and
+// never revisited — so a poison op neither wedges the water nor is silently lost.
+func advanceAccepted(ctx context.Context, tx *sql.Tx, siteID string, acked int64, rejectedSeqs map[int64]bool, now int64) (int64, error) {
+	h := acked
 
 	for {
 		next := h + 1
@@ -687,11 +707,18 @@ func (s *Store) LastSeq(ctx context.Context) (int64, error) {
 
 // RecordCursor stores a device's last pull high-water (best-effort bookkeeping /
 // observability; the wire is client-driven so this is not load-bearing).
-func (s *Store) RecordCursor(ctx context.Context, siteID string, lastPullSeq int64) error {
+// deviceName is the optional label from the request envelope: a non-empty name
+// refreshes the stored one (so client renames propagate), while empty preserves
+// it — an old client that never sends the field must not erase a known name.
+func (s *Store) RecordCursor(ctx context.Context, siteID string, lastPullSeq int64, deviceName string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sync_cursors (site_id, last_pull_seq, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT(site_id) DO UPDATE SET last_pull_seq=excluded.last_pull_seq, updated_at=excluded.updated_at`,
-		siteID, lastPullSeq, time.Now().UnixMilli())
+		`INSERT INTO sync_cursors (site_id, last_pull_seq, updated_at, device_name) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(site_id) DO UPDATE SET
+			last_pull_seq = excluded.last_pull_seq,
+			updated_at    = excluded.updated_at,
+			device_name   = CASE WHEN excluded.device_name <> '' THEN excluded.device_name
+			                     ELSE sync_cursors.device_name END`,
+		siteID, lastPullSeq, time.Now().UnixMilli(), deviceName)
 	return err
 }
 

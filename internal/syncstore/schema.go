@@ -191,6 +191,9 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		{"fn_page", "template_pitch_mm", "INTEGER"},
 		// Phase 8 cutover: the durable op_ts HLC on the authoring-site row.
 		{"sync_site", "last_hlc", "INTEGER NOT NULL DEFAULT 0"},
+		// Device management: optional human-readable label refreshed on every sync
+		// that carries one ('' = the device never sent a name).
+		{"sync_cursors", "device_name", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := ensureColumn(ctx, db, a.table, a.col, a.decl); err != nil {
 			return fmt.Errorf("syncstore migrate: %w", err)

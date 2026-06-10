@@ -1,6 +1,9 @@
 package syncstore
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // schemaHashV3 is the published CURRENT schema hash (docs/sync/forestnote-sync-protocol.md
 // §6) — folder/notebook/page/page_text_from_client/page_text_from_server/stroke/text_box.
@@ -50,6 +53,38 @@ func TestIsULID(t *testing.T) {
 		if got := IsULID(c.in); got != c.want {
 			t.Errorf("IsULID(%q) = %v, want %v", c.in, got, c.want)
 		}
+	}
+}
+
+func TestULIDTime(t *testing.T) {
+	// Round-trip: a freshly minted ULID decodes to "now" (within the mint window).
+	before := time.Now().UnixMilli()
+	ms, ok := ULIDTime(newULID())
+	after := time.Now().UnixMilli()
+	if !ok {
+		t.Fatal("ULIDTime rejected a newULID() value")
+	}
+	if ms < before || ms > after {
+		t.Errorf("decoded ms %d outside mint window [%d, %d]", ms, before, after)
+	}
+
+	// Fixed vector: encode a known timestamp, decode it back exactly.
+	const wantMs = int64(1717200000000) // 2024-06-01T00:00:00Z
+	var b [16]byte
+	u := uint64(wantMs)
+	b[0], b[1], b[2], b[3], b[4], b[5] = byte(u>>40), byte(u>>32), byte(u>>24), byte(u>>16), byte(u>>8), byte(u)
+	if got, ok := ULIDTime(encodeULID(b)); !ok || got != wantMs {
+		t.Errorf("ULIDTime(fixed) = (%d, %v), want (%d, true)", got, ok, wantMs)
+	}
+
+	// All-zero timestamp half (the test-suite site_id convention) decodes to 0.
+	if got, ok := ULIDTime("0000000000000000000000000A"); !ok || got != 0 {
+		t.Errorf("ULIDTime(zero ULID) = (%d, %v), want (0, true)", got, ok)
+	}
+
+	// Non-ULID input is rejected.
+	if _, ok := ULIDTime("not-a-ulid"); ok {
+		t.Error("ULIDTime accepted a non-ULID string")
 	}
 }
 

@@ -183,6 +183,13 @@ row and the merge therefore consider only the known column set. (Conformance vec
   "protocol_version": 1,
   "schema_hash": "724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe",
   "site_id": "<ULID>",
+  "device_name": "<string>",  // OPTIONAL, informational. Human-readable device label (e.g.
+                              //   "Viwoods AiPaper") for the server's device-management UI.
+                              //   Server trims whitespace and truncates to 128 runes; absent
+                              //   or empty leaves any previously stored name intact, so old
+                              //   clients can never erase a name. Not part of the schema
+                              //   hash (§6); a server that predates this field ignores it
+                              //   (additive envelope field, protocol_version stays 1).
   "cursor": <int64>,     // last global seq this device has applied (0 = never synced)
   "ops": [ Op, ... ]     // pending local ops, in op_seq order
 }
@@ -255,6 +262,32 @@ loop:
   re-applied idempotently.
 - `accepted_through` is computed from the server's **durable** state, so a response lost in
   flight is harmless: the device resends, the server dedups, and reports the same water (§7.3).
+
+### 4.3 Device registry & lifecycle
+
+A device's identity **is** its `site_id`: minted client-side on first sync-enable, persisted
+in the client database, never rotated in place. Reinstalling the app or clearing its data
+mints a **new** `site_id` — the old one is orphaned and lingers in the server's registry.
+
+- **Registration is implicit.** The server has no enrolment step; the first `/sync/v1` call
+  from an unknown `site_id` creates its registry (cursor) row, recording last-pull seq,
+  contiguous `accepted_through`, last-seen timestamp, and the optional `device_name` (§4).
+  The "first seen" time needs no storage: it is the 48-bit millisecond timestamp embedded in
+  the `site_id` ULID itself.
+- **Stale devices and the watermark.** Tombstone compaction is gated on the minimum
+  last-pull seq over *active* devices; a device unseen for longer than the stale horizon is
+  evicted from that minimum so a dead install cannot pin the relay log forever (see
+  spec/compaction.md semantics in the compaction config).
+- **Prune (server-side device management).** Pruning a device deletes **only its registry
+  row**. Ops it authored stay in the changelog and mirrors — they are content other replicas
+  and the server need; dedup identity remains `(site_id, op_seq)`. Pruning is cleanup, not
+  revocation: a pruned device that is still alive transparently **re-registers** on its next
+  sync. To make that safe, a server seeing no registry row for a `site_id` must seed the
+  device's `accepted_through` walk from the changelog's `MAX(op_seq)` for that site (every
+  op at or below it was settled — applied, since compacted, or permanently rejected) instead
+  of walking from 0, which would wedge below the device's real high-water at the first
+  compaction hole. The seed is read **before** the request's ops are applied, so a genuine
+  gap inside a first-contact batch still caps the water (§4.1 rule 3).
 
 ---
 

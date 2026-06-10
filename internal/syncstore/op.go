@@ -154,6 +154,23 @@ func encodeULID(b [16]byte) string {
 	return string(d)
 }
 
+// ULIDTime decodes the 48-bit millisecond Unix timestamp embedded in a ULID's
+// first 10 characters (the inverse of encodeULID's timestamp half). For a
+// device site_id this is the moment the client minted it — i.e. when that
+// install first enabled sync — which the device-management UI surfaces as
+// "first seen" without needing a stored column. Returns ok=false for a
+// non-ULID input.
+func ULIDTime(s string) (unixMs int64, ok bool) {
+	if !IsULID(s) {
+		return 0, false
+	}
+	var ms int64
+	for i := 0; i < 10; i++ {
+		ms = ms<<5 | int64(strings.IndexByte(ulidAlphabet, s[i]))
+	}
+	return ms, true
+}
+
 // IsULID reports whether s is a canonical 26-char uppercase Crockford ULID.
 func IsULID(s string) bool {
 	if len(s) != 26 {
