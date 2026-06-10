@@ -758,6 +758,12 @@ func main() {
 		webHandler = web.NewHandler(taskSvc, noteSvc, searchSvc, configSvc, noteDB, snNotesPath, booxNotesPath, logger, broadcaster)
 		webHandler.SetDigestService(digestSvc)
 		webHandler.SetSPCFileRoot(cfg.SPCFileRoot) // resolves digest source pages for /digests/{id}/render
+		// Wire ForestNote sync device management (Settings card + /api/v1/sync/*).
+		// NewSyncDeviceService returns nil for a nil source, which keeps the card
+		// hidden and the routes 404ing when no ForestNote source is active.
+		if fnSource != nil {
+			webHandler.SetSyncDeviceService(service.NewSyncDeviceService(fnSource))
+		}
 
 		// Serve the public signed attachment + FN-render endpoints using the same
 		// signer/store/base URL the CalDAV backend embeds in ATTACH (created above).

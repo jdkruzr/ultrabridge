@@ -32,6 +32,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/notedb"
 	"github.com/sysop/ultrabridge/internal/service"
 	"github.com/sysop/ultrabridge/internal/source"
+	"github.com/sysop/ultrabridge/internal/syncstore"
 	"github.com/sysop/ultrabridge/internal/taskattach"
 )
 
@@ -60,11 +61,12 @@ type fnRowCtx struct {
 var staticFS embed.FS
 
 type Handler struct {
-	tasks   service.TaskService
-	notes   service.NoteService
-	search  service.SearchService
-	config  service.ConfigService
-	digests service.DigestService // optional; nil when no digest store (non-server mode)
+	tasks       service.TaskService
+	notes       service.NoteService
+	search      service.SearchService
+	config      service.ConfigService
+	digests     service.DigestService     // optional; nil when no digest store (non-server mode)
+	syncDevices service.SyncDeviceService // optional; nil when no ForestNote source (hides the Sync Devices card)
 
 	noteDB          *sql.DB
 	notesPathPrefix string
@@ -303,6 +305,12 @@ func NewHandler(
 		h.mux.HandleFunc("POST /settings/mcp-tokens/revoke", h.handleMCPTokenRevoke)
 	}
 
+	// Registered unconditionally; the handlers 404 when no SyncDeviceService is
+	// wired (it arrives via SetSyncDeviceService after construction, so route
+	// registration can't be gated on it).
+	h.mux.HandleFunc("POST /settings/sync-devices/prune", h.handleSyncDevicePrune)
+	h.mux.HandleFunc("POST /settings/sync-devices/compact", h.handleSyncDeviceCompact)
+
 	h.mux.HandleFunc("GET /files", h.handleFiles)
 	h.mux.HandleFunc("GET /files/supernote", h.handleFilesSupernote)
 	h.mux.HandleFunc("GET /files/boox", h.handleFilesBoox)
@@ -399,6 +407,14 @@ func (h *Handler) SetDigestService(d service.DigestService) {
 // keeps the NewHandler call sites stable.
 func (h *Handler) SetSPCFileRoot(root string) {
 	h.spcFileRoot = root
+}
+
+// SetSyncDeviceService wires the ForestNote sync device-management surface. Set
+// from main only when a ForestNote source is active; when unset the Sync
+// Devices settings card hides and its routes 404. A setter (not a constructor
+// arg) keeps the NewHandler call sites stable, mirroring SetDigestService.
+func (h *Handler) SetSyncDeviceService(s service.SyncDeviceService) {
+	h.syncDevices = s
 }
 
 func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, name string, data map[string]interface{}) {
@@ -1015,10 +1031,25 @@ func (h *Handler) setSourceConfigBool(ctx context.Context, row source.SourceRow,
 }
 
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
+	h.renderTemplate(w, r, "settings", h.settingsData(r))
+}
+
+// settingsData builds the Settings page's template data. Extracted from
+// handleSettings so mutation handlers that re-render the page on HX (sync
+// device prune/compact) can add their own flash keys on top.
+func (h *Handler) settingsData(r *http.Request) map[string]interface{} {
 	ctx := r.Context()
 	cfg, _ := h.config.GetConfig(ctx)
 	srcs, _ := h.config.ListSources(ctx)
 	data := map[string]interface{}{"Config": cfg, "Sources": srcs, "activeTab": "settings"}
+	if h.syncDevices != nil {
+		data["SyncDevicesEnabled"] = true
+		devices, err := h.syncDevices.ListSyncDevices(ctx)
+		if err != nil {
+			h.logger.Error("failed to list sync devices", "error", err)
+		}
+		data["SyncDevices"] = devices
+	}
 	if h.noteDB != nil {
 		tokens, _ := mcpauth.ListTokens(ctx, h.noteDB)
 		data["MCPTokens"], data["MCPTokensEnabled"] = tokens, true
@@ -1070,7 +1101,59 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		data["MCPHTTPURL"] = fmt.Sprintf("%s://%s:%d/sse", scheme, host, mcpCfg.MCPPort)
 		data["MCPStdioCommand"] = "docker exec -i ub-mcp ub-mcp"
 	}
-	h.renderTemplate(w, r, "settings", data)
+	return data
+}
+
+// handleSyncDevicePrune deletes a ForestNote sync device's registry row (spec
+// §4.3 prune: cleanup only — its authored ops stay, and a still-alive device
+// re-registers on its next sync). 404s when no ForestNote source is wired.
+func (h *Handler) handleSyncDevicePrune(w http.ResponseWriter, r *http.Request) {
+	if h.syncDevices == nil {
+		http.NotFound(w, r)
+		return
+	}
+	siteID := strings.TrimSpace(r.FormValue("site_id"))
+	if !syncstore.IsULID(siteID) {
+		http.Error(w, "site_id must be a ULID", http.StatusBadRequest)
+		return
+	}
+	if err := h.syncDevices.PruneSyncDevice(r.Context(), siteID); err != nil {
+		if errors.Is(err, service.ErrSyncDeviceNotFound) {
+			http.Error(w, "no such device", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to prune sync device", "site_id", siteID, "error", err)
+		http.Error(w, "failed to prune device", http.StatusInternalServerError)
+		return
+	}
+	h.logger.Info("pruned sync device", "site_id", siteID)
+	if r.Header.Get("HX-Request") == "true" {
+		h.handleSettings(w, r)
+		return
+	}
+	http.Redirect(w, r, "/settings#sync-devices", http.StatusSeeOther)
+}
+
+// handleSyncDeviceCompact runs one relay-log compaction pass on demand (the
+// prune → reclaim-history loop). 404s when no ForestNote source is wired.
+func (h *Handler) handleSyncDeviceCompact(w http.ResponseWriter, r *http.Request) {
+	if h.syncDevices == nil {
+		http.NotFound(w, r)
+		return
+	}
+	result, err := h.syncDevices.CompactNow(r.Context())
+	if err != nil {
+		h.logger.Error("manual sync compaction failed", "error", err)
+		http.Error(w, "compaction failed", http.StatusInternalServerError)
+		return
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		data := h.settingsData(r)
+		data["SyncCompactResult"] = result
+		h.renderTemplate(w, r, "settings", data)
+		return
+	}
+	http.Redirect(w, r, "/settings#sync-devices", http.StatusSeeOther)
 }
 
 func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
