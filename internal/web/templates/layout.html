@@ -513,8 +513,16 @@
                 {{end}}
                 <a class="nav-item {{if eq .activeTab "logs"}}active{{end}}"
                    href="/logs" hx-get="/logs" hx-target="#main-content" hx-push-url="true">Logs</a>
-                <a class="nav-item {{if eq .activeTab "settings"}}active{{end}}"
-                   href="/settings" hx-get="/settings" hx-target="#main-content" hx-push-url="true">Settings</a>
+                {{/* Settings group: four deep-linkable sub-pages. */}}
+                <div class="nav-group-label">Settings</div>
+                <a class="nav-item nav-sub {{if eq .activeTab "settings-devices"}}active{{end}}"
+                   href="/settings/devices" hx-get="/settings/devices" hx-target="#main-content" hx-push-url="true">Devices</a>
+                <a class="nav-item nav-sub {{if eq .activeTab "settings-ai"}}active{{end}}"
+                   href="/settings/ai" hx-get="/settings/ai" hx-target="#main-content" hx-push-url="true">AI &amp; Processing</a>
+                <a class="nav-item nav-sub {{if eq .activeTab "settings-integrations"}}active{{end}}"
+                   href="/settings/integrations" hx-get="/settings/integrations" hx-target="#main-content" hx-push-url="true">Integrations</a>
+                <a class="nav-item nav-sub {{if eq .activeTab "settings-system"}}active{{end}}"
+                   href="/settings/system" hx-get="/settings/system" hx-target="#main-content" hx-push-url="true">System</a>
             </div>
         </nav>
 
