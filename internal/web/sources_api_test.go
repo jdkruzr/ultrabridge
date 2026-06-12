@@ -348,3 +348,82 @@ func TestDeleteSourceNotFound(t *testing.T) {
 		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
+
+// TestListSourcesSyncModel verifies GET /api/sources carries a derived
+// sync_model object per source.
+// sync-model-and-settings-ia.AC2.1: each source includes the five-field descriptor.
+// sync-model-and-settings-ia.AC2.2: the persisted SourceRow shape is unchanged.
+// sync-model-and-settings-ia.AC7.1: asserting view.SyncModel ==
+// source.SyncModelFor(view.Type) is itself the proof that the API derives from
+// the single internal/source definition rather than a duplicate.
+func TestListSourcesSyncModel(t *testing.T) {
+	db := initSourceTestDB(t)
+	defer db.Close()
+
+	h := setupTestHandler(t, db)
+
+	ctx := context.Background()
+	seeds := []source.SourceRow{
+		{Type: "supernote", Name: "SN", Enabled: true, ConfigJSON: `{"notes_path":"/sn"}`},
+		{Type: "boox", Name: "BX", Enabled: false, ConfigJSON: `{"notes_path":"/bx"}`},
+		{Type: "forestnote", Name: "FN", Enabled: true, ConfigJSON: `{"batch_limit":50}`},
+	}
+	for _, row := range seeds {
+		if _, err := source.AddSource(ctx, db, row); err != nil {
+			t.Fatalf("seed %s: %v", row.Type, err)
+		}
+	}
+
+	req := httptest.NewRequest("GET", "/api/sources", nil)
+	w := httptest.NewRecorder()
+	h.handleListSources(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("handleListSources returned %d, want 200", w.Code)
+	}
+	body := w.Body.Bytes()
+
+	// AC2.1: each element carries the descriptor derived from its type.
+	type viewShape struct {
+		source.SourceRow
+		SyncModel source.SyncModel `json:"sync_model"`
+	}
+	var views []viewShape
+	if err := json.Unmarshal(body, &views); err != nil {
+		t.Fatalf("decode views: %v", err)
+	}
+	if len(views) != len(seeds) {
+		t.Fatalf("views length = %d, want %d", len(views), len(seeds))
+	}
+	for _, v := range views {
+		want := source.SyncModelFor(v.Type)
+		if v.SyncModel != want {
+			t.Errorf("sync_model for %s = %+v, want %+v", v.Type, v.SyncModel, want)
+		}
+	}
+
+	// AC2.1: the sync_model key is present and non-empty in the raw JSON.
+	var raw []map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	for i, m := range raw {
+		sm, present := m["sync_model"]
+		if !present || len(sm) == 0 || string(sm) == "null" {
+			t.Errorf("element %d: sync_model key missing or empty", i)
+		}
+	}
+
+	// AC2.2: the same body still decodes into []source.SourceRow with the
+	// persisted fields intact — the descriptor is additive, view-only.
+	var rows []source.SourceRow
+	if err := json.Unmarshal(body, &rows); err != nil {
+		t.Fatalf("decode rows: %v", err)
+	}
+	for i, row := range rows {
+		if row.Type != seeds[i].Type || row.Name != seeds[i].Name ||
+			row.Enabled != seeds[i].Enabled || row.ConfigJSON != seeds[i].ConfigJSON {
+			t.Errorf("row %d = %+v, persisted fields diverge from seed %+v", i, row, seeds[i])
+		}
+	}
+}
