@@ -4,11 +4,21 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/sysop/ultrabridge/internal/source"
 )
+
+// sourceView is the API representation of a source: the persisted row plus its
+// derived, view-only sync model. The embedded SourceRow promotes its JSON
+// fields to top level, so existing []source.SourceRow decoders keep working —
+// the added sync_model field is simply ignored by them.
+type sourceView struct {
+	source.SourceRow
+	SyncModel source.SyncModel `json:"sync_model"`
+}
 
 // handleListSources handles GET /api/sources — list all sources.
 func (h *Handler) handleListSources(w http.ResponseWriter, r *http.Request) {
@@ -19,8 +29,20 @@ func (h *Handler) handleListSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rows, ok := sources.([]source.SourceRow)
+	if !ok {
+		h.logger.Error("list sources: unexpected type from service", "type", fmt.Sprintf("%T", sources))
+		apiError(w, http.StatusInternalServerError, "failed to list sources")
+		return
+	}
+
+	views := make([]sourceView, len(rows))
+	for i, row := range rows {
+		views[i] = sourceView{SourceRow: row, SyncModel: source.SyncModelFor(row.Type)}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sources)
+	json.NewEncoder(w).Encode(views)
 }
 
 // handleAddSource handles POST /api/sources — add a new source.
