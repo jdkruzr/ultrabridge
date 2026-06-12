@@ -1157,50 +1157,6 @@
           );
         }
 
-        function saveConfig() {
-          var statusEl = document.getElementById('config-status');
-          statusEl.textContent = 'Saving...';
-
-          var config = {
-            username: document.getElementById('config-username').value,
-            password: document.getElementById('config-password').value,
-            ocr_format: document.getElementById('config-ocr-format').value,
-            ocr_api_url: document.getElementById('config-ocr-api-url').value,
-            ocr_api_key: document.getElementById('config-ocr-api-key').value,
-            ocr_model: document.getElementById('config-ocr-model').value,
-            ocr_concurrency: parseInt(document.getElementById('config-ocr-concurrency').value) || 1,
-            ocr_max_file_mb: parseInt(document.getElementById('config-ocr-max-file-mb').value) || 0,
-            // Embedding (ollama_*) and chat (chat_*) live in the "General" card below
-            // (RAG Search / AI Chat, with enable toggles) — not duplicated here.
-            mcp_port: parseInt(document.getElementById('config-mcp-port').value) || 0
-          };
-
-          fetch('/api/config', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-          })
-          .then(r => {
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            return r.json();
-          })
-          .then(data => {
-            if (data.restart_required) {
-              statusEl.textContent = 'Saved. ⚠ Restart required!';
-              statusEl.style.color = '#c00';
-              setTimeout(() => location.reload(), 1000);
-            } else {
-              statusEl.textContent = 'Saved.';
-              statusEl.style.color = '#090';
-              setTimeout(() => { statusEl.textContent = ''; }, 2000);
-            }
-          })
-          .catch(e => {
-            statusEl.textContent = 'Error: ' + e.message;
-            statusEl.style.color = '#c00';
-          });
-        }
-
         // Sources API functions
         function toggleSourceEnabled(sourceId, enabled) {
           var statusEl = document.getElementById('sources-status');
