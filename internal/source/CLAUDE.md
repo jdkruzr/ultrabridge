@@ -1,6 +1,6 @@
 # Source Abstraction Package
 
-Last verified: 2026-05-27
+Last verified: 2026-06-12 (added `SyncModel` — typed per-source-type sync-semantics descriptor)
 
 ## Purpose
 
@@ -23,6 +23,26 @@ type Source interface {
 
 Database model for the `sources` table:
 - `ID`, `Type` ("supernote" | "boox" | "forestnote"), `Name`, `Enabled`, `ConfigJSON`, `CreatedAt`, `UpdatedAt`
+
+### SyncModel (syncmodel.go)
+
+Typed, derived classification of how a source type syncs — a constant function of `Type`, never stored, never per-device-instance. The single source of truth behind the `/api/sources` `sync_model` JSON and the web sync-model banners (Files tabs + Settings Devices group).
+
+```go
+type Direction int // OneWayIn, TwoWay; String()/MarshalJSON/UnmarshalJSON use wire tokens "one_way_in"/"two_way" (symmetric; unknown tokens error)
+
+type SyncModel struct {
+    Label            string    `json:"label"`
+    Direction        Direction `json:"direction"`
+    Authority        string    `json:"authority"`
+    DeletesPropagate bool      `json:"deletes_propagate"`
+    Blurb            string    `json:"blurb"`
+}
+
+func SyncModelFor(sourceType string) SyncModel // exhaustive over the 3 types; anything else → Unmanaged (a named non-zero fallback)
+```
+
+Descriptors: supernote = "Two-way sync"/TwoWay/deletes propagate; forestnote = "Live mirror"/TwoWay/deletes propagate; boox = "Receive-only"/OneWayIn/`DeletesPropagate: false` (the only one — device deletes/renames never reach UB). The exact wording is pinned by `syncmodel_test.go`; user-facing copy changes must update that test.
 
 ### Registry
 

@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Last verified: 2026-06-10 (ForestNote sync device management: /sync/v1 gained an optional `device_name` envelope field; Settings "Sync Devices" card + /api/v1/sync/{devices,compact} list/prune devices and trigger relay-log compaction on demand; prune = cleanup-only delete of the sync_cursors row — spec §4.3)
+Last verified: 2026-06-12 (SyncModel + Settings IA: `internal/source` gained `SyncModel`/`SyncModelFor` — a typed per-source-type sync-semantics descriptor surfaced as `sync_model` on `GET /api/sources` and as Unicode-glyph banners (⇅/⬇) on the Files tabs; Settings split into four deep-linkable groups `/settings/{devices,ai,integrations,system}` (legacy `/settings` 303s to devices), with the Devices group rendering uniform per-source sections. Prior: ForestNote sync device management — /sync/v1 optional `device_name` envelope field; Settings "Sync Devices" card + /api/v1/sync/{devices,compact}; prune = cleanup-only delete of the sync_cursors row, spec §4.3)
 
 Platform-neutral note management and task synchronization service supporting Supernote (via Supernote Private Cloud) and Onyx Boox devices. Six subsystems:
 1. **CalDAV task sync** -- CalDAV VTODO over local SQLite task store
@@ -59,7 +59,7 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 - `internal/service/` -- Service interfaces (`TaskService`, `NoteService`, `SearchService`, `ConfigService`) that decouple HTTP handlers from concrete stores and pipelines; plus the store/pipeline interfaces (`TaskStore`, `BooxStore`, `BooxImporter`, `BooxProcessor`, `FileScanner`, `SyncNotifier`, `SyncStatusProvider`) that adapters implement (see domain CLAUDE.md)
 
 ### Web UI & API
-- `internal/web/` -- HTML UI: setup wizard, settings, task list, Files tab, Search tab, Chat tab, processor C&C, sync status, Boox render/versions, JSON API, config/sources API, MCP token management, SSE log stream (see domain CLAUDE.md)
+- `internal/web/` -- HTML UI: setup wizard, settings (four deep-linkable groups: Devices · AI & Processing · Integrations · System), task list, Files tabs (with per-source sync-model banners), Search tab, Chat tab, processor C&C, sync status, Boox render/versions, JSON API, config/sources API, MCP token management, SSE log stream (see domain CLAUDE.md)
 - `internal/mcpauth/` -- MCP bearer token store: SHA-256 hashed tokens in SQLite, CRUD + validation (see domain CLAUDE.md)
 
 ### SPC Server (UB-as-SPC) — the device-facing integration
