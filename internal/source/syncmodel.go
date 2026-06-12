@@ -1,6 +1,9 @@
 package source
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
 // Direction describes which way notes flow for a source's sync model.
 type Direction int
@@ -28,6 +31,24 @@ func (d Direction) String() string {
 // MarshalJSON encodes the Direction as its wire token.
 func (d Direction) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.Quote(d.String())), nil
+}
+
+// UnmarshalJSON decodes a Direction from its wire token, keeping the type
+// symmetric on the wire (clients that decode a SyncModel round-trip cleanly).
+func (d *Direction) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return fmt.Errorf("direction: expected string token: %w", err)
+	}
+	switch s {
+	case "two_way":
+		*d = TwoWay
+	case "one_way_in":
+		*d = OneWayIn
+	default:
+		return fmt.Errorf("direction: unknown token %q", s)
+	}
+	return nil
 }
 
 // SyncModel is the typed, derived classification of how a source syncs. It is

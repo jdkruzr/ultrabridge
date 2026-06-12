@@ -75,6 +75,22 @@ func TestDirectionWireEncoding(t *testing.T) {
 		}
 	}
 
+	// Round-trip: the wire token decodes back to the same Direction, and an
+	// unknown token errors rather than silently zeroing.
+	for _, d := range []Direction{TwoWay, OneWayIn} {
+		raw, _ := json.Marshal(d)
+		var back Direction
+		if err := json.Unmarshal(raw, &back); err != nil {
+			t.Errorf("round-trip %v: %v", d, err)
+		} else if back != d {
+			t.Errorf("round-trip %v = %v", d, back)
+		}
+	}
+	var bad Direction
+	if err := json.Unmarshal([]byte(`"sideways"`), &bad); err == nil {
+		t.Error("unmarshal of unknown token succeeded, want error")
+	}
+
 	// A marshaled SyncModel embeds the string token, not a raw int.
 	raw, err := json.Marshal(SyncModelFor("supernote"))
 	if err != nil {
