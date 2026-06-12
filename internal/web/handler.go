@@ -573,6 +573,7 @@ func (h *Handler) handleFilesSupernote(w http.ResponseWriter, r *http.Request) {
 	data["filesTotalPages"] = totalPages
 	data["pager"] = pager("/files/supernote", page, totalPages, map[string]string{"path": relPath})
 	data["pipelinePanel"] = pipelinePanel{Source: "supernote", StartStop: true}
+	data["syncModel"] = source.SyncModelFor("supernote")
 	h.renderTemplate(w, r, "files_supernote", data)
 }
 
@@ -655,6 +656,7 @@ func (h *Handler) handleFilesBoox(w http.ResponseWriter, r *http.Request) {
 	data["filesTotalPages"] = totalPages
 	data["pager"] = pager("/files/boox", page, totalPages, map[string]string{"folder": folder, "device": device})
 	data["pipelinePanel"] = pipelinePanel{Source: "boox", StartStop: true}
+	data["syncModel"] = source.SyncModelFor("boox")
 	h.renderTemplate(w, r, "files_boox", data)
 }
 
@@ -697,6 +699,7 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 	data["navCrumbs"] = forestNoteCrumbs(crumbs)
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
 	data["pipelinePanel"] = pipelinePanel{Note: "Re-OCR is per-notebook — open a notebook to reprocess it."}
+	data["syncModel"] = source.SyncModelFor("forestnote")
 	h.renderTemplate(w, r, "files_forestnote", data)
 }
 

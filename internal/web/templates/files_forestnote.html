@@ -8,6 +8,7 @@
     {{template "_detail_page_grid" .detail}}
   {{else}}
     {{/* Browse mode: Supernote-style table of folders + notebooks. */}}
+    {{if .syncModel}}{{template "_sync_model_banner" .syncModel}}{{end}}
     {{template "_files_status_panel" .pipelinePanel}}
     <div class="card">
       {{template "_files_breadcrumb" .navCrumbs}}

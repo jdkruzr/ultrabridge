@@ -7,6 +7,7 @@
   {{else if .detail}}
     {{template "_detail_page_grid" .detail}}
   {{else}}
+    {{if .syncModel}}{{template "_sync_model_banner" .syncModel}}{{end}}
     {{template "_files_status_panel" .pipelinePanel}}
 
     <div class="toolbar">
