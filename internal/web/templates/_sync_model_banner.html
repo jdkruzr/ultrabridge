@@ -1,0 +1,13 @@
+{{define "_sync_model_banner"}}
+{{- /* Context: source.SyncModel. Glyph + tone are view concerns derived from
+       Direction. Unicode glyphs only — no icon library. */ -}}
+{{- $oneWay := eq .Direction.String "one_way_in" -}}
+<div class="sync-model-banner {{if $oneWay}}sync-model-attention{{else}}sync-model-quiet{{end}}"
+     style="display:flex; align-items:flex-start; gap:0.6rem; padding:0.75rem 1rem; margin-bottom:1rem; border:1px solid var(--border-color); border-radius:var(--radius); background:var(--bg-color);{{if $oneWay}} border-left:3px solid #c97;{{end}}">
+  <span aria-hidden="true" style="font-size:1.1rem; line-height:1.3;">{{if eq .Direction.String "two_way"}}⇅{{else}}⬇{{end}}</span>
+  <span>
+    <span class="text-bold">{{.Label}}</span>
+    <span class="text-small" style="display:block; color:var(--text-secondary);">{{.Blurb}}</span>
+  </span>
+</div>
+{{end}}
