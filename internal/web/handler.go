@@ -175,6 +175,7 @@ func NewHandler(
 		"formatDueTime":   formatDueTime,
 		"formatCreated":   formatCreated,
 		"formatTimestamp": formatTimestampMs,
+		"syncModelFor":    source.SyncModelFor,
 		"fileTypeStr":     func(ft string) string { return ft },
 		"fileRowID": func(path string) string {
 			sum := sha1.Sum([]byte(path))
