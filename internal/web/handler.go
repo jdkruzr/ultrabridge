@@ -1737,19 +1737,25 @@ func (h *Handler) handleMCPTokenCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
-		h.renderTemplate(w, r, "settings", map[string]interface{}{"NewMCPToken": t})
+		// Full settingsData, not just the flash key — rendering the group with
+		// only NewMCPToken would blank every other card on the page.
+		data := h.settingsData(r)
+		data["activeTab"], data["SettingsGroup"], data["NewMCPToken"] = "settings-integrations", "integrations", t
+		h.renderTemplate(w, r, "settings_integrations", data)
 		return
 	}
-	http.Redirect(w, r, "/settings?new_token="+url.QueryEscape(t)+"#mcp-tokens", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/integrations?new_token="+url.QueryEscape(t)+"#mcp-tokens", http.StatusSeeOther)
 }
 
 func (h *Handler) handleMCPTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	mcpauth.RevokeToken(r.Context(), h.noteDB, r.FormValue("token_hash"))
 	if r.Header.Get("HX-Request") == "true" {
-		h.handleSettings(w, r)
+		data := h.settingsData(r)
+		data["activeTab"], data["SettingsGroup"] = "settings-integrations", "integrations"
+		h.renderTemplate(w, r, "settings_integrations", data)
 		return
 	}
-	http.Redirect(w, r, "/settings#mcp-tokens", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/integrations#mcp-tokens", http.StatusSeeOther)
 }
 
 func (h *Handler) handleAsk(w http.ResponseWriter, r *http.Request) {

@@ -1455,13 +1455,13 @@ func TestHandleMCPTokenCreate_Success(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	// Should redirect with 303 to /settings?new_token=...#mcp-tokens
+	// Should redirect with 303 to /settings/integrations?new_token=...#mcp-tokens
 	if w.Code != http.StatusSeeOther {
 		t.Errorf("POST /settings/mcp-tokens/create status = %d, want 303", w.Code)
 	}
 
 	location := w.Header().Get("Location")
-	if !strings.Contains(location, "/settings?new_token=") || !strings.Contains(location, "#mcp-tokens") {
+	if !strings.Contains(location, "/settings/integrations?new_token=") || !strings.Contains(location, "#mcp-tokens") {
 		t.Errorf("unexpected redirect location: %s", location)
 	}
 
@@ -1619,14 +1619,14 @@ func TestHandleMCPTokenRevoke_Success(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	// Should redirect with 303 to /settings#mcp-tokens
+	// Should redirect with 303 to /settings/integrations#mcp-tokens
 	if w.Code != http.StatusSeeOther {
 		t.Errorf("POST /settings/mcp-tokens/revoke status = %d, want 303", w.Code)
 	}
 
 	location := w.Header().Get("Location")
-	if location != "/settings#mcp-tokens" {
-		t.Errorf("unexpected redirect location: %s, want /settings#mcp-tokens", location)
+	if location != "/settings/integrations#mcp-tokens" {
+		t.Errorf("unexpected redirect location: %s, want /settings/integrations#mcp-tokens", location)
 	}
 
 	// Verify the token is now invalid
