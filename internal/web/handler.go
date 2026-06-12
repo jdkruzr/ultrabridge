@@ -1328,6 +1328,19 @@ func (h *Handler) handlePurgeDeleted(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// settingsGroupForSection maps a /settings/save section value to the Settings
+// group page that owns its form, so saves land back where they came from.
+func settingsGroupForSection(section string) string {
+	switch section {
+	case "supernote", "ub-spc", "sync", "boox":
+		return "devices"
+	case "ai", "integrations", "system":
+		return section
+	default:
+		return "devices"
+	}
+}
+
 func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	cObj, _ := h.config.GetConfig(r.Context())
 	cfg := cObj.(*appconfig.Config)
@@ -1343,7 +1356,7 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 				_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeySNOCRPrompt, v)
 			}
 		}
-		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings/devices", http.StatusSeeOther)
 		return
 	case "ub-spc":
 		// UB-as-SPC device-sync server config. Every field is restart-required
@@ -1437,11 +1450,11 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			extURL = strings.TrimRight(extURL, "/")
 			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeyBooxExternalBaseURL, extURL)
 		}
-		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings/devices", http.StatusSeeOther)
 		return
 	}
 	h.config.UpdateConfig(r.Context(), cfg)
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/"+settingsGroupForSection(r.FormValue("section")), http.StatusSeeOther)
 }
 
 func (h *Handler) handleBackfillEmbeddings(w http.ResponseWriter, r *http.Request) {
