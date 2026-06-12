@@ -86,10 +86,17 @@
   </div>
   {{end}}
 
-  <div class="card{{if not .SNPipelineActive}} settings-inactive{{end}}">
-    <h2>Supernote Settings</h2>
+  {{/* Supernote: two-way sync over the UB-as-SPC server. */}}
+  {{if or .SNPipelineActive .Config}}
+  <section class="card device-source{{if not .SNPipelineActive}} settings-inactive{{end}}">
+    <h2>Supernote</h2>
+    {{template "_sync_model_banner" (syncModelFor "supernote")}}
+
+    <h3>Configuration</h3>
+
+    <h4 style="margin-bottom: 0.75rem;">Notes Pipeline</h4>
     {{if not .SNPipelineActive}}
-      <p class="text-small">Supernote notes pipeline is not configured. Add a Supernote source in Settings to enable.</p>
+      <p class="text-small">Supernote notes pipeline is not configured. Add a Supernote source above to enable.</p>
     {{else}}
       <form hx-post="/settings/save" hx-target="#main-content">
         <input type="hidden" name="section" value="supernote">
@@ -110,11 +117,10 @@
         <button type="submit" class="btn-small">Save Supernote Settings</button>
       </form>
     {{end}}
-  </div>
 
-  {{if .Config}}
-  <div class="card">
-    <h2>UB-as-SPC Device Sync Server</h2>
+    {{if .Config}}
+    <hr>
+    <h4 style="margin-bottom: 0.75rem;">UB-as-SPC Device Sync Server</h4>
     <p class="device-info" style="margin-bottom: 1rem;">
       UltraBridge's built-in Supernote Private Cloud server that devices sync against directly.
       <strong>Changes to any field here require an application restart to take effect.</strong>
@@ -169,7 +175,7 @@
       </div>
 
       <hr>
-      <h3 style="margin-bottom: 1rem;">Advanced</h3>
+      <h4 style="margin-bottom: 1rem;">Advanced</h4>
 
       <div class="form-group">
         <label for="spc-tls-cert">TLS Certificate Path</label>
@@ -196,12 +202,24 @@
 
       <button type="submit" class="btn-small">Save SPC Settings</button>
     </form>
-  </div>
+    {{end}}
+
+    <hr>
+    <h3>Device management</h3>
+    {{template "_device_mgmt_supernote" .}}
+  </section>
   {{end}}
 
-  {{if .Config}}
-  <div class="card">
-    <h2>ForestNote Device Sync</h2>
+  {{/* ForestNote: live mirror over /sync/v1. The section renders whenever the
+       sync service is wired, even without Config — device management (prune/
+       compact) must stay reachable. */}}
+  {{if or .Config .SyncDevicesEnabled}}
+  <section class="card device-source">
+    <h2>ForestNote</h2>
+    {{template "_sync_model_banner" (syncModelFor "forestnote")}}
+
+    <h3>Configuration</h3>
+    {{if .Config}}
     <p class="device-info" style="margin-bottom: 1rem;">
       UltraBridge's native device-sync server for ForestNote (and future UB-native clients).
       Exposes <code>/sync/v1</code> on the main app port, behind the same authentication as the web UI.
@@ -247,93 +265,26 @@
 
       <button type="submit" class="btn-small">Save Sync Settings</button>
     </form>
-  </div>
-  {{end}}
-
-  {{if .SyncDevicesEnabled}}
-  <div class="card" id="sync-devices">
-    <h2>Sync Devices</h2>
-    <p class="device-info" style="margin-bottom: 1rem;">
-      Devices registered with the ForestNote sync server. A device that was uninstalled or
-      factory-reset rejoins with a <em>new</em> ID, leaving its old row behind — prune dead rows so
-      relay-log compaction can reclaim the history they pin. Pruning removes only the sync
-      registration; the device's notes are kept, and a still-active device re-registers on its next sync.
-    </p>
-
-    {{if .SyncCompactResult}}
-    <div style="background:var(--status-bg-done); border:1px solid var(--status-text-done); border-radius:var(--radius); padding:1rem; margin-bottom:1.5rem;">
-      <p class="text-bold" style="color: var(--status-text-done); margin: 0;">
-        ✔ Compaction pass complete: collapsed {{.SyncCompactResult.CollapsedSuperseded}} superseded
-        snapshot(s), purged {{.SyncCompactResult.PurgedTombstones}} tombstone(s) (watermark
-        {{.SyncCompactResult.Watermark}}{{if .SyncCompactResult.EvictedSites}}; evicted stale:
-        {{range .SyncCompactResult.EvictedSites}}<code>{{slice . 0 8}}…</code> {{end}}{{end}}).
-      </p>
-    </div>
-    {{end}}
-
-    {{if .SyncDevices}}
-    <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th>Device</th>
-            <th>Site ID</th>
-            <th>First Seen</th>
-            <th>Last Seen</th>
-            <th>Pending Ops</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .SyncDevices}}
-          <tr>
-            <td class="text-bold">{{if .Name}}{{.Name}}{{else}}(unnamed){{end}}</td>
-            <td><code title="{{.SiteID}}">{{slice .SiteID 0 8}}…</code></td>
-            <td class="text-small">{{formatTimestamp .FirstSeen}}</td>
-            <td class="text-small">{{formatTimestamp .LastSeen}}</td>
-            <td class="text-small">{{.PendingOps}}</td>
-            <td class="text-small">
-              {{if .Stale}}<span style="color: var(--status-text-failed);">Stale</span>
-              {{else if .PinsWatermark}}<span style="color: var(--status-text-pending, #b58900);">Pins watermark</span>
-              {{else}}Active{{end}}
-            </td>
-            <td>
-              <form hx-post="/settings/sync-devices/prune" hx-target="#main-content" style="margin:0;">
-                <input type="hidden" name="site_id" value="{{.SiteID}}">
-                <button type="submit" class="btn-small"
-                  onclick="return confirm('Prune {{if .Name}}{{.Name}}{{else}}this device{{end}} ({{slice .SiteID 0 8}}…)?\n\nRemoves only its sync registration; its notes are kept. A still-active device re-registers on its next sync.')"
-                  style="background: var(--status-text-failed);">✕ Prune</button>
-              </form>
-            </td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
-    </div>
     {{else}}
-    <p class="device-info" style="margin-bottom:1.5rem;">No devices have synced yet.</p>
+    <p class="text-small">Configuration unavailable.</p>
     {{end}}
 
     <hr>
-
-    <form hx-post="/settings/sync-devices/compact" hx-target="#main-content" class="toolbar">
-      <div class="form-group" style="flex: 1; margin-bottom: 0;">
-        <label>Run Compaction Now</label>
-        <p class="device-info" style="margin-bottom: 0;">
-          Reclaims relay-log history no remaining device needs — run after pruning a dead device.
-          Safe: only the relay log is swept, never the note mirror.
-        </p>
-      </div>
-      <button type="submit" class="btn-small" style="align-self: flex-end;">Compact Relay Log</button>
-    </form>
-  </div>
+    <h3>Device management</h3>
+    {{template "_device_mgmt_forestnote" .}}
+  </section>
   {{end}}
 
-  <div class="card{{if not .BooxActive}} settings-inactive{{end}}">
-    <h2>Boox Settings</h2>
+  {{/* Boox: receive-only WebDAV export. */}}
+  <section class="card device-source{{if not .BooxActive}} settings-inactive{{end}}">
+    <h2>Boox</h2>
+    {{template "_sync_model_banner" (syncModelFor "boox")}}
+
+    <h3>Configuration</h3>
+
+    <h4 style="margin-bottom: 0.75rem;">Pipeline</h4>
     {{if not .BooxActive}}
-      <p class="text-small">Boox integration is not enabled. Add a Boox source in Settings to enable.</p>
+      <p class="text-small">Boox integration is not enabled. Add a Boox source above to enable.</p>
     {{else}}
       <form hx-post="/settings/save" hx-target="#main-content">
         <input type="hidden" name="section" value="boox">
@@ -397,7 +348,7 @@
 
         <button type="submit" class="btn-small" style="margin-top: 1rem;">Save Boox Settings</button>
       </form>
-      
+
       {{if .BooxImportPath}}
       <hr>
       <div class="toolbar">
@@ -408,14 +359,9 @@
           <p class="device-info">Copies files from import path to the permanent Boox notes directory.</p>
       </div>
       {{end}}
-    {{end}}
-  </div>
 
-  <div class="card{{if not .BooxActive}} settings-inactive{{end}}">
-    <h2>Boox Database Maintenance</h2>
-    {{if not .BooxActive}}
-      <p class="text-small">Add a Boox source in Settings to enable maintenance tools.</p>
-    {{else}}
+      <hr>
+      <h4 style="margin-bottom: 0.75rem;">Database Maintenance</h4>
       <div class="form-group">
         <p class="device-info" style="margin-bottom: 0.5rem;">Walk the Boox notes directory and enqueue any <code>.note</code> or <code>.pdf</code> files that aren't tracked in <code>boox_notes</code>. Recovers files that landed on disk via something other than the WebDAV upload hook (rsync, manual copy, pre-fix uploads). Already-tracked files are left alone.</p>
         <form hx-post="/maintenance/boox/scan-untracked" hx-target="#boox-maint-status" hx-swap="innerHTML">
@@ -444,5 +390,9 @@
 
       <div id="boox-maint-status" style="margin-top: 1rem;"></div>
     {{end}}
-  </div>
+
+    <hr>
+    <h3>Device management</h3>
+    {{template "_device_mgmt_boox" .}}
+  </section>
 </div>

@@ -54,7 +54,7 @@ func TestSettings_SyncDevicesCard(t *testing.T) {
 		t.Fatalf("GET /settings/devices = %d", w.Code)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"Sync Devices", "Viwoods AiPaper", "(unnamed)", "01HZXM5K", "Stale", "Compact Relay Log"} {
+	for _, want := range []string{"Devices registered with the ForestNote sync server", "Viwoods AiPaper", "(unnamed)", "01HZXM5K", "Stale", "Compact Relay Log"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("settings page missing %q", want)
 		}
@@ -70,8 +70,8 @@ func TestSettings_SyncDevicesCardHiddenWhenUnwired(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /settings/devices = %d", w.Code)
 	}
-	if strings.Contains(w.Body.String(), "Sync Devices") {
-		t.Error("Sync Devices card rendered with no SyncDeviceService wired")
+	if strings.Contains(w.Body.String(), "Devices registered with the ForestNote sync server") {
+		t.Error("sync device registry rendered with no SyncDeviceService wired")
 	}
 }
 
