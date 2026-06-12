@@ -297,6 +297,7 @@ func NewHandler(
 	h.mux.HandleFunc("POST /tasks/purge-deleted", h.handlePurgeDeleted)
 	h.mux.HandleFunc("GET /logs", h.handleLogs)
 	h.mux.HandleFunc("GET /settings", h.handleSettings)
+	h.mux.HandleFunc("GET /settings/{group}", h.handleSettingsGroup)
 	h.mux.HandleFunc("POST /settings/save", h.handleSettingsSave)
 	h.mux.HandleFunc("POST /settings/backfill-embeddings", h.handleBackfillEmbeddings)
 
@@ -1033,8 +1034,41 @@ func (h *Handler) setSourceConfigBool(ctx context.Context, row source.SourceRow,
 	return h.config.UpdateSource(ctx, fmt.Sprint(row.ID), &row)
 }
 
+// settingsGroups is the canonical ordered set of Settings sub-pages.
+var settingsGroups = []string{"devices", "ai", "integrations", "system"}
+
+func validSettingsGroup(g string) bool {
+	for _, s := range settingsGroups {
+		if s == g {
+			return true
+		}
+	}
+	return false
+}
+
+// handleSettings redirects the legacy /settings entry point to the default
+// Settings group. The query string is preserved — flash params like
+// ?new_token= (MCP token one-time display) must survive the hop.
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
-	h.renderTemplate(w, r, "settings", h.settingsData(r))
+	target := "/settings/devices"
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// handleSettingsGroup renders one Settings group. Unknown groups fall back to
+// the default (a clean 303, never a 500).
+func (h *Handler) handleSettingsGroup(w http.ResponseWriter, r *http.Request) {
+	group := r.PathValue("group")
+	if !validSettingsGroup(group) {
+		http.Redirect(w, r, "/settings/devices", http.StatusSeeOther)
+		return
+	}
+	data := h.settingsData(r)
+	data["activeTab"] = "settings-" + group
+	data["SettingsGroup"] = group
+	h.renderTemplate(w, r, "settings_"+group, data)
 }
 
 // settingsData builds the Settings page's template data. Extracted from
@@ -1131,10 +1165,13 @@ func (h *Handler) handleSyncDevicePrune(w http.ResponseWriter, r *http.Request) 
 	}
 	h.logger.Info("pruned sync device", "site_id", siteID)
 	if r.Header.Get("HX-Request") == "true" {
-		h.handleSettings(w, r)
+		data := h.settingsData(r)
+		data["activeTab"] = "settings-devices"
+		data["SettingsGroup"] = "devices"
+		h.renderTemplate(w, r, "settings_devices", data)
 		return
 	}
-	http.Redirect(w, r, "/settings#sync-devices", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/devices", http.StatusSeeOther)
 }
 
 // handleSyncDeviceCompact runs one relay-log compaction pass on demand (the
@@ -1152,11 +1189,13 @@ func (h *Handler) handleSyncDeviceCompact(w http.ResponseWriter, r *http.Request
 	}
 	if r.Header.Get("HX-Request") == "true" {
 		data := h.settingsData(r)
+		data["activeTab"] = "settings-devices"
+		data["SettingsGroup"] = "devices"
 		data["SyncCompactResult"] = result
-		h.renderTemplate(w, r, "settings", data)
+		h.renderTemplate(w, r, "settings_devices", data)
 		return
 	}
-	http.Redirect(w, r, "/settings#sync-devices", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/devices", http.StatusSeeOther)
 }
 
 func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {

@@ -46,12 +46,12 @@ func TestSettings_SyncDevicesCard(t *testing.T) {
 		{SiteID: "01HZXM5K8PQRSTVWXYZ0123457", Name: "", Stale: true},
 	}})
 
-	req := httptest.NewRequest("GET", "/settings", nil)
+	req := httptest.NewRequest("GET", "/settings/devices", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("GET /settings = %d", w.Code)
+		t.Fatalf("GET /settings/devices = %d", w.Code)
 	}
 	body := w.Body.String()
 	for _, want := range []string{"Sync Devices", "Viwoods AiPaper", "(unnamed)", "01HZXM5K", "Stale", "Compact Relay Log"} {
@@ -63,12 +63,12 @@ func TestSettings_SyncDevicesCard(t *testing.T) {
 
 func TestSettings_SyncDevicesCardHiddenWhenUnwired(t *testing.T) {
 	h := newTestHandler()
-	req := httptest.NewRequest("GET", "/settings", nil)
+	req := httptest.NewRequest("GET", "/settings/devices", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("GET /settings = %d", w.Code)
+		t.Fatalf("GET /settings/devices = %d", w.Code)
 	}
 	if strings.Contains(w.Body.String(), "Sync Devices") {
 		t.Error("Sync Devices card rendered with no SyncDeviceService wired")
@@ -146,11 +146,11 @@ func TestSyncDeviceCompact(t *testing.T) {
 		}
 	}
 
-	// Non-HX redirects back to the card.
+	// Non-HX redirects back to the Devices settings group.
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("POST", "/settings/sync-devices/compact", nil))
-	if w.Code != http.StatusSeeOther || !strings.Contains(w.Header().Get("Location"), "#sync-devices") {
-		t.Errorf("non-HX compact = %d → %q, want 303 → /settings#sync-devices", w.Code, w.Header().Get("Location"))
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/settings/devices" {
+		t.Errorf("non-HX compact = %d → %q, want 303 → /settings/devices", w.Code, w.Header().Get("Location"))
 	}
 }
 

@@ -1489,13 +1489,23 @@ func TestHandleMCPTokenCreate_Success(t *testing.T) {
 		t.Errorf("token label = %s, want test-client", label)
 	}
 
-	// Verify the token appears in settings page when flash param is provided
-	req2 := httptest.NewRequest("GET", "/settings?new_token="+url.QueryEscape(rawToken), nil)
+	// Verify the legacy /settings?new_token= redirect preserves the flash param
+	// (the one-time token display must survive the hop to the group page).
+	reqLegacy := httptest.NewRequest("GET", "/settings?new_token="+url.QueryEscape(rawToken), nil)
+	wLegacy := httptest.NewRecorder()
+	handler.ServeHTTP(wLegacy, reqLegacy)
+	if wLegacy.Code != http.StatusSeeOther || !strings.Contains(wLegacy.Header().Get("Location"), "new_token=") {
+		t.Errorf("GET /settings?new_token=... = %d → %q, want 303 preserving new_token", wLegacy.Code, wLegacy.Header().Get("Location"))
+	}
+
+	// Verify the token appears in the settings group page when the flash param
+	// is provided.
+	req2 := httptest.NewRequest("GET", "/settings/integrations?new_token="+url.QueryEscape(rawToken), nil)
 	w2 := httptest.NewRecorder()
 	handler.ServeHTTP(w2, req2)
 
 	if w2.Code != http.StatusOK {
-		t.Errorf("GET /settings?new_token=... status = %d, want 200", w2.Code)
+		t.Errorf("GET /settings/integrations?new_token=... status = %d, want 200", w2.Code)
 	}
 
 	// Verify the raw token is in the response HTML
@@ -1535,13 +1545,13 @@ func TestHandleSettings_TokenList(t *testing.T) {
 	notes := &mockNoteService{}
 	handler := NewHandler(nil, notes, nil, config, testDB, "", "", logger, broadcaster)
 
-	// GET /settings
-	req := httptest.NewRequest("GET", "/settings", nil)
+	// GET the settings group that carries the MCP tokens card
+	req := httptest.NewRequest("GET", "/settings/integrations", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("GET /settings status = %d, want 200", w.Code)
+		t.Errorf("GET /settings/integrations status = %d, want 200", w.Code)
 	}
 
 	body := w.Body.String()

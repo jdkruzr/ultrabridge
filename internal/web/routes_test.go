@@ -21,7 +21,11 @@ func TestRoutes(t *testing.T) {
 		{"GET", "/files/supernote", http.StatusOK},
 		{"GET", "/files/boox", http.StatusOK},
 		{"GET", "/search", http.StatusOK},
-		{"GET", "/settings", http.StatusOK},
+		{"GET", "/settings", http.StatusSeeOther}, // legacy entry point redirects to /settings/devices
+		{"GET", "/settings/devices", http.StatusOK},
+		{"GET", "/settings/ai", http.StatusOK},
+		{"GET", "/settings/integrations", http.StatusOK},
+		{"GET", "/settings/system", http.StatusOK},
 		{"GET", "/chat", http.StatusOK},
 		{"GET", "/nonexistent", http.StatusNotFound},
 	}
@@ -37,6 +41,14 @@ func TestRoutes(t *testing.T) {
 			t.Errorf("%s %s returned status %d, want %d", tt.method, tt.path, w.Code, tt.status)
 		}
 	}
+
+	// The legacy /settings redirect lands on the default group.
+	req := httptest.NewRequest("GET", "/settings", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if loc := w.Header().Get("Location"); loc != "/settings/devices" {
+		t.Errorf("GET /settings Location = %q, want /settings/devices", loc)
+	}
 }
 
 func TestSectionVisibility(t *testing.T) {
@@ -51,13 +63,13 @@ func TestSectionVisibility(t *testing.T) {
 	handler := NewHandler(tasks, notes, search, config, nil, "", "", logger, broadcaster)
 
 	t.Run("RAG Search not configured", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/settings", nil)
+		req := httptest.NewRequest("GET", "/settings/devices", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		// Assuming the template renders "not configured" message when some flag is false
 		// For now we just verify it doesn't crash
 		if w.Code != http.StatusOK {
-			t.Errorf("GET /settings returned %d", w.Code)
+			t.Errorf("GET /settings/devices returned %d", w.Code)
 		}
 	})
 }
