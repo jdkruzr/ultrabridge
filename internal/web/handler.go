@@ -1450,7 +1450,7 @@ func (h *Handler) handleBackfillEmbeddings(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.search.TriggerBackfill(r.Context())
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/ai", http.StatusSeeOther)
 }
 
 // respondEmptyOrRedirect is the shared HX/non-HX tail for broad file mutations

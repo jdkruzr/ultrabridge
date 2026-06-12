@@ -1406,10 +1406,10 @@ func TestHandleBackfillEmbeddings(t *testing.T) {
 		t.Errorf("POST /settings/backfill-embeddings status = %d, want %d", w.Code, http.StatusSeeOther)
 	}
 
-	// Should redirect to /settings
+	// Should redirect to the AI & Processing group (where backfill lives)
 	location := w.Header().Get("Location")
-	if location != "/settings" {
-		t.Errorf("redirect location = %q, want /settings", location)
+	if location != "/settings/ai" {
+		t.Errorf("redirect location = %q, want /settings/ai", location)
 	}
 }
 

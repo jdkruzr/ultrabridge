@@ -1,1 +1,120 @@
-{{template "_settings_all" .}}
+<!-- Settings · AI & Processing -->
+<div id="settings" class="tab-content active">
+  {{template "_settings_restart_banner" .}}
+
+  {{if .Config}}
+  <div class="card">
+    <h2>OCR Configuration</h2>
+    <div class="form-group">
+      <label for="config-ocr-format">Provider</label>
+      <select id="config-ocr-format">
+        <option value="anthropic" {{if eq .Config.OCRFormat "anthropic"}}selected{{end}}>Anthropic</option>
+        <option value="openai" {{if eq .Config.OCRFormat "openai"}}selected{{end}}>OpenAI</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="config-ocr-api-url">API URL</label>
+      <input id="config-ocr-api-url" type="text" value="{{.Config.OCRAPIURL}}">
+    </div>
+    <div class="form-group">
+      <label for="config-ocr-api-key">API Key</label>
+      <input id="config-ocr-api-key" type="password" placeholder="Leave empty to keep current">
+    </div>
+    <div class="form-group">
+      <label for="config-ocr-model">Model</label>
+      <input id="config-ocr-model" type="text" value="{{.Config.OCRModel}}">
+    </div>
+    <div class="form-group">
+      <label for="config-ocr-concurrency">Concurrency</label>
+      <input id="config-ocr-concurrency" type="number" value="{{.Config.OCRConcurrency}}">
+    </div>
+    <div class="form-group">
+      <label for="config-ocr-max-file-mb">Max File Size (MB)</label>
+      <input id="config-ocr-max-file-mb" type="number" value="{{.Config.OCRMaxFileMB}}">
+    </div>
+    <div class="toolbar">
+      <button type="button" onclick="saveOCRConfig()">Save OCR Settings</button>
+      <span id="ocr-config-status" class="text-small"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Search &amp; Chat</h2>
+
+    <form hx-post="/settings/save" hx-target="#main-content">
+      <input type="hidden" name="section" value="ai">
+
+      <div style="margin-bottom:1.25rem;">
+        <h3 style="margin-bottom:0.5rem;">RAG Search</h3>
+        <p class="device-info" style="margin-bottom:0.5rem;">Enables vector-based similarity search alongside keyword search.</p>
+
+        <div style="margin-bottom:0.75rem;">
+          <label for="embed-enabled" style="font-weight:bold; display:block; margin-bottom:0.3rem;">Enable Embedding</label>
+          <select id="embed-enabled" name="embed_enabled" style="padding:0.4rem; border:1px solid #ccc; border-radius:3px;">
+            <option value="false" {{if not .Config.EmbedEnabled}}selected{{end}}>Disabled</option>
+            <option value="true" {{if .Config.EmbedEnabled}}selected{{end}}>Enabled</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom:0.75rem;">
+          <label for="ollama-url" style="font-weight:bold; display:block; margin-bottom:0.3rem;">Ollama API URL</label>
+          <input type="text" id="ollama-url" name="ollama_url" value="{{.Config.OllamaURL}}" placeholder="http://localhost:11434"
+            style="width:100%; padding:0.75rem; border:1px solid var(--border-color); border-radius:4px;">
+        </div>
+
+        <div style="margin-bottom:0.75rem;">
+          <label for="ollama-embed-model" style="font-weight:bold; display:block; margin-bottom:0.3rem;">Embedding Model</label>
+          <input type="text" id="ollama-embed-model" name="ollama_embed_model" value="{{.Config.OllamaEmbedModel}}" placeholder="nomic-embed-text:v1.5"
+            style="width:100%; padding:0.75rem; border:1px solid var(--border-color); border-radius:4px;">
+        </div>
+
+        {{if .EmbedEnabled}}
+          <div style="margin-bottom:0.75rem; padding:0.5rem; background:var(--bg-color); border-radius:4px; border:1px solid var(--border-color);">
+            <label style="font-weight:bold; font-size:12px; color:var(--brand-color);">RUNNING STATUS</label>
+            <p style="margin:0; font-size:13px;">{{.EmbeddingCount}} embeddings loaded in memory.</p>
+          </div>
+        {{end}}
+      </div>
+
+      <hr>
+
+      <div style="margin-bottom:1.25rem;">
+        <h3 style="margin-bottom:0.5rem;">AI Chat</h3>
+        <p class="device-info" style="margin-bottom:0.5rem;">Conversational interface for your notes.</p>
+
+        <div style="margin-bottom:0.75rem;">
+          <label for="chat-enabled" style="font-weight:bold; display:block; margin-bottom:0.3rem;">Enable Chat</label>
+          <select id="chat-enabled" name="chat_enabled" style="padding:0.4rem; border:1px solid #ccc; border-radius:3px;">
+            <option value="false" {{if not .Config.ChatEnabled}}selected{{end}}>Disabled</option>
+            <option value="true" {{if .Config.ChatEnabled}}selected{{end}}>Enabled</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom:0.75rem;">
+          <label for="chat-api-url" style="font-weight:bold; display:block; margin-bottom:0.3rem;">vLLM / Ollama URL</label>
+          <input type="text" id="chat-api-url" name="chat_api_url" value="{{.Config.ChatAPIURL}}" placeholder="http://localhost:11434"
+            style="width:100%; padding:0.75rem; border:1px solid var(--border-color); border-radius:4px;">
+        </div>
+
+        <div style="margin-bottom:0.75rem;">
+          <label for="chat-model" style="font-weight:bold; display:block; margin-bottom:0.3rem;">Chat Model</label>
+          <input type="text" id="chat-model" name="chat_model" value="{{.Config.ChatModel}}" placeholder="llama3:8b"
+            style="width:100%; padding:0.75rem; border:1px solid var(--border-color); border-radius:4px;">
+        </div>
+      </div>
+
+      <button type="submit" class="btn-small">Save Search &amp; Chat Settings</button>
+    </form>
+
+    {{if .EmbedEnabled}}
+    <hr>
+    <div class="toolbar">
+        <form hx-post="/settings/backfill-embeddings" hx-target="#main-content" style="display:inline;">
+          <button type="submit" class="btn-small" style="background: var(--brand-hover);">⚡ Re-index All (Backfill)</button>
+        </form>
+        <p class="device-info">Trigger background re-indexing of all existing notes.</p>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+</div>
