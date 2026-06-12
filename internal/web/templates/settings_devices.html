@@ -88,7 +88,7 @@
 
   {{/* Supernote: two-way sync over the UB-as-SPC server. */}}
   {{if or .SNPipelineActive .Config}}
-  <section class="card device-source{{if not .SNPipelineActive}} settings-inactive{{end}}">
+  <section class="device-source card{{if not .SNPipelineActive}} settings-inactive{{end}}">
     <h2>Supernote</h2>
     {{template "_sync_model_banner" (syncModelFor "supernote")}}
 
@@ -214,7 +214,7 @@
        sync service is wired, even without Config — device management (prune/
        compact) must stay reachable. */}}
   {{if or .Config .SyncDevicesEnabled}}
-  <section class="card device-source">
+  <section class="device-source card">
     <h2>ForestNote</h2>
     {{template "_sync_model_banner" (syncModelFor "forestnote")}}
 
@@ -276,7 +276,7 @@
   {{end}}
 
   {{/* Boox: receive-only WebDAV export. */}}
-  <section class="card device-source{{if not .BooxActive}} settings-inactive{{end}}">
+  <section class="device-source card{{if not .BooxActive}} settings-inactive{{end}}">
     <h2>Boox</h2>
     {{template "_sync_model_banner" (syncModelFor "boox")}}
 
