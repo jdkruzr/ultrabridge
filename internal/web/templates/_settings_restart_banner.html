@@ -1,0 +1,8 @@
+{{define "_settings_restart_banner"}}
+{{if .RestartRequired}}
+<div style="background:var(--status-bg-failed); border:1px solid var(--status-text-failed); border-radius:var(--radius); padding:1rem; margin-bottom:1rem; color:var(--status-text-failed);">
+  <strong>⚠ Configuration has changed</strong><br>
+  Restart the application for changes to take effect.
+</div>
+{{end}}
+{{end}}

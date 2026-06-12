@@ -1,1 +1,38 @@
-{{template "_settings_all" .}}
+<!-- Settings · System -->
+<div id="settings" class="tab-content active">
+  {{template "_settings_restart_banner" .}}
+
+  {{if .Config}}
+  <div class="card">
+    <h2>Authentication</h2>
+    <div class="form-group">
+      <label for="config-username">Username</label>
+      <input id="config-username" type="text" value="{{.Config.Username}}">
+    </div>
+    <div class="form-group">
+      <label for="config-password">Password</label>
+      <p class="device-info" style="margin-bottom: 0.5rem;">Leave empty to keep current password.</p>
+      <input id="config-password" type="password" placeholder="Leave empty to keep current">
+    </div>
+    <div class="toolbar">
+      <button type="button" onclick="saveAuthConfig()">Save Authentication</button>
+      <span id="auth-config-status" class="text-small"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Debugging</h2>
+    <form hx-post="/settings/save" hx-target="#main-content">
+      <input type="hidden" name="section" value="system">
+      <div style="margin-bottom:0.75rem;">
+        <label for="log-verbose-api" style="font-weight:bold; display:block; margin-bottom:0.3rem;">Verbose API Logging</label>
+        <select id="log-verbose-api" name="log_verbose_api" style="padding:0.4rem; border:1px solid #ccc; border-radius:3px;">
+          <option value="false" {{if not .Config.LogVerboseAPI}}selected{{end}}>Disabled</option>
+          <option value="true" {{if .Config.LogVerboseAPI}}selected{{end}}>Enabled</option>
+        </select>
+      </div>
+      <button type="submit" class="btn-small">Save System Settings</button>
+    </form>
+  </div>
+  {{end}}
+</div>

@@ -1403,15 +1403,17 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 				h.logger.Warn("forestnote compaction toggle save failed", "err", err)
 			}
 		}
-	case "general":
+	case "ai":
 		cfg.EmbedEnabled = r.FormValue("embed_enabled") == "true"
 		cfg.OllamaURL, cfg.OllamaEmbedModel = r.FormValue("ollama_url"), r.FormValue("ollama_embed_model")
 		cfg.ChatEnabled = r.FormValue("chat_enabled") == "true"
 		cfg.ChatAPIURL, cfg.ChatModel = r.FormValue("chat_api_url"), r.FormValue("chat_model")
-		cfg.LogVerboseAPI = r.FormValue("log_verbose_api") == "true"
+	case "integrations":
 		if v := strings.TrimSpace(r.FormValue("caldav_collection_name")); v != "" {
 			cfg.CalDAVCollectionName = v
 		}
+	case "system":
+		cfg.LogVerboseAPI = r.FormValue("log_verbose_api") == "true"
 	case "boox":
 		// Boox settings are stored as runtime-configurable keys in the
 		// settings table (not on the Config struct); write them

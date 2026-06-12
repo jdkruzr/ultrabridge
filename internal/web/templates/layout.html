@@ -1098,7 +1098,65 @@
           return div.innerHTML;
         }
 
-        // Configuration API functions
+        // Configuration API functions. Each settings group saves only its own
+        // subset — /api/config merges by key presence, so partial PUTs are
+        // safe. Secrets (password, OCR API key) are OMITTED when blank so an
+        // empty "leave to keep current" field never overwrites a stored value.
+        function putConfig(config, statusEl) {
+          statusEl.textContent = 'Saving...';
+          fetch('/api/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+          })
+          .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(data => {
+            if (data.restart_required) {
+              statusEl.textContent = 'Saved. ⚠ Restart required!';
+              statusEl.style.color = '#c00';
+              setTimeout(() => location.reload(), 1000);
+            } else {
+              statusEl.textContent = 'Saved.';
+              statusEl.style.color = '#090';
+              setTimeout(() => { statusEl.textContent = ''; }, 2000);
+            }
+          })
+          .catch(e => {
+            statusEl.textContent = 'Error: ' + e.message;
+            statusEl.style.color = '#c00';
+          });
+        }
+
+        function saveAuthConfig() {
+          var config = { username: document.getElementById('config-username').value };
+          var password = document.getElementById('config-password').value;
+          if (password !== '') config.password = password;
+          putConfig(config, document.getElementById('auth-config-status'));
+        }
+
+        function saveOCRConfig() {
+          var config = {
+            ocr_format: document.getElementById('config-ocr-format').value,
+            ocr_api_url: document.getElementById('config-ocr-api-url').value,
+            ocr_model: document.getElementById('config-ocr-model').value,
+            ocr_concurrency: parseInt(document.getElementById('config-ocr-concurrency').value) || 1,
+            ocr_max_file_mb: parseInt(document.getElementById('config-ocr-max-file-mb').value) || 0
+          };
+          var apiKey = document.getElementById('config-ocr-api-key').value;
+          if (apiKey !== '') config.ocr_api_key = apiKey;
+          putConfig(config, document.getElementById('ocr-config-status'));
+        }
+
+        function saveMCPConfig() {
+          putConfig(
+            { mcp_port: parseInt(document.getElementById('config-mcp-port').value) || 0 },
+            document.getElementById('mcp-config-status')
+          );
+        }
+
         function saveConfig() {
           var statusEl = document.getElementById('config-status');
           statusEl.textContent = 'Saving...';
