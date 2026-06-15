@@ -416,7 +416,7 @@ auth-failure detail.
 
 ## License
 
-[Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt)
+[Apache 2.0](LICENSE) © 2026 jdkruzr. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Credits
 This project owes a bunch to two self-hosted Supernote Private Cloud reimplementation projects: [Supernote Knowledge Hub](https://github.com/allenporter/supernote) and [OpenNoteCloud](https://github.com/k4z4n0v4/opennotecloud), both of which helped shape how Ultrabridge evolved (and will continue to in the future).
