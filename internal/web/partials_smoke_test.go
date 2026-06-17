@@ -106,12 +106,24 @@ func TestDetailPageGridRenders(t *testing.T) {
 		`src="/files/render?path=x&amp;page=0&amp;v=2"`, // lazy image (amp-escaped in attr)
 		"hello", "myScript", // OCR text + source
 		`hx-post="/files/delete-note"`, // action
-		// loader calls — slashes are JS-string-escaped (\/) in <script> context.
-		`ubLoadJobInfo("\/files\/history?path=x"`,
-		`ubLoadVersions("\/files\/boox\/versions?path=x"`,
+		// loader URLs — slashes are JS-string-escaped (\/) in <script> context.
+		`"\/files\/history?path=x"`,
+		`"\/files\/boox\/versions?path=x"`,
+		// Order-independent guard: the loaders must NOT be invoked at parse
+		// time (on a full-page render of a ?detail= URL the helper defs come
+		// later in the document → ReferenceError). They run immediately if
+		// defined, else defer to DOMContentLoaded.
+		"window.ubLoadJobInfo", "window.ubLoadVersions",
+		"DOMContentLoaded",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("detail grid missing %q in:\n%s", want, s)
+		}
+	}
+	// Regression guard: the old unguarded parse-time invocation must not return.
+	for _, banned := range []string{`<script>ubLoadJobInfo(`, `<script>ubLoadVersions(`} {
+		if strings.Contains(s, banned) {
+			t.Errorf("detail grid has unguarded parse-time loader call %q", banned)
 		}
 	}
 

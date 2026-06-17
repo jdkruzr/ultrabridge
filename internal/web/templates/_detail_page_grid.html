@@ -51,7 +51,16 @@
 <details class="card" style="margin-top: 1rem;">
   <summary class="text-small text-secondary" style="cursor: pointer;">Job info</summary>
   <pre id="detail-jobinfo" class="text-small" style="white-space: pre-wrap; max-height: 200px; overflow-y: auto; margin-top: 0.5rem;">Loading…</pre>
-  <script>ubLoadJobInfo("{{.JobInfoURL}}", "detail-jobinfo");</script>
+  <script>
+    // Order-independent: on an HTMX swap the helper is already defined (call
+    // now); on a full-page render of this ?detail= URL the helper defs come
+    // later in the document, so defer to DOMContentLoaded. Calling at parse
+    // time would throw ReferenceError and leave the panel stuck on "Loading…".
+    (function(u, id) {
+      function go() { ubLoadJobInfo(u, id); }
+      if (window.ubLoadJobInfo) { go(); } else { document.addEventListener("DOMContentLoaded", go); }
+    })("{{.JobInfoURL}}", "detail-jobinfo");
+  </script>
 </details>
 {{end}}
 
@@ -59,7 +68,14 @@
 <details class="card" style="margin-top: 0.75rem;">
   <summary class="text-small text-secondary" style="cursor: pointer;">Version history</summary>
   <div id="detail-versions" style="margin-top: 0.5rem;">Loading…</div>
-  <script>ubLoadVersions("{{.VersionsURL}}", "detail-versions");</script>
+  <script>
+    // See the Job-info panel above: defer when the helper isn't defined yet
+    // (full-page render) so the call can't throw ReferenceError at parse time.
+    (function(u, id) {
+      function go() { ubLoadVersions(u, id); }
+      if (window.ubLoadVersions) { go(); } else { document.addEventListener("DOMContentLoaded", go); }
+    })("{{.VersionsURL}}", "detail-versions");
+  </script>
 </details>
 {{end}}
 
