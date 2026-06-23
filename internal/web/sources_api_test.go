@@ -367,6 +367,7 @@ func TestListSourcesSyncModel(t *testing.T) {
 		{Type: "supernote", Name: "SN", Enabled: true, ConfigJSON: `{"notes_path":"/sn"}`},
 		{Type: "boox", Name: "BX", Enabled: false, ConfigJSON: `{"notes_path":"/bx"}`},
 		{Type: "forestnote", Name: "FN", Enabled: true, ConfigJSON: `{"batch_limit":50}`},
+		{Type: "remarkable", Name: "RM", Enabled: true, ConfigJSON: `{"data_path":"/rm","pairing_code":"123456"}`},
 	}
 	for _, row := range seeds {
 		if _, err := source.AddSource(ctx, db, row); err != nil {

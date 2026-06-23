@@ -73,6 +73,10 @@ func (h *Handler) RegisterAPIv1() {
 	h.mux.HandleFunc("GET /api/v1/sync/devices", h.handleV1ListSyncDevices)
 	h.mux.HandleFunc("DELETE /api/v1/sync/devices/{id}", h.handleV1PruneSyncDevice)
 	h.mux.HandleFunc("POST /api/v1/sync/compact", h.handleV1SyncCompact)
+
+	// reMarkable device management. Read-only in phase 1.
+	h.mux.HandleFunc("GET /api/v1/remarkable/devices", h.handleV1ListRemarkableDevices)
+	h.mux.HandleFunc("GET /api/v1/remarkable/documents", h.handleV1ListRemarkableDocuments)
 }
 
 // --- Tasks ---
@@ -350,6 +354,42 @@ func (h *Handler) handleV1ListSyncDevices(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"devices": devices})
+}
+
+func (h *Handler) handleV1ListRemarkableDevices(w http.ResponseWriter, r *http.Request) {
+	if h.rmDevices == nil {
+		http.NotFound(w, r)
+		return
+	}
+	devices, err := h.rmDevices.ListDevices(r.Context())
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "failed to list remarkable devices")
+		return
+	}
+	if devices == nil {
+		devices = []service.RemarkableDevice{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"devices": devices})
+}
+
+// handleV1ListRemarkableDocuments returns the synced reMarkable document/folder
+// tree (read-only). 404 when no reMarkable source is wired.
+func (h *Handler) handleV1ListRemarkableDocuments(w http.ResponseWriter, r *http.Request) {
+	if h.rmDevices == nil {
+		http.NotFound(w, r)
+		return
+	}
+	docs, err := h.rmDevices.ListDocuments(r.Context())
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "failed to list remarkable documents")
+		return
+	}
+	if docs == nil {
+		docs = []service.RemarkableDocument{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"documents": docs})
 }
 
 // handleV1PruneSyncDevice deletes a device's sync registry row (spec §4.3

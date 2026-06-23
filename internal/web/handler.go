@@ -67,6 +67,7 @@ type Handler struct {
 	config      service.ConfigService
 	digests     service.DigestService     // optional; nil when no digest store (non-server mode)
 	syncDevices service.SyncDeviceService // optional; nil when no ForestNote source (hides the Sync Devices card)
+	rmDevices   service.RemarkableDeviceService
 
 	noteDB          *sql.DB
 	notesPathPrefix string
@@ -417,6 +418,10 @@ func (h *Handler) SetSPCFileRoot(root string) {
 // arg) keeps the NewHandler call sites stable, mirroring SetDigestService.
 func (h *Handler) SetSyncDeviceService(s service.SyncDeviceService) {
 	h.syncDevices = s
+}
+
+func (h *Handler) SetRemarkableDeviceService(s service.RemarkableDeviceService) {
+	h.rmDevices = s
 }
 
 func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, name string, data map[string]interface{}) {
@@ -984,6 +989,10 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 // so both the Settings prefill and the save path need it. ok=false when no ForestNote source
 // exists yet (the toggle is hidden — there's nothing to compact).
 func (h *Handler) forestNoteSourceRow(ctx context.Context) (source.SourceRow, bool) {
+	return h.sourceRowByType(ctx, "forestnote")
+}
+
+func (h *Handler) sourceRowByType(ctx context.Context, wantType string) (source.SourceRow, bool) {
 	listed, err := h.config.ListSources(ctx)
 	if err != nil {
 		return source.SourceRow{}, false
@@ -993,7 +1002,7 @@ func (h *Handler) forestNoteSourceRow(ctx context.Context) (source.SourceRow, bo
 		return source.SourceRow{}, false
 	}
 	for _, row := range rows {
-		if row.Type == "forestnote" {
+		if row.Type == wantType {
 			return row, true
 		}
 	}
@@ -1088,6 +1097,14 @@ func (h *Handler) settingsData(r *http.Request) map[string]interface{} {
 		}
 		data["SyncDevices"] = devices
 	}
+	if h.rmDevices != nil {
+		data["RemarkableDevicesEnabled"] = true
+		devices, err := h.rmDevices.ListDevices(ctx)
+		if err != nil {
+			h.logger.Error("failed to list remarkable devices", "error", err)
+		}
+		data["RemarkableDevices"] = devices
+	}
 	if h.noteDB != nil {
 		tokens, _ := mcpauth.ListTokens(ctx, h.noteDB)
 		data["MCPTokens"], data["MCPTokensEnabled"] = tokens, true
@@ -1099,6 +1116,9 @@ func (h *Handler) settingsData(r *http.Request) map[string]interface{} {
 		// current values.
 		data["SNPipelineActive"] = h.notes != nil && h.notes.HasSupernoteSource()
 		data["BooxActive"] = h.notes != nil && h.notes.HasBooxSource()
+		if _, ok := h.sourceRowByType(ctx, "remarkable"); ok {
+			data["RemarkableSourceActive"] = true
+		}
 		fnOCRPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyForestNoteOCRPrompt)
 		data["ForestNoteOCRPrompt"] = fnOCRPrompt
 		// Relay-log compaction lives in the ForestNote source row's config_json (not appconfig);

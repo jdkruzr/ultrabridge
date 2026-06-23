@@ -98,7 +98,7 @@ func TestSettingsGroupMembership(t *testing.T) {
 			wantNot: []string{"OCR Configuration", "<h2>Authentication</h2>", "RAG Search", "<h2>Sources</h2>"},
 		},
 		"devices": {
-			want:    []string{"<h2>Sources</h2>", "<h2>Supernote</h2>", "<h2>ForestNote</h2>", "<h2>Boox</h2>"},
+			want:    []string{"<h2>Sources</h2>", "<h2>Supernote</h2>", "<h2>ForestNote</h2>", "<h2>reMarkable</h2>", "<h2>Boox</h2>"},
 			wantNot: []string{"OCR Configuration", "<h2>MCP</h2>", "RAG Search", "<h2>Authentication</h2>"},
 		},
 	}

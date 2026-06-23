@@ -44,6 +44,16 @@ func TestSyncModelFor(t *testing.T) {
 				Blurb:            "ForestNote mirrors your notes two ways in real time. Deletes are recoverable tombstones that converge across devices.",
 			},
 		},
+		{
+			sourceType: "remarkable",
+			want: SyncModel{
+				Label:            "Two-way sync",
+				Direction:        TwoWay,
+				Authority:        "Shared (reMarkable protocol)",
+				DeletesPropagate: true,
+				Blurb:            "reMarkable devices sync through UltraBridge's hosted protocol surface. Multiple devices share one account state and converge through the vendor sync model.",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -124,7 +134,7 @@ func TestSyncModelForUnknown(t *testing.T) {
 // descriptor. sync-model-and-settings-ia.AC1.4.
 func TestDeletesPropagateExactlyOneFalse(t *testing.T) {
 	var nonPropagating []string
-	for _, sourceType := range []string{"supernote", "boox", "forestnote"} {
+	for _, sourceType := range []string{"supernote", "boox", "forestnote", "remarkable"} {
 		if !SyncModelFor(sourceType).DeletesPropagate {
 			nonPropagating = append(nonPropagating, sourceType)
 		}

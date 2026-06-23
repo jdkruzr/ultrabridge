@@ -39,6 +39,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/source"
 	"github.com/sysop/ultrabridge/internal/source/boox"
 	"github.com/sysop/ultrabridge/internal/source/forestnote"
+	"github.com/sysop/ultrabridge/internal/source/remarkable"
 	"github.com/sysop/ultrabridge/internal/source/supernote"
 	"github.com/sysop/ultrabridge/internal/spcserver"
 	spcauth "github.com/sysop/ultrabridge/internal/spcserver/auth"
@@ -237,6 +238,9 @@ func main() {
 				}
 			},
 		})
+	})
+	registry.Register("remarkable", func(db *sql.DB, row source.SourceRow, deps source.SharedDeps) (source.Source, error) {
+		return remarkable.NewSource(db, row, deps)
 	})
 
 	// Create shared dependencies for sources
@@ -636,15 +640,22 @@ func main() {
 	// with how Boox's WebDAV endpoint is wired in the web block below). Plain
 	// authenticated REST behind authMW — NOT the SPC Engine.IO/Socket.IO machinery.
 	var fnSource *forestnote.Source
+	var rmSource *remarkable.Source
 	for _, s := range sources {
 		if fn, ok := s.(*forestnote.Source); ok {
 			fnSource = fn
-			break
+		}
+		if rm, ok := s.(*remarkable.Source); ok {
+			rmSource = rm
 		}
 	}
 	if fnSource != nil {
 		mux.Handle("/sync/v1", authMW.Wrap(synchttp.New(fnSource.SyncService(), synchttp.DefaultMaxBytes, logger)))
 		logger.Info("ForestNote device sync enabled", "route", "/sync/v1")
+	}
+	if rmSource != nil {
+		rmSource.RegisterRoutes(mux)
+		logger.Info("reMarkable device sync enabled")
 	}
 
 	// MCP discovery for Claude/OAuth clients
@@ -763,6 +774,9 @@ func main() {
 		// hidden and the routes 404ing when no ForestNote source is active.
 		if fnSource != nil {
 			webHandler.SetSyncDeviceService(service.NewSyncDeviceService(fnSource))
+		}
+		if rmSource != nil {
+			webHandler.SetRemarkableDeviceService(service.NewRemarkableDeviceService(rmSource))
 		}
 
 		// Serve the public signed attachment + FN-render endpoints using the same

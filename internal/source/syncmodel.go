@@ -92,6 +92,14 @@ func SyncModelFor(sourceType string) SyncModel {
 			DeletesPropagate: true,
 			Blurb:            "ForestNote mirrors your notes two ways in real time. Deletes are recoverable tombstones that converge across devices.",
 		}
+	case "remarkable":
+		return SyncModel{
+			Label:            "Two-way sync",
+			Direction:        TwoWay,
+			Authority:        "Shared (reMarkable protocol)",
+			DeletesPropagate: true,
+			Blurb:            "reMarkable devices sync through UltraBridge's hosted protocol surface. Multiple devices share one account state and converge through the vendor sync model.",
+		}
 	default:
 		return Unmanaged
 	}

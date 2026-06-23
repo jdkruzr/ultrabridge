@@ -1189,7 +1189,15 @@
         function updateSourceConfigFields() {
           var type = document.getElementById('source-type').value;
           var backupField = document.getElementById('field-backup-path');
+          var notesField = document.getElementById('field-notes-path');
+          var dataField = document.getElementById('field-data-path');
+          var pairingField = document.getElementById('field-pairing-code');
+          var accountField = document.getElementById('field-device-account');
           backupField.style.display = (type === 'supernote') ? 'block' : 'none';
+          notesField.style.display = (type === 'supernote' || type === 'boox') ? 'block' : 'none';
+          dataField.style.display = (type === 'remarkable') ? 'block' : 'none';
+          pairingField.style.display = (type === 'remarkable') ? 'block' : 'none';
+          accountField.style.display = (type === 'remarkable') ? 'block' : 'none';
         }
 
         function showAddSourceForm() {
@@ -1201,7 +1209,10 @@
           document.getElementById('source-name').value = '';
           document.getElementById('source-enabled').checked = true;
           document.getElementById('source-notes-path').value = '';
+          document.getElementById('source-data-path').value = '';
           document.getElementById('source-backup-path').value = '';
+          document.getElementById('source-pairing-code').value = '';
+          document.getElementById('source-device-account').value = '';
           updateSourceConfigFields();
         }
 
@@ -1224,7 +1235,10 @@
             var cfg = {};
             try { cfg = JSON.parse(src.config_json || '{}'); } catch(e) {}
             document.getElementById('source-notes-path').value = cfg.notes_path || '';
+            document.getElementById('source-data-path').value = cfg.data_path || '';
             document.getElementById('source-backup-path').value = cfg.backup_path || '';
+            document.getElementById('source-pairing-code').value = cfg.pairing_code || '';
+            document.getElementById('source-device-account').value = cfg.device_account || '';
             updateSourceConfigFields();
           })
           .catch(e => {
@@ -1244,14 +1258,29 @@
           var name = document.getElementById('source-name').value.trim();
           var enabled = document.getElementById('source-enabled').checked;
           var notesPath = document.getElementById('source-notes-path').value.trim();
+          var dataPath = document.getElementById('source-data-path').value.trim();
           var backupPath = document.getElementById('source-backup-path').value.trim();
+          var pairingCode = document.getElementById('source-pairing-code').value.trim();
+          var deviceAccount = document.getElementById('source-device-account').value.trim();
 
           if (!name) { statusEl.textContent = 'Name is required.'; statusEl.style.color = '#c00'; return; }
-          if (!notesPath) { statusEl.textContent = 'Notes path is required.'; statusEl.style.color = '#c00'; return; }
+          if ((type === 'supernote' || type === 'boox') && !notesPath) { statusEl.textContent = 'Notes path is required.'; statusEl.style.color = '#c00'; return; }
+          if (type === 'remarkable' && !dataPath) { statusEl.textContent = 'Data path is required.'; statusEl.style.color = '#c00'; return; }
+          if (type === 'remarkable' && !pairingCode) { statusEl.textContent = 'Pairing code is required.'; statusEl.style.color = '#c00'; return; }
 
-          var configObj = { notes_path: notesPath };
+          var configObj = {};
+          if (type === 'supernote' || type === 'boox') {
+            configObj.notes_path = notesPath;
+          }
           if (type === 'supernote' && backupPath) {
             configObj.backup_path = backupPath;
+          }
+          if (type === 'remarkable') {
+            configObj.data_path = dataPath;
+            configObj.pairing_code = pairingCode;
+            if (deviceAccount) {
+              configObj.device_account = deviceAccount;
+            }
           }
 
           var body = {

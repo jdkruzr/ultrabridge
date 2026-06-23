@@ -56,6 +56,7 @@
         <select id="source-type" onchange="updateSourceConfigFields()">
           <option value="supernote">Supernote</option>
           <option value="boox">Boox</option>
+          <option value="remarkable">reMarkable</option>
         </select>
       </div>
       <div class="form-group">
@@ -73,9 +74,21 @@
           <label>Notes Path</label>
           <input type="text" id="source-notes-path" placeholder="/data/notes">
         </div>
+        <div class="form-group" id="field-data-path" style="display:none;">
+          <label>Data Path</label>
+          <input type="text" id="source-data-path" placeholder="/data/remarkable">
+        </div>
         <div class="form-group" id="field-backup-path">
           <label>Backup Path</label>
           <input type="text" id="source-backup-path" placeholder="/data/backup">
+        </div>
+        <div class="form-group" id="field-pairing-code" style="display:none;">
+          <label>Pairing Code</label>
+          <input type="text" id="source-pairing-code" placeholder="tablet pairing code">
+        </div>
+        <div class="form-group" id="field-device-account" style="display:none;">
+          <label>Device Account</label>
+          <input type="text" id="source-device-account" placeholder="optional account label">
         </div>
       </div>
       <div class="toolbar" style="margin-top: 1rem; margin-bottom: 0;">
@@ -272,6 +285,28 @@
     <hr>
     <h3>Device management</h3>
     {{template "_device_mgmt_forestnote" .}}
+  </section>
+  {{end}}
+
+  {{if or .Config .RemarkableSourceActive .RemarkableDevicesEnabled}}
+  <section class="device-source card{{if not .RemarkableSourceActive}} settings-inactive{{end}}">
+    <h2>reMarkable</h2>
+    {{template "_sync_model_banner" (syncModelFor "remarkable")}}
+
+    <h3>Configuration</h3>
+    {{if not .RemarkableSourceActive}}
+      <p class="text-small">reMarkable sync server is not configured. Add a reMarkable source above to enable.</p>
+    {{else}}
+      <p class="device-info" style="margin-bottom: 1rem;">
+        UltraBridge serves the core reMarkable sync protocol directly from this source. The source owns
+        pairing, per-device registration, legacy document sync, and diff-sync root/blob state.
+        Changes to source configuration require an application restart to take effect.
+      </p>
+    {{end}}
+
+    <hr>
+    <h3>Device management</h3>
+    {{template "_device_mgmt_remarkable" .}}
   </section>
   {{end}}
 

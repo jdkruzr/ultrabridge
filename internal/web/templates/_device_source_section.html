@@ -96,3 +96,36 @@
 <p class="device-info">No device registry — receive-only. Boox exports notes one way,
   so there are no devices to manage here.</p>
 {{end}}
+
+{{define "_device_mgmt_remarkable"}}
+{{if .RemarkableDevicesEnabled}}
+  {{if .RemarkableDevices}}
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Device ID</th>
+          <th>First Seen</th>
+          <th>Last Seen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .RemarkableDevices}}
+        <tr>
+          <td class="text-bold">{{if .Name}}{{.Name}}{{else}}(unnamed){{end}}</td>
+          <td><code title="{{.DeviceID}}">{{slice .DeviceID 0 8}}…</code></td>
+          <td class="text-small">{{formatTimestamp .FirstSeen}}</td>
+          <td class="text-small">{{formatTimestamp .LastSeen}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <p class="device-info">No reMarkable devices have paired yet.</p>
+  {{end}}
+{{else}}
+  <p class="device-info">Device registry unavailable — the reMarkable source is not running.</p>
+{{end}}
+{{end}}

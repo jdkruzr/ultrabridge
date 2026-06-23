@@ -520,6 +520,28 @@ type SyncDeviceService interface {
 	CompactNow(ctx context.Context) (SyncCompactResult, error)
 }
 
+type RemarkableDevice struct {
+	DeviceID  string `json:"device_id"`
+	Name      string `json:"name"`
+	FirstSeen int64  `json:"first_seen"`
+	LastSeen  int64  `json:"last_seen"`
+}
+
+// RemarkableDocument is a read-only view of one node (folder or document) in
+// the synced reMarkable tree, surfaced on the Files tab and /api/v1.
+type RemarkableDocument struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"` // "folder" | "document"
+	Parent    string `json:"parent"`
+	PageCount int    `json:"page_count"`
+}
+
+type RemarkableDeviceService interface {
+	ListDevices(ctx context.Context) ([]RemarkableDevice, error)
+	ListDocuments(ctx context.Context) ([]RemarkableDocument, error)
+}
+
 // ConfigService manages system configuration and sources.
 type ConfigService interface {
 	GetConfig(ctx context.Context) (interface{}, error)

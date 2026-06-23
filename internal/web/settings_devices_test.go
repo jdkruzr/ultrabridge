@@ -34,6 +34,9 @@ func newDevicesGroupHandler(t *testing.T) *Handler {
 	h.SetSyncDeviceService(&fakeSyncDeviceService{devices: []service.SyncDevice{
 		{SiteID: testSiteID, Name: "Viwoods AiPaper", LastSeen: 1700000000000, PendingOps: 3},
 	}})
+	h.SetRemarkableDeviceService(&fakeRemarkableDeviceService{devices: []service.RemarkableDevice{
+		{DeviceID: "rm-device-001", Name: "reMarkable Paper Pro", LastSeen: 1700000000000},
+	}})
 	return h
 }
 
@@ -60,15 +63,15 @@ func TestDevicesGroupUniformSections(t *testing.T) {
 	body, sections := deviceSections(t, h)
 
 	// AC6.1: Sources card first, then three structurally identical sections.
-	if len(sections) != 3 {
-		t.Fatalf("device-source section count = %d, want 3", len(sections))
+	if len(sections) != 4 {
+		t.Fatalf("device-source section count = %d, want 4", len(sections))
 	}
 	srcIdx := strings.Index(body, "<h2>Sources</h2>")
 	firstSection := strings.Index(body, `<section class="device-source`)
 	if srcIdx < 0 || firstSection < 0 || srcIdx > firstSection {
 		t.Error("Sources card does not precede the device sections")
 	}
-	names := []string{"Supernote", "ForestNote", "Boox"}
+	names := []string{"Supernote", "ForestNote", "reMarkable", "Boox"}
 	for i, sec := range sections {
 		if !strings.Contains(sec, "<h2>"+names[i]+"</h2>") {
 			t.Errorf("section %d missing <h2>%s</h2>", i, names[i])
@@ -85,7 +88,7 @@ func TestDevicesGroupUniformSections(t *testing.T) {
 		}
 	}
 
-	sn, fn, bx := sections[0], sections[1], sections[2]
+	sn, fn, rm, bx := sections[0], sections[1], sections[2], sections[3]
 
 	// AC6.2: glyphs derive from each source's Direction.
 	if !strings.Contains(sn, "⇅") || !strings.Contains(fn, "⇅") {
@@ -125,5 +128,11 @@ func TestDevicesGroupUniformSections(t *testing.T) {
 	}
 	if strings.Contains(sn, "/settings/sync-devices/prune") {
 		t.Error("Supernote section wrongly contains the ForestNote prune control")
+	}
+
+	for _, want := range []string{"reMarkable Paper Pro", "rm-devic"} {
+		if !strings.Contains(rm, want) {
+			t.Errorf("reMarkable section missing %q", want)
+		}
 	}
 }

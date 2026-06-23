@@ -20,6 +20,19 @@ type fakeSyncDeviceService struct {
 	compactRes service.SyncCompactResult
 }
 
+type fakeRemarkableDeviceService struct {
+	devices   []service.RemarkableDevice
+	documents []service.RemarkableDocument
+}
+
+func (f *fakeRemarkableDeviceService) ListDevices(context.Context) ([]service.RemarkableDevice, error) {
+	return f.devices, nil
+}
+
+func (f *fakeRemarkableDeviceService) ListDocuments(context.Context) ([]service.RemarkableDocument, error) {
+	return f.documents, nil
+}
+
 func (f *fakeSyncDeviceService) ListSyncDevices(context.Context) ([]service.SyncDevice, error) {
 	return f.devices, nil
 }
@@ -72,6 +85,93 @@ func TestSettings_SyncDevicesCardHiddenWhenUnwired(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "Devices registered with the ForestNote sync server") {
 		t.Error("sync device registry rendered with no SyncDeviceService wired")
+	}
+}
+
+func TestSettings_RemarkableDevicesCard(t *testing.T) {
+	h := newTestHandler()
+	h.SetRemarkableDeviceService(&fakeRemarkableDeviceService{devices: []service.RemarkableDevice{
+		{DeviceID: "rm-device-001", Name: "reMarkable Paper Pro", FirstSeen: 1700000000000, LastSeen: 1700001000000},
+	}})
+
+	req := httptest.NewRequest("GET", "/settings/devices", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /settings/devices = %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"reMarkable", "reMarkable Paper Pro", "rm-devic"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("settings page missing %q", want)
+		}
+	}
+}
+
+func TestAPIv1RemarkableDevices(t *testing.T) {
+	h := newTestHandler()
+	fake := &fakeRemarkableDeviceService{devices: []service.RemarkableDevice{
+		{DeviceID: "rm-device-001", Name: "reMarkable 2", FirstSeen: 1700000000000, LastSeen: 1700000001000},
+	}}
+	h.SetRemarkableDeviceService(fake)
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/remarkable/devices", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/remarkable/devices = %d", w.Code)
+	}
+	var body struct {
+		Devices []service.RemarkableDevice `json:"devices"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(body.Devices) != 1 || body.Devices[0].DeviceID != "rm-device-001" {
+		t.Fatalf("devices = %+v", body.Devices)
+	}
+}
+
+func TestAPIv1RemarkableDevices404WhenUnwired(t *testing.T) {
+	h := newTestHandler()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/remarkable/devices", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/v1/remarkable/devices = %d, want 404", w.Code)
+	}
+}
+
+func TestAPIv1RemarkableDocuments(t *testing.T) {
+	h := newTestHandler()
+	h.SetRemarkableDeviceService(&fakeRemarkableDeviceService{documents: []service.RemarkableDocument{
+		{ID: "folder-1", Name: "Notebooks", Type: "folder", Parent: ""},
+		{ID: "doc-1", Name: "Project Plan", Type: "document", Parent: "folder-1", PageCount: 5},
+	}})
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/remarkable/documents", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/remarkable/documents = %d", w.Code)
+	}
+	var body struct {
+		Documents []service.RemarkableDocument `json:"documents"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(body.Documents) != 2 {
+		t.Fatalf("documents = %+v", body.Documents)
+	}
+	if body.Documents[1].ID != "doc-1" || body.Documents[1].PageCount != 5 {
+		t.Fatalf("doc-1 = %+v, want PageCount 5", body.Documents[1])
+	}
+}
+
+func TestAPIv1RemarkableDocuments404WhenUnwired(t *testing.T) {
+	h := newTestHandler()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/remarkable/documents", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/v1/remarkable/documents = %d, want 404", w.Code)
 	}
 }
 
