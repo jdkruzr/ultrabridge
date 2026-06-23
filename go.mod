@@ -8,6 +8,7 @@ require (
 	github.com/fogleman/gg v1.2.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-pdf/fpdf v0.9.0
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jdkruzr/go-sn v0.0.0-20260322033813-b2a5f8c9e7e4
