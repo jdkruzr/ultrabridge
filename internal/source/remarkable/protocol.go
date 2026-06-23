@@ -75,6 +75,19 @@ func (p *protocol) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sync/v3/check-files", p.withUserAuth(p.handleCheckFiles))
 	mux.HandleFunc("GET /sync/v4/root", p.withUserAuth(p.handleGetRootV4))
 
+	// Telemetry / integrations endpoints the device calls but UB has no use
+	// for. If they aren't registered here they fall through to the top-level
+	// catch-all (Basic/bearer auth) and return 401; the device reads that 401
+	// as a *token* failure and refetches its user token in a tight loop, which
+	// starves real document sync ("unable to sync document content"). rmfakecloud
+	// stubs them the same way (nullReport / syncReports / empty integrations).
+	mux.HandleFunc("POST /report/v1", p.handleNullReport)
+	mux.HandleFunc("POST /v1/reports", p.handleNullReport)
+	mux.HandleFunc("POST /v2/reports", p.handleNullReport)
+	mux.HandleFunc("POST /sync/reports/v1", p.handleNullReport)
+	mux.HandleFunc("POST /analytics/v2/events", p.handleNullReport)
+	mux.HandleFunc("GET /integrations/v2/instances", p.handleIntegrations)
+
 	mux.HandleFunc("GET /notifications/ws/json/1", p.handleNotificationsWS)
 
 	mux.HandleFunc("GET /storage/{token}", p.handleStorageGet)
@@ -224,6 +237,22 @@ func (p *protocol) handleLocateService(w http.ResponseWriter, r *http.Request) {
 		host = externalBaseURL(r)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"Host": host, "Status": "OK"})
+}
+
+// handleNullReport accepts and discards device telemetry (crash/usage/sync
+// reports). It is intentionally unauthenticated and always 200: the device
+// must never see a 401 here (it would treat it as a token failure). Mirrors
+// rmfakecloud's nullReport/syncReports.
+func (p *protocol) handleNullReport(w http.ResponseWriter, r *http.Request) {
+	_, _ = io.Copy(io.Discard, r.Body)
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleIntegrations returns an empty third-party integration list. UB has no
+// integrations to advertise; the device is happy with an empty set ("received
+// 0 integrations").
+func (p *protocol) handleIntegrations(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"integrations": []any{}})
 }
 
 func (p *protocol) handleUploadRequest(w http.ResponseWriter, r *http.Request, claims tokenClaims) {
