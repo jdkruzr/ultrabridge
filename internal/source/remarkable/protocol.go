@@ -450,14 +450,14 @@ func (p *protocol) handleGetRootV3(w http.ResponseWriter, r *http.Request, claim
 		http.Error(w, "failed to read root", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, syncRootResponse{Generation: rec.Generation, Hash: string(data)})
+	writeJSONHashed(w, http.StatusOK, syncRootResponse{Generation: rec.Generation, Hash: string(data)})
 	_ = claims
 }
 
 func (p *protocol) handleGetRootV4(w http.ResponseWriter, r *http.Request, claims tokenClaims) {
 	rec, err := p.store.getBlob(r.Context(), rootBlobID)
 	if errors.Is(err, errBlobNotFound) {
-		writeJSON(w, http.StatusOK, syncRootV4Response{SchemaVersion: 3})
+		writeJSONHashed(w, http.StatusOK, syncRootV4Response{SchemaVersion: 3})
 		return
 	}
 	if err != nil {
@@ -469,7 +469,7 @@ func (p *protocol) handleGetRootV4(w http.ResponseWriter, r *http.Request, claim
 		http.Error(w, "failed to read root", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, syncRootV4Response{
+	writeJSONHashed(w, http.StatusOK, syncRootV4Response{
 		Generation:    rec.Generation,
 		Hash:          string(data),
 		SchemaVersion: 3,
