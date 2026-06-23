@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -357,46 +358,107 @@ func (s *store) putBlob(ctx context.Context, blobID string, body io.Reader, matc
 	if err != nil {
 		return 0, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	now := time.Now().UnixMilli()
+
+	// Hot path: ordinary blob writes carry no optimistic-concurrency check
+	// (matchGeneration == 0). Do the read-modify-write as a single atomic
+	// UPSERT ... RETURNING so the statement takes the write lock directly. The
+	// old "BEGIN; SELECT; INSERT" pattern took a read lock first and then
+	// upgraded to write; under the concurrent blob-upload burst two such
+	// transactions would each hold a read lock and deadlock on the upgrade.
+	// SQLite returns BUSY immediately for that deadlock (busy_timeout cannot
+	// wait it out), which was the ~3.5% of 500s during the bulk first sync.
+	if matchGeneration == 0 {
+		var newGen int64
+		err := retryOnBusy(func() error {
+			return s.db.QueryRowContext(ctx, `
+				INSERT INTO remarkable_blobs(blob_id, generation, size_bytes, crc32c, payload_path, updated_at)
+				VALUES(?, 1, ?, ?, ?, ?)
+				ON CONFLICT(blob_id) DO UPDATE SET
+					generation = remarkable_blobs.generation + 1,
+					size_bytes = excluded.size_bytes,
+					crc32c = excluded.crc32c,
+					payload_path = excluded.payload_path,
+					updated_at = excluded.updated_at
+				RETURNING generation`,
+				blobID, size, crc, path, now).Scan(&newGen)
+		})
+		if err != nil {
+			return 0, err
+		}
+		return newGen, nil
+	}
+
+	// Optimistic path (root commits): verify the caller's expected generation.
+	// Effectively single-writer and low-frequency, but retried for safety.
+	var newGen int64
+	err = retryOnBusy(func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		var current blobRecord
+		err = tx.QueryRowContext(ctx, `
+			SELECT generation, size_bytes, crc32c, payload_path
+			FROM remarkable_blobs WHERE blob_id = ?`, blobID).
+			Scan(&current.Generation, &current.Size, &current.CRC32C, &current.Path)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if errors.Is(err, sql.ErrNoRows) || current.Generation != matchGeneration {
+			return errGenerationMismatch
+		}
+		g := current.Generation + 1
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO remarkable_blobs(blob_id, generation, size_bytes, crc32c, payload_path, updated_at)
+			VALUES(?, ?, ?, ?, ?, ?)
+			ON CONFLICT(blob_id) DO UPDATE SET
+				generation = excluded.generation,
+				size_bytes = excluded.size_bytes,
+				crc32c = excluded.crc32c,
+				payload_path = excluded.payload_path,
+				updated_at = excluded.updated_at`,
+			blobID, g, size, crc, path, now); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		newGen = g
+		return nil
+	})
 	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	var current blobRecord
-	err = tx.QueryRowContext(ctx, `
-		SELECT generation, size_bytes, crc32c, payload_path
-		FROM remarkable_blobs WHERE blob_id = ?`, blobID).
-		Scan(&current.Generation, &current.Size, &current.CRC32C, &current.Path)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-	if err == nil && matchGeneration > 0 && current.Generation != matchGeneration {
-		return 0, errGenerationMismatch
-	}
-	if errors.Is(err, sql.ErrNoRows) && matchGeneration > 0 {
-		return 0, errGenerationMismatch
-	}
-	newGen := current.Generation + 1
-	if newGen == 0 {
-		newGen = 1
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO remarkable_blobs(blob_id, generation, size_bytes, crc32c, payload_path, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?)
-		ON CONFLICT(blob_id) DO UPDATE SET
-			generation = excluded.generation,
-			size_bytes = excluded.size_bytes,
-			crc32c = excluded.crc32c,
-			payload_path = excluded.payload_path,
-			updated_at = excluded.updated_at`,
-		blobID, newGen, size, crc, path, time.Now().UnixMilli())
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return newGen, nil
+}
+
+// retryOnBusy replays fn while it returns a transient SQLite busy/locked error.
+// busy_timeout handles plain lock waits; this covers the residual cases (e.g. a
+// write-write deadlock that SQLite reports immediately) where replaying lets one
+// writer win and the other proceed on its next attempt.
+func retryOnBusy(fn func() error) error {
+	const maxAttempts = 10
+	var err error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err = fn(); err == nil || !isBusyErr(err) {
+			return err
+		}
+		time.Sleep(time.Duration(attempt+1) * 3 * time.Millisecond)
+	}
+	return err
+}
+
+func isBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked") ||
+		strings.Contains(msg, "sqlite_busy") ||
+		strings.Contains(msg, "sqlite_locked")
 }
 
 func (s *store) getBlob(ctx context.Context, blobID string) (blobRecord, error) {
