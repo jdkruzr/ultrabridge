@@ -25,6 +25,7 @@ services:
     volumes:
       - ./ultrabridge-data:/data
       - /mnt/supernote:/mnt/supernote
+      - /mnt/remarkable:/mnt/remarkable
     networks:
       - default
       - supernote_default

@@ -187,6 +187,14 @@ if [[ -d "/mnt/supernote" ]]; then
     VOLUMES_BLOCK="$VOLUMES_BLOCK
       - /mnt/supernote:/mnt/supernote"
 fi
+# Mount the reMarkable storage tree if present. UltraBridge is the reMarkable
+# cloud the device syncs against; this holds the reMarkable source's data_path
+# (documents + content-addressed blobs).
+if [[ -d "/mnt/remarkable" ]]; then
+    ok "Detected reMarkable directory at /mnt/remarkable"
+    VOLUMES_BLOCK="$VOLUMES_BLOCK
+      - /mnt/remarkable:/mnt/remarkable"
+fi
 
 cat > "$SCRIPT_DIR/docker-compose.yml" <<EOF
 services:
