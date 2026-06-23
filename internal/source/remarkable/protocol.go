@@ -171,7 +171,6 @@ func (p *protocol) handleDiscoveryWebapp(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"Host": externalBaseURL(r), "Status": "OK"})
 }
 
-
 func (p *protocol) handleNewDevice(w http.ResponseWriter, r *http.Request) {
 	var req deviceTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
