@@ -17,7 +17,11 @@ import (
 )
 
 const (
-	deviceTokenTTL = 30 * time.Minute
+	// The device treats its device token as long-lived: it uses the device
+	// token to mint short-lived user tokens, so a short device TTL would log
+	// the device out (here, ~30 min after pairing). Real reMarkable / rmfakecloud
+	// device tokens effectively never expire.
+	deviceTokenTTL = 10 * 365 * 24 * time.Hour
 	userTokenTTL   = 12 * time.Hour
 	urlTokenTTL    = 30 * time.Minute
 	rootBlobID     = "root"
@@ -191,7 +195,14 @@ func (p *protocol) handleNewUserToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to update device", http.StatusInternalServerError)
 		return
 	}
-	tok, err := p.store.issueToken(r.Context(), "user", deviceClaims.DeviceID, deviceClaims.DeviceDesc, "sync:default sync:tortoise", userTokenTTL)
+	// The DB row (random token) is the validation anchor; the JWT we hand the
+	// device carries that token id as its jti. See token.go.
+	jti, err := p.store.issueToken(r.Context(), "user", deviceClaims.DeviceID, deviceClaims.DeviceDesc, userScopes, userTokenTTL)
+	if err != nil {
+		http.Error(w, "failed to issue token", http.StatusInternalServerError)
+		return
+	}
+	tok, err := newUserJWT(jti, p.cfg.DeviceAccount, deviceClaims, userTokenTTL)
 	if err != nil {
 		http.Error(w, "failed to issue token", http.StatusInternalServerError)
 		return
@@ -582,6 +593,12 @@ func (p *protocol) deviceClaims(ctx context.Context, token string) (tokenClaims,
 }
 
 func (p *protocol) userClaims(ctx context.Context, token string) (tokenClaims, error) {
+	// The device returns the user token as a JWT carrying the DB token id as
+	// its jti; validate that id against the store. Fall back to a direct lookup
+	// for legacy opaque tokens (and so a non-JWT bearer still fails cleanly).
+	if jti, ok := parseUserJTI(token); ok {
+		return p.store.loadToken(ctx, jti, "user")
+	}
 	return p.store.loadToken(ctx, token, "user")
 }
 
