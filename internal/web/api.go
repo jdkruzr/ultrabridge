@@ -28,15 +28,11 @@ func (h *Handler) handleAPISearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	folder := r.URL.Query().Get("folder")
-	sources := r.URL.Query()["source"] // repeated: ?source=digest&source=supernote
-	limit := 0
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			limit = n
-		}
+	opts, _, _ := h.searchOptionsFromRequest(r)
+	if _, ok := r.URL.Query()["source"]; !ok && r.URL.Query().Get("sources_submitted") != "1" {
+		opts.Sources = nil
 	}
-	results, err := h.search.Search(r.Context(), q, folder, sources, limit)
+	results, err := h.search.SearchAdvanced(r.Context(), q, opts)
 	if err != nil {
 		h.logger.Error("api search failed", "err", err)
 		apiError(w, http.StatusInternalServerError, "search failed")

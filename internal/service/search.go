@@ -90,26 +90,48 @@ const searchDefaultLimit = 20
 const searchMaxLimit = 100
 
 func (s *searchService) Search(ctx context.Context, query, folder string, sources []string, limit int) ([]SearchResult, error) {
+	return s.SearchAdvanced(ctx, query, SearchOptions{
+		Folder:  folder,
+		Sources: sources,
+		Limit:   limit,
+	})
+}
+
+func (s *searchService) SearchAdvanced(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error) {
 	if s.retriever == nil {
 		return nil, nil
 	}
 	// Resolve the caller's limit against the service defaults: 0/negative
 	// means "use the default"; anything over the max is clamped down.
 	switch {
-	case limit <= 0:
-		limit = searchDefaultLimit
-	case limit > searchMaxLimit:
-		limit = searchMaxLimit
+	case opts.Limit <= 0:
+		opts.Limit = searchDefaultLimit
+	case opts.Limit > searchMaxLimit:
+		opts.Limit = searchMaxLimit
+	}
+	locations := make([]rag.LocationFilter, 0, len(opts.Locations))
+	for _, loc := range opts.Locations {
+		locations = append(locations, rag.LocationFilter{
+			Source:   loc.Source,
+			ID:       loc.ID,
+			FullPath: loc.FullPath,
+		})
 	}
 	// Hybrid retrieval (FTS5 + vector RRF) with the source-type facet. Going
 	// through the retriever (rather than the bare FTS index) means digests and
 	// ForestNote pages are searchable here exactly as they are in chat, and each
 	// result carries its source type for the UI facet/badge.
 	rr, err := s.retriever.Search(ctx, rag.SearchRequest{
-		Query:   query,
-		Folder:  folder,
-		Sources: sources,
-		Limit:   limit,
+		Query:        query,
+		Folder:       opts.Folder,
+		Sources:      opts.Sources,
+		Locations:    locations,
+		CreatedFrom:  opts.CreatedFrom,
+		CreatedTo:    opts.CreatedTo,
+		ModifiedFrom: opts.ModifiedFrom,
+		ModifiedTo:   opts.ModifiedTo,
+		Sort:         opts.Sort,
+		Limit:        opts.Limit,
 	})
 	if err != nil {
 		s.logger.Error("search failed", "error", err)
@@ -128,6 +150,9 @@ func (s *searchService) Search(ctx context.Context, query, folder string, source
 			Snippet:    makeSnippet(r.BodyText, query, 240),
 			Score:      float32(r.Score),
 			SourceType: r.SourceType,
+			Folder:     r.Folder,
+			CreatedAt:  r.CreatedAt,
+			ModifiedAt: r.ModifiedAt,
 		})
 	}
 	return results, nil

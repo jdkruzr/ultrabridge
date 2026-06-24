@@ -263,6 +263,9 @@ func (m *mockNoteService) ListBooxDevices(ctx context.Context) ([]service.BooxDe
 	}
 	return out, nil
 }
+func (m *mockNoteService) ListSearchLocations(ctx context.Context) ([]service.SearchLocation, error) {
+	return nil, nil
+}
 func (m *mockNoteService) GetBooxNote(ctx context.Context, path string) (service.BooxNoteSummary, error) {
 	for _, bn := range m.booxNotes {
 		if bn.Path == path {
@@ -443,6 +446,10 @@ func (m *mockSearchService) Search(ctx context.Context, query, folder string, so
 	// test wants to assert it was threaded through (left at zero value
 	// otherwise so existing assertions keep working).
 	m.lastLimit = limit
+	return m.results, nil
+}
+func (m *mockSearchService) SearchAdvanced(ctx context.Context, query string, opts service.SearchOptions) ([]service.SearchResult, error) {
+	m.lastLimit = opts.Limit
 	return m.results, nil
 }
 func (m *mockSearchService) Ask(ctx context.Context, question string, sessionID int) (<-chan service.ChatResponse, error) {

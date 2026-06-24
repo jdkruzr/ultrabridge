@@ -457,6 +457,72 @@ func (s *noteService) ListBooxDevices(ctx context.Context) ([]BooxDevice, error)
 	return out, nil
 }
 
+// ListSearchLocations returns source-aware folder/location facets for Search.
+// It also adds aggregate entries for exact full paths that appear in multiple
+// sources, e.g. "Work" across Boox, ForestNote, and reMarkable.
+func (s *noteService) ListSearchLocations(ctx context.Context) ([]SearchLocation, error) {
+	var sourceLocations []SearchLocation
+	if s.noteStore != nil {
+		dirs, err := s.collectSupernoteLocations(ctx, "")
+		if err != nil {
+			s.logger.Warn("list supernote search locations", "error", err)
+		}
+		sourceLocations = append(sourceLocations, dirs...)
+	}
+	if s.booxStore != nil {
+		rows, err := s.booxStore.ListFolders(ctx)
+		if err != nil {
+			s.logger.Warn("list boox search locations", "error", err)
+		} else {
+			for _, fc := range rows {
+				folder := strings.TrimSpace(fc.Folder)
+				if folder == "" {
+					continue
+				}
+				sourceLocations = append(sourceLocations, SearchLocation{
+					Value:    encodeSearchLocation("boox", "", folder),
+					Source:   "boox",
+					FullPath: folder,
+					Label:    "Boox / " + folder,
+					Count:    fc.Count,
+				})
+			}
+		}
+	}
+	if s.fnReader != nil {
+		folders, err := s.fnReader.ListFolders(ctx)
+		if err != nil {
+			s.logger.Warn("list forestnote search locations", "error", err)
+		} else {
+			sourceLocations = append(sourceLocations, forestNoteSearchLocations(folders)...)
+		}
+	}
+	if s.rmReader != nil {
+		docs, err := s.rmReader.ListDocuments(ctx)
+		if err != nil {
+			s.logger.Warn("list remarkable search locations", "error", err)
+		} else {
+			sourceLocations = append(sourceLocations, remarkableSearchLocations(docs)...)
+		}
+	}
+
+	out := aggregateSearchLocations(sourceLocations)
+	out = append(out, sourceLocations...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Source == "" && out[j].Source != "" {
+			return true
+		}
+		if out[i].Source != "" && out[j].Source == "" {
+			return false
+		}
+		if out[i].FullPath != out[j].FullPath {
+			return strings.ToLower(out[i].FullPath) < strings.ToLower(out[j].FullPath)
+		}
+		return out[i].Source < out[j].Source
+	})
+	return out, nil
+}
+
 // GetBooxNote returns the Boox-tab summary for a single path. Returns
 // sql.ErrNoRows if the path is not in the Boox catalog.
 func (s *noteService) GetBooxNote(ctx context.Context, path string) (BooxNoteSummary, error) {
@@ -1834,6 +1900,149 @@ func sortBooxNotes(rows []BooxNoteSummary, sortField, order string) {
 		}
 		return cmp < 0
 	})
+}
+
+func (s *noteService) collectSupernoteLocations(ctx context.Context, relPath string) ([]SearchLocation, error) {
+	files, err := s.noteStore.List(ctx, relPath)
+	if err != nil {
+		return nil, err
+	}
+	var out []SearchLocation
+	for _, f := range files {
+		if !f.IsDir {
+			continue
+		}
+		fullPath := filepath.ToSlash(f.RelPath)
+		out = append(out, SearchLocation{
+			Value:    encodeSearchLocation("supernote", "", fullPath),
+			Source:   "supernote",
+			FullPath: fullPath,
+			Label:    "Supernote / " + fullPath,
+		})
+		children, err := s.collectSupernoteLocations(ctx, f.RelPath)
+		if err != nil {
+			s.logger.Warn("list supernote child search locations", "path", f.RelPath, "error", err)
+			continue
+		}
+		out = append(out, children...)
+	}
+	return out, nil
+}
+
+func aggregateSearchLocations(sourceLocations []SearchLocation) []SearchLocation {
+	type acc struct {
+		sources map[string]bool
+		count   int
+	}
+	byPath := map[string]*acc{}
+	display := map[string]string{}
+	for _, loc := range sourceLocations {
+		if loc.FullPath == "" || loc.Source == "" {
+			continue
+		}
+		key := strings.ToLower(loc.FullPath)
+		if byPath[key] == nil {
+			byPath[key] = &acc{sources: map[string]bool{}}
+			display[key] = loc.FullPath
+		}
+		byPath[key].sources[loc.Source] = true
+		byPath[key].count += loc.Count
+	}
+	var out []SearchLocation
+	for key, a := range byPath {
+		if len(a.sources) < 2 {
+			continue
+		}
+		fullPath := display[key]
+		out = append(out, SearchLocation{
+			Value:    encodeSearchLocation("", "", fullPath),
+			FullPath: fullPath,
+			Label:    "All sources / " + fullPath,
+			Count:    a.count,
+		})
+	}
+	return out
+}
+
+func forestNoteSearchLocations(folders []syncstore.FolderRow) []SearchLocation {
+	byID := make(map[string]syncstore.FolderRow, len(folders))
+	for _, f := range folders {
+		byID[f.ID] = f
+	}
+	out := make([]SearchLocation, 0, len(folders))
+	for _, f := range folders {
+		fullPath := forestNoteFolderFullPath(f.ID, byID)
+		if fullPath == "" {
+			continue
+		}
+		out = append(out, SearchLocation{
+			Value:    encodeSearchLocation("forestnote", f.ID, fullPath),
+			Source:   "forestnote",
+			ID:       f.ID,
+			FullPath: fullPath,
+			Label:    "ForestNote / " + fullPath,
+		})
+	}
+	return out
+}
+
+func forestNoteFolderFullPath(folderID string, byID map[string]syncstore.FolderRow) string {
+	var names []string
+	seen := map[string]bool{}
+	for folderID != "" && !seen[folderID] {
+		seen[folderID] = true
+		f, ok := byID[folderID]
+		if !ok {
+			break
+		}
+		if f.Name != "" {
+			names = append([]string{f.Name}, names...)
+		}
+		folderID = f.ParentFolderID
+	}
+	return strings.Join(names, "/")
+}
+
+func remarkableSearchLocations(docs []rmsource.Document) []SearchLocation {
+	byID := make(map[string]rmsource.Document, len(docs))
+	for _, d := range docs {
+		byID[d.ID] = d
+	}
+	var out []SearchLocation
+	for _, d := range docs {
+		if d.Type != "folder" {
+			continue
+		}
+		fullPath := remarkableFolderFullPath(d.ID, byID)
+		if fullPath == "" {
+			continue
+		}
+		out = append(out, SearchLocation{
+			Value:    encodeSearchLocation("remarkable", d.ID, fullPath),
+			Source:   "remarkable",
+			ID:       d.ID,
+			FullPath: fullPath,
+			Label:    "reMarkable / " + fullPath,
+		})
+	}
+	return out
+}
+
+func remarkableFolderFullPath(folderID string, byID map[string]rmsource.Document) string {
+	var names []string
+	seen := map[string]bool{}
+	for folderID != "" && !seen[folderID] {
+		seen[folderID] = true
+		d, ok := byID[folderID]
+		if !ok {
+			break
+		}
+		if d.Name != "" {
+			names = append([]string{displayRemarkableName(d)}, names...)
+		}
+		folderID = d.Parent
+	}
+	return strings.Join(names, "/")
 }
 
 func compareTime(a, b time.Time) int {

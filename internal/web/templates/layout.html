@@ -77,6 +77,7 @@
             position: fixed;
             height: 100vh;
             z-index: 10;
+            overflow: hidden;
         }
 
         .sidebar h1 {
@@ -97,6 +98,10 @@
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding-right: 0.25rem;
         }
 
         .nav-item {
@@ -292,6 +297,9 @@
         .badge-digest { background: #9333ea; color: white; margin-left: 0.5rem; }
         .search-facet { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-secondary); }
         .search-facet label { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; }
+        .search-filter-row { display: grid; grid-template-columns: minmax(14rem, 2fr) repeat(4, minmax(9rem, 1fr)); gap: 0.75rem; width: 100%; align-items: end; }
+        .search-filter-row label { margin-bottom: 0; font-size: 0.8rem; color: var(--text-secondary); }
+        .search-filter-row input, .search-filter-row select { margin-top: 0.25rem; }
 
         .device-info { font-size: 0.75rem; color: var(--text-muted); }
 
@@ -343,6 +351,8 @@
             .nav-links {
                 flex-direction: row;
                 overflow-x: auto;
+                overflow-y: visible;
+                flex: none;
                 padding-bottom: 0.5rem;
                 -webkit-overflow-scrolling: touch;
             }
@@ -362,6 +372,7 @@
             }
             
             .task-actions button { width: 100%; margin-top: 0.5rem; }
+            .search-filter-row { grid-template-columns: 1fr; }
         }
 
         /* Logs */

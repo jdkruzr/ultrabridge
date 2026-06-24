@@ -288,8 +288,8 @@ func TestRetrieverMetadataJOINs(t *testing.T) {
 			if r.Device != "Supernote" {
 				t.Errorf("Expected device Supernote from notes JOIN, got %s", r.Device)
 			}
-			if r.Folder != "Personal" {
-				t.Errorf("Expected folder Personal extracted from rel_path, got %s", r.Folder)
+			if r.Folder != "MyNotes/Personal" {
+				t.Errorf("Expected full folder path MyNotes/Personal extracted from rel_path, got %s", r.Folder)
 			}
 		}
 	}
@@ -474,6 +474,73 @@ func TestRetrieverSourceFilter(t *testing.T) {
 	}
 	if len(two) != 2 {
 		t.Errorf("two-source filter returned %d results, want 2", len(two))
+	}
+}
+
+func TestRetrieverLocationFilterUsesExactFullPath(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	insertBooxNote(t, db, "/boox/work.note", "Palma2", "Work", "alpha boox work")
+	insertBooxNote(t, db, "/boox/personal-work.note", "Palma2", "Personal/Work", "alpha boox nested")
+	insertSupernoteNote(t, db, "/sn/work.note", "Work/work.note", "alpha supernote work")
+	insertSupernoteNote(t, db, "/sn/personal-work.note", "Personal/Work/work.note", "alpha supernote nested")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	retriever := NewRetriever(db, search.New(db), NewStore(db, logger), nil, logger)
+	results, err := retriever.Search(ctx, SearchRequest{
+		Query:     "alpha",
+		Locations: []LocationFilter{{FullPath: "Work"}},
+		Limit:     20,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r.NotePath] = true
+		if r.Folder != "Work" {
+			t.Fatalf("result %s folder = %q, want exact full path Work", r.NotePath, r.Folder)
+		}
+	}
+	for _, want := range []string{"/boox/work.note", "/sn/work.note"} {
+		if !got[want] {
+			t.Fatalf("missing %s from exact Work results: %+v", want, results)
+		}
+	}
+	for _, notWant := range []string{"/boox/personal-work.note", "/sn/personal-work.note"} {
+		if got[notWant] {
+			t.Fatalf("nested folder %s should not match exact Work", notWant)
+		}
+	}
+}
+
+func TestRetrieverDateSortNewestAndEarliest(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	oldTime := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	newTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	insertBooxNoteWithTime(t, db, "/boox/old.note", "Palma2", "Work", "alpha old", oldTime)
+	insertBooxNoteWithTime(t, db, "/boox/new.note", "Palma2", "Work", "alpha new", newTime)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	retriever := NewRetriever(db, search.New(db), NewStore(db, logger), nil, logger)
+	newest, err := retriever.Search(ctx, SearchRequest{Query: "alpha", Sort: "date_desc", Limit: 20})
+	if err != nil {
+		t.Fatalf("newest Search: %v", err)
+	}
+	if len(newest) < 2 || newest[0].NotePath != "/boox/new.note" {
+		t.Fatalf("date_desc first = %+v, want /boox/new.note", newest)
+	}
+	earliest, err := retriever.Search(ctx, SearchRequest{Query: "alpha", Sort: "date_asc", Limit: 20})
+	if err != nil {
+		t.Fatalf("earliest Search: %v", err)
+	}
+	if len(earliest) < 2 || earliest[0].NotePath != "/boox/old.note" {
+		t.Fatalf("date_asc first = %+v, want /boox/old.note", earliest)
 	}
 }
 

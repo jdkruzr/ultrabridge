@@ -2,20 +2,21 @@
 <div id="search" class="tab-content active">
   <div class="card">
     <form hx-get="/search" hx-target="#main-content" hx-push-url="true" class="toolbar" style="flex-wrap: wrap;">
+        <input type="hidden" name="sources_submitted" value="1">
         <input type="text" name="q" value="{{.searchQuery}}"
                placeholder="Search notes, digests…"
                style="flex: 1; min-width: 12rem;">
-        {{if .searchFolders}}
-        <select name="folder" style="width: auto;">
-          <option value="">All folders</option>
-          {{range .searchFolders}}
-          <option value="{{.}}" {{if eq . $.searchFolder}}selected{{end}}>{{.}}</option>
-          {{end}}
+        <select name="sort" style="width: auto;">
+          <option value="relevance" {{if eq .searchSort "relevance"}}selected{{end}}>Relevance</option>
+          <option value="date_desc" {{if eq .searchSort "date_desc"}}selected{{end}}>Most recent</option>
+          <option value="date_asc" {{if eq .searchSort "date_asc"}}selected{{end}}>Earliest first</option>
         </select>
-        {{end}}
         <button type="submit">Search</button>
 
-        <!-- Source-type facet: none checked = search everything. -->
+        {{if .searchError}}
+        <div class="text-danger" style="width:100%;">{{.searchError}}</div>
+        {{end}}
+
         <div class="search-facet">
           {{if .HasSupernoteSource}}
           <label><input type="checkbox" name="source" value="supernote" {{if index .searchSources "supernote"}}checked{{end}}> Supernote</label>
@@ -33,6 +34,36 @@
           <label><input type="checkbox" name="source" value="digest" {{if index .searchSources "digest"}}checked{{end}}> Digests</label>
           {{end}}
         </div>
+
+        <div class="search-filter-row">
+          {{if .searchLocations}}
+          <label>
+            Location
+            <select name="location">
+              <option value="">All locations</option>
+              {{range .searchLocations}}
+              <option value="{{.Value}}" {{if index $.searchSelectedLocations .Value}}selected{{end}}>{{.Label}}{{if .Count}} ({{.Count}}){{end}}</option>
+              {{end}}
+            </select>
+          </label>
+          {{end}}
+          <label>
+            Created from
+            <input type="date" name="created_from" value="{{.searchCreatedFrom}}">
+          </label>
+          <label>
+            Created to
+            <input type="date" name="created_to" value="{{.searchCreatedTo}}">
+          </label>
+          <label>
+            Modified from
+            <input type="date" name="modified_from" value="{{.searchModifiedFrom}}">
+          </label>
+          <label>
+            Modified to
+            <input type="date" name="modified_to" value="{{.searchModifiedTo}}">
+          </label>
+        </div>
     </form>
   </div>
 
@@ -40,7 +71,7 @@
     <div class="card">
         <div class="table-container">
             <table>
-              <thead><tr><th style="width: 6rem;">Source</th><th>Result</th><th style="width: 4rem;">Page</th><th>Match</th></tr></thead>
+              <thead><tr><th style="width: 6rem;">Source</th><th>Result</th><th style="width: 4rem;">Page</th><th>Created</th><th>Modified</th><th>Match</th></tr></thead>
               <tbody>
                 {{range .searchResults}}
                 <tr>
@@ -68,6 +99,8 @@
                     {{end}}
                   </td>
                   <td>{{.Page}}</td>
+                  <td class="text-small">{{formatCreated .CreatedAt}}</td>
+                  <td class="text-small">{{formatCreated .ModifiedAt}}</td>
                   <td class="text-small">{{.Snippet}}</td>
                 </tr>
                 {{end}}

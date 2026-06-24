@@ -111,3 +111,36 @@ func TestSearchPage_SourceBadges(t *testing.T) {
 		t.Error("expected supernote file path in response")
 	}
 }
+
+func TestSearchPage_DefaultsEnabledSourcesChecked(t *testing.T) {
+	handler := newTestHandler()
+	req := httptest.NewRequest(http.MethodGet, "/search", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /search = %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`name="source" value="supernote" checked`, `name="source" value="boox" checked`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("search page missing checked source %q in:\n%s", want, body)
+		}
+	}
+}
+
+func TestSearchPage_AllUncheckedSubmissionShowsValidation(t *testing.T) {
+	handler := newTestHandler()
+	req := httptest.NewRequest(http.MethodGet, "/search?q=alpha&sources_submitted=1", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /search all unchecked = %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Select at least one source to search.") {
+		t.Fatalf("expected source validation, got:\n%s", body)
+	}
+	if strings.Contains(body, `value="supernote" checked`) || strings.Contains(body, `value="boox" checked`) {
+		t.Fatalf("unchecked submission should not re-check sources:\n%s", body)
+	}
+}

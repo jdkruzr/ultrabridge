@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sysop/ultrabridge/internal/rag"
 )
@@ -133,6 +134,37 @@ func TestSearchService_MetadataPageSentinelIsNotExposed(t *testing.T) {
 	}
 	if got[0].Title != "Alpha Plan" || got[0].Path != "remarkable://doc-1" {
 		t.Fatalf("result = %+v", got[0])
+	}
+}
+
+func TestSearchService_AdvancedOptionsPlumbToRetriever(t *testing.T) {
+	createdFrom := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	modifiedTo := time.Date(2026, 6, 30, 23, 59, 59, 0, time.UTC)
+	r := &fakeRetriever{}
+	svc := &searchService{
+		retriever: r,
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	_, err := svc.SearchAdvanced(context.Background(), "alpha", SearchOptions{
+		Sources:     []string{rag.SourceForestNote},
+		Locations:   []SearchLocationFilter{{Source: rag.SourceForestNote, ID: "folder-1", FullPath: "Work"}},
+		CreatedFrom: createdFrom,
+		ModifiedTo:  modifiedTo,
+		Sort:        "date_desc",
+		Limit:       12,
+	})
+	if err != nil {
+		t.Fatalf("SearchAdvanced: %v", err)
+	}
+	if r.lastReq.Sort != "date_desc" || r.lastReq.Limit != 12 {
+		t.Fatalf("sort/limit not plumbed: %+v", r.lastReq)
+	}
+	if !r.lastReq.CreatedFrom.Equal(createdFrom) || !r.lastReq.ModifiedTo.Equal(modifiedTo) {
+		t.Fatalf("dates not plumbed: %+v", r.lastReq)
+	}
+	if len(r.lastReq.Locations) != 1 || r.lastReq.Locations[0].ID != "folder-1" || r.lastReq.Locations[0].FullPath != "Work" {
+		t.Fatalf("locations not plumbed: %+v", r.lastReq.Locations)
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/mcpauth"
 	"github.com/sysop/ultrabridge/internal/notedb"
+	"github.com/sysop/ultrabridge/internal/rag"
 	"github.com/sysop/ultrabridge/internal/service"
 	"github.com/sysop/ultrabridge/internal/source"
 	"github.com/sysop/ultrabridge/internal/syncstore"
@@ -1010,20 +1011,123 @@ func (h *Handler) digestSourceAbsPath(sourcePath string) string {
 
 func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{"activeTab": "search"}
-	query, folder := strings.TrimSpace(r.URL.Query().Get("q")), strings.TrimSpace(r.URL.Query().Get("folder"))
-	sources := r.URL.Query()["source"] // repeated checkbox params; empty = all
-	data["searchQuery"], data["searchFolder"] = query, folder
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	opts, selectedSources, submitted := h.searchOptionsFromRequest(r)
+	data["searchQuery"] = query
+	data["searchFolder"] = opts.Folder
+	data["searchSort"] = opts.Sort
+	data["searchCreatedFrom"] = r.URL.Query().Get("created_from")
+	data["searchCreatedTo"] = r.URL.Query().Get("created_to")
+	data["searchModifiedFrom"] = r.URL.Query().Get("modified_from")
+	data["searchModifiedTo"] = r.URL.Query().Get("modified_to")
+	data["searchSelectedLocations"] = selectedLocations(r.URL.Query()["location"])
 	// Echo selections back so the facet checkboxes stay checked across submits.
 	selected := map[string]bool{}
-	for _, s := range sources {
+	for _, s := range selectedSources {
 		selected[s] = true
 	}
 	data["searchSources"] = selected
+	if h.notes != nil {
+		if locations, err := h.notes.ListSearchLocations(r.Context()); err == nil {
+			data["searchLocations"] = locations
+		} else {
+			h.logger.Warn("search locations unavailable", "error", err)
+		}
+	}
+	if submitted && len(opts.Sources) == 0 {
+		data["searchError"] = "Select at least one source to search."
+		h.renderTemplate(w, r, "search", data)
+		return
+	}
 	if query != "" {
-		results, _ := h.search.Search(r.Context(), query, folder, sources, 0)
+		results, _ := h.search.SearchAdvanced(r.Context(), query, opts)
 		data["searchResults"] = results
 	}
 	h.renderTemplate(w, r, "search", data)
+}
+
+func (h *Handler) searchOptionsFromRequest(r *http.Request) (service.SearchOptions, []string, bool) {
+	q := r.URL.Query()
+	submitted := q.Get("sources_submitted") == "1"
+	sources := q["source"]
+	if !submitted && len(sources) == 0 {
+		sources = h.enabledSearchSources()
+	}
+	opts := service.SearchOptions{
+		Folder:       strings.TrimSpace(q.Get("folder")),
+		Sources:      sources,
+		Sort:         normalizeSearchSort(q.Get("sort")),
+		CreatedFrom:  parseSearchDateStart(q.Get("created_from")),
+		CreatedTo:    parseSearchDateEnd(q.Get("created_to")),
+		ModifiedFrom: parseSearchDateStart(q.Get("modified_from")),
+		ModifiedTo:   parseSearchDateEnd(q.Get("modified_to")),
+	}
+	if raw := q.Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			opts.Limit = n
+		}
+	}
+	for _, raw := range q["location"] {
+		if loc, ok := service.ParseSearchLocation(raw); ok {
+			opts.Locations = append(opts.Locations, loc)
+		}
+	}
+	return opts, sources, submitted
+}
+
+func (h *Handler) enabledSearchSources() []string {
+	var out []string
+	if h.notes != nil {
+		if h.notes.HasSupernoteSource() {
+			out = append(out, rag.SourceSupernote)
+		}
+		if h.notes.HasBooxSource() {
+			out = append(out, rag.SourceBoox)
+		}
+		if h.notes.HasForestNoteSource() {
+			out = append(out, rag.SourceForestNote)
+		}
+		if h.notes.HasRemarkableSource() {
+			out = append(out, rag.SourceRemarkable)
+		}
+	}
+	if h.digests != nil {
+		out = append(out, rag.SourceDigest)
+	}
+	return out
+}
+
+func normalizeSearchSort(raw string) string {
+	switch raw {
+	case "date_asc", "date_desc":
+		return raw
+	default:
+		return "relevance"
+	}
+}
+
+func parseSearchDateStart(raw string) time.Time {
+	t, err := time.Parse("2006-01-02", strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
+}
+
+func parseSearchDateEnd(raw string) time.Time {
+	t, err := time.Parse("2006-01-02", strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}
+	}
+	return t.Add(24*time.Hour - time.Nanosecond).UTC()
+}
+
+func selectedLocations(values []string) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range values {
+		out[v] = true
+	}
+	return out
 }
 
 func (h *Handler) handleChat(w http.ResponseWriter, r *http.Request) {

@@ -356,6 +356,7 @@ type NoteService interface {
 	ListBooxNotes(ctx context.Context, device, folder, sort, order string, page, perPage int) ([]BooxNoteSummary, int, error)
 	ListBooxFolders(ctx context.Context) ([]BooxFolder, error)
 	ListBooxDevices(ctx context.Context) ([]BooxDevice, error)
+	ListSearchLocations(ctx context.Context) ([]SearchLocation, error)
 	GetFile(ctx context.Context, path string) (NoteFile, error)
 	GetBooxNote(ctx context.Context, path string) (BooxNoteSummary, error)
 	GetNoteDetails(ctx context.Context, path string) (interface{}, error)                 // history/job info
@@ -445,12 +446,45 @@ type NoteService interface {
 
 // SearchResult represents a single search match.
 type SearchResult struct {
-	Path       string  `json:"path"`
-	Page       int     `json:"page"`
-	Title      string  `json:"title"` // note/digest title, if any
-	Snippet    string  `json:"snippet"`
-	Score      float32 `json:"score"`
-	SourceType string  `json:"source_type"` // supernote|boox|forestnote|digest
+	Path       string    `json:"path"`
+	Page       int       `json:"page"`
+	Title      string    `json:"title"` // note/digest title, if any
+	Snippet    string    `json:"snippet"`
+	Score      float32   `json:"score"`
+	SourceType string    `json:"source_type"` // supernote|boox|forestnote|remarkable|digest
+	Folder     string    `json:"folder,omitempty"`
+	CreatedAt  time.Time `json:"created_at,omitempty"`
+	ModifiedAt time.Time `json:"modified_at,omitempty"`
+}
+
+// SearchLocation is one selectable source-aware folder/location facet.
+type SearchLocation struct {
+	Value    string `json:"value"`
+	Source   string `json:"source,omitempty"` // empty for aggregate locations
+	ID       string `json:"id,omitempty"`     // source-native folder id when available
+	FullPath string `json:"full_path"`
+	Label    string `json:"label"`
+	Count    int    `json:"count"`
+}
+
+// SearchLocationFilter is a resolved location filter passed to the retrieval layer.
+type SearchLocationFilter struct {
+	Source   string
+	ID       string
+	FullPath string
+}
+
+// SearchOptions carries optional filters/sort for the richer search UI.
+type SearchOptions struct {
+	Folder       string // legacy exact folder filter
+	Sources      []string
+	Locations    []SearchLocationFilter
+	CreatedFrom  time.Time
+	CreatedTo    time.Time
+	ModifiedFrom time.Time
+	ModifiedTo   time.Time
+	Sort         string // relevance|date_asc|date_desc
+	Limit        int
 }
 
 // SearchService manages search and chat interactions.
@@ -459,6 +493,7 @@ type SearchService interface {
 	// type (empty = all); see rag.Source* constants for the values. limit caps
 	// the number of returned results (0 = service default; capped server-side).
 	Search(ctx context.Context, query, folder string, sources []string, limit int) ([]SearchResult, error)
+	SearchAdvanced(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
 
 	// Chat (SSE stream)
 	Ask(ctx context.Context, question string, sessionID int) (<-chan ChatResponse, error)
