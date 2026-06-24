@@ -81,6 +81,9 @@ func (p *protocol) register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /document-storage/json/2/delete", p.withUserAuth(p.handleDelete))
 	mux.HandleFunc("GET /document-storage/json/2/docs", p.withUserAuth(p.handleListDocuments))
 
+	mux.HandleFunc("POST /api/v1/page", p.withUserAuth(p.handleHWR))
+	mux.HandleFunc("POST /convert/v1/handwriting", p.withUserAuth(p.handleHWR))
+
 	mux.HandleFunc("POST /api/v1/signed-urls/downloads", p.withUserAuth(p.handleSignedBlobDownload))
 	mux.HandleFunc("POST /api/v1/signed-urls/uploads", p.withUserAuth(p.handleSignedBlobUpload))
 	mux.HandleFunc("POST /api/v1/sync-complete", p.withUserAuth(p.handleSyncComplete))
@@ -228,12 +231,13 @@ func (p *protocol) handleNewUserToken(w http.ResponseWriter, r *http.Request) {
 	}
 	// The DB row (random token) is the validation anchor; the JWT we hand the
 	// device carries that token id as its jti. See token.go.
-	jti, err := p.store.issueToken(r.Context(), "user", deviceClaims.DeviceID, deviceClaims.DeviceDesc, userScopes, userTokenTTL)
+	scopes := userScopesForConfig(p.cfg)
+	jti, err := p.store.issueToken(r.Context(), "user", deviceClaims.DeviceID, deviceClaims.DeviceDesc, scopes, userTokenTTL)
 	if err != nil {
 		http.Error(w, "failed to issue token", http.StatusInternalServerError)
 		return
 	}
-	tok, err := newUserJWT(jti, p.cfg.DeviceAccount, deviceClaims, userTokenTTL)
+	tok, err := newUserJWT(jti, p.cfg.DeviceAccount, deviceClaims, scopes, userTokenTTL)
 	if err != nil {
 		http.Error(w, "failed to issue token", http.StatusInternalServerError)
 		return
@@ -591,6 +595,27 @@ func (p *protocol) serveBlobByID(w http.ResponseWriter, r *http.Request, blobID 
 	w.Header().Set("x-goog-generation", fmt.Sprintf("%d", rec.Generation))
 	w.Header().Set("x-goog-hash", "crc32c="+rec.CRC32C)
 	http.ServeFile(w, r, rec.Path)
+}
+
+func (p *protocol) handleHWR(w http.ResponseWriter, r *http.Request, _ tokenClaims) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		http.Error(w, "missing body", http.StatusBadRequest)
+		return
+	}
+	resp, err := newHWRClient(p.cfg).Recognize(r.Context(), body)
+	if err != nil {
+		if errors.Is(err, errHWRNotConfigured) {
+			http.Error(w, "handwriting recognition not configured", http.StatusInternalServerError)
+			return
+		}
+		p.logger.Warn("remarkable hwr proxy failed", "error", err)
+		http.Error(w, "handwriting recognition failed", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", hwrJIIX)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(resp)
 }
 
 // handleNotificationsWS upgrades the device's notification handshake to a

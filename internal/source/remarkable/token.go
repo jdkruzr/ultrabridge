@@ -27,10 +27,11 @@ import (
 // (internal/app/claims.go), which this exact device/firmware already accepted.
 
 const (
-	// userScopes grants modern sync (sync:tortoise = "sync15"/v3+, which UB
+	// baseUserScopes grants modern sync (sync:tortoise = "sync15"/v3+, which UB
 	// implements) alongside the integration/screenshare/docedit scopes the
 	// device expects on a Connect account.
-	userScopes = "intgr screenshare docedit sync:tortoise"
+	baseUserScopes = "intgr screenshare docedit sync:tortoise"
+	hwrUserScopes  = "hwcmail:-1 hwc"
 
 	// userTokenVersion mirrors rmfakecloud's tokenVersion.
 	userTokenVersion = 10
@@ -77,7 +78,14 @@ type userTokenClaims struct {
 
 // newUserJWT builds a signed user-token JWT carrying `jti` (UB's DB token id) as
 // its identifier. account is the display name/email shown on-device.
-func newUserJWT(jti, account string, dc tokenClaims, ttl time.Duration) (string, error) {
+func userScopesForConfig(cfg Config) string {
+	if strings.TrimSpace(cfg.HWRApplicationKey) == "" || strings.TrimSpace(cfg.HWRHMAC) == "" {
+		return baseUserScopes
+	}
+	return baseUserScopes + " " + hwrUserScopes
+}
+
+func newUserJWT(jti, account string, dc tokenClaims, scopes string, ttl time.Duration) (string, error) {
 	if strings.TrimSpace(account) == "" {
 		account = "UltraBridge"
 	}
@@ -102,7 +110,7 @@ func newUserJWT(jti, account string, dc tokenClaims, ttl time.Duration) (string,
 		},
 		DeviceDesc: dc.DeviceDesc,
 		DeviceID:   dc.DeviceID,
-		Scopes:     userScopes,
+		Scopes:     scopes,
 		Version:    userTokenVersion,
 		Level:      "connect",
 		Tectonic:   "eu",

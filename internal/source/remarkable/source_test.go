@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -361,6 +362,90 @@ func TestProtocol_BlobSignedURLAndDirectRead(t *testing.T) {
 	}
 	if got := w.Body.String(); got != "blob-contents" {
 		t.Fatalf("signed blob body = %q, want blob-contents", got)
+	}
+}
+
+func TestProtocol_HWRProxy(t *testing.T) {
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != hwrAPIPath {
+			t.Fatalf("upstream path = %q, want %q", r.URL.Path, hwrAPIPath)
+		}
+		data, _ := io.ReadAll(r.Body)
+		upstreamBody = string(data)
+		w.Header().Set("Content-Type", hwrJIIX)
+		_, _ = w.Write([]byte(`{"type":"Text","label":"recognized"}`))
+	}))
+	defer upstream.Close()
+
+	db := testDB(t)
+	row := source.SourceRow{
+		Type: "remarkable",
+		Name: "RM",
+		ConfigJSON: `{"data_path":"` + t.TempDir() + `","pairing_code":"123456",` +
+			`"hwr_application_key":"app-key","hwr_hmac":"hmac-secret","hwr_host":"` + upstream.URL + `"}`,
+	}
+	src, err := NewSource(db, row, source.SharedDeps{})
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	mux := http.NewServeMux()
+	src.RegisterRoutes(mux)
+	userToken := pairUserToken(t, mux, "rm-device-hwr", "reMarkable 2")
+
+	body := `{"configuration":{"lang":"en_US"},"content":"ink"}`
+	req := httptest.NewRequest(http.MethodPost, "/convert/v1/handwriting", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("hwr proxy = %d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != hwrJIIX {
+		t.Fatalf("content type = %q, want %q", got, hwrJIIX)
+	}
+	if upstreamBody != body {
+		t.Fatalf("upstream body = %s, want %s", upstreamBody, body)
+	}
+	if got := w.Body.String(); got != `{"type":"Text","label":"recognized"}` {
+		t.Fatalf("response = %s", got)
+	}
+}
+
+func TestProtocol_HWRRequiresAuthAndConfig(t *testing.T) {
+	db := testDB(t)
+	row := source.SourceRow{
+		Type:       "remarkable",
+		Name:       "RM",
+		ConfigJSON: `{"data_path":"` + t.TempDir() + `","pairing_code":"123456"}`,
+	}
+	src, err := NewSource(db, row, source.SharedDeps{})
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	mux := http.NewServeMux()
+	src.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/page", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth hwr = %d body=%s", w.Code, w.Body.String())
+	}
+
+	userToken := pairUserToken(t, mux, "rm-device-hwr-unconfigured", "reMarkable 2")
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/page", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("unconfigured hwr = %d body=%s", w.Code, w.Body.String())
 	}
 }
 

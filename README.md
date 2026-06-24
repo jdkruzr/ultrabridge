@@ -325,6 +325,14 @@ TLS is normally terminated at the proxy. Leave the SPC card's TLS fields blank i
 
 When running the SPC server in Docker, publish the extra port: add `-p 8089:8089` to the `docker run` in Option B (or the `ports:` list in your compose file).
 
+### reMarkable Handwriting Recognition
+
+UltraBridge can proxy the reMarkable tablet's native handwriting-recognition requests to MyScript, matching the rmfakecloud contract the device expects. This is separate from UltraBridge's server-side VLM OCR: the tablet sends vector iink JSON, UltraBridge signs and forwards it to MyScript, and MyScript returns JIIX directly to the device.
+
+To enable it, edit your reMarkable source in **Settings > Devices > Sources** and set the MyScript application key and HMAC from a MyScript developer account. Optional fields let you override the MyScript host and language (`hwr_lang_override`, for example `en_US`). Leave the secret fields blank when editing to keep existing values.
+
+This device HWR proxy does not yet populate UltraBridge search or RAG text for synced reMarkable pages; that server-side indexing path is planned as a later phase.
+
 ## Architecture
 
 UltraBridge is organised as four services (Task, Note, Search, Config)

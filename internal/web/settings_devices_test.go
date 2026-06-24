@@ -136,3 +136,28 @@ func TestDevicesGroupUniformSections(t *testing.T) {
 		}
 	}
 }
+
+func TestDevicesGroupRemarkableHWRFields(t *testing.T) {
+	h := newDevicesGroupHandler(t)
+	req := httptest.NewRequest("GET", "/settings/devices", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /settings/devices = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		`id="source-current-config"`,
+		`id="source-hwr-application-key"`,
+		`id="source-hwr-hmac"`,
+		`id="source-hwr-lang-override"`,
+		`id="source-hwr-host"`,
+		`cfg.hwr_lang_override`,
+		`configObj.hwr_application_key`,
+		`configObj.hwr_hmac`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("settings devices page missing %q", want)
+		}
+	}
+}

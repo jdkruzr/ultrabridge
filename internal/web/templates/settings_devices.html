@@ -51,6 +51,7 @@
     <div id="source-form" style="display:none; margin-top:1.5rem; padding:1.5rem; border:1px solid var(--border-color); border-radius:var(--radius); background:var(--bg-color);">
       <h3 id="source-form-title" style="margin-bottom:1rem;">Add Source</h3>
       <input type="hidden" id="source-form-id" value="">
+      <input type="hidden" id="source-current-config" value="{}">
       <div class="form-group">
         <label>Type</label>
         <select id="source-type" onchange="updateSourceConfigFields()">
@@ -89,6 +90,22 @@
         <div class="form-group" id="field-device-account" style="display:none;">
           <label>Device Account</label>
           <input type="text" id="source-device-account" placeholder="optional account label">
+        </div>
+        <div class="form-group" id="field-hwr-application-key" style="display:none;">
+          <label>MyScript Application Key</label>
+          <input type="password" id="source-hwr-application-key" placeholder="Leave empty to keep current">
+        </div>
+        <div class="form-group" id="field-hwr-hmac" style="display:none;">
+          <label>MyScript HMAC</label>
+          <input type="password" id="source-hwr-hmac" placeholder="Leave empty to keep current">
+        </div>
+        <div class="form-group" id="field-hwr-lang-override" style="display:none;">
+          <label>MyScript Language Override</label>
+          <input type="text" id="source-hwr-lang-override" placeholder="optional locale, e.g. en_US">
+        </div>
+        <div class="form-group" id="field-hwr-host" style="display:none;">
+          <label>MyScript Host</label>
+          <input type="text" id="source-hwr-host" placeholder="https://cloud.myscript.com">
         </div>
       </div>
       <div class="toolbar" style="margin-top: 1rem; margin-bottom: 0;">

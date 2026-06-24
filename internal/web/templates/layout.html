@@ -1212,17 +1212,26 @@
           var dataField = document.getElementById('field-data-path');
           var pairingField = document.getElementById('field-pairing-code');
           var accountField = document.getElementById('field-device-account');
+          var hwrKeyField = document.getElementById('field-hwr-application-key');
+          var hwrHMACField = document.getElementById('field-hwr-hmac');
+          var hwrLangField = document.getElementById('field-hwr-lang-override');
+          var hwrHostField = document.getElementById('field-hwr-host');
           backupField.style.display = (type === 'supernote') ? 'block' : 'none';
           notesField.style.display = (type === 'supernote' || type === 'boox') ? 'block' : 'none';
           dataField.style.display = (type === 'remarkable') ? 'block' : 'none';
           pairingField.style.display = (type === 'remarkable') ? 'block' : 'none';
           accountField.style.display = (type === 'remarkable') ? 'block' : 'none';
+          hwrKeyField.style.display = (type === 'remarkable') ? 'block' : 'none';
+          hwrHMACField.style.display = (type === 'remarkable') ? 'block' : 'none';
+          hwrLangField.style.display = (type === 'remarkable') ? 'block' : 'none';
+          hwrHostField.style.display = (type === 'remarkable') ? 'block' : 'none';
         }
 
         function showAddSourceForm() {
           document.getElementById('source-form').style.display = 'block';
           document.getElementById('source-form-title').textContent = 'Add Source';
           document.getElementById('source-form-id').value = '';
+          document.getElementById('source-current-config').value = '{}';
           document.getElementById('source-type').value = 'supernote';
           document.getElementById('source-type').disabled = false;
           document.getElementById('source-name').value = '';
@@ -1232,6 +1241,10 @@
           document.getElementById('source-backup-path').value = '';
           document.getElementById('source-pairing-code').value = '';
           document.getElementById('source-device-account').value = '';
+          document.getElementById('source-hwr-application-key').value = '';
+          document.getElementById('source-hwr-hmac').value = '';
+          document.getElementById('source-hwr-lang-override').value = '';
+          document.getElementById('source-hwr-host').value = '';
           updateSourceConfigFields();
         }
 
@@ -1253,11 +1266,16 @@
             document.getElementById('source-enabled').checked = src.enabled;
             var cfg = {};
             try { cfg = JSON.parse(src.config_json || '{}'); } catch(e) {}
+            document.getElementById('source-current-config').value = JSON.stringify(cfg);
             document.getElementById('source-notes-path').value = cfg.notes_path || '';
             document.getElementById('source-data-path').value = cfg.data_path || '';
             document.getElementById('source-backup-path').value = cfg.backup_path || '';
             document.getElementById('source-pairing-code').value = cfg.pairing_code || '';
             document.getElementById('source-device-account').value = cfg.device_account || '';
+            document.getElementById('source-hwr-application-key').value = '';
+            document.getElementById('source-hwr-hmac').value = '';
+            document.getElementById('source-hwr-lang-override').value = cfg.hwr_lang_override || '';
+            document.getElementById('source-hwr-host').value = cfg.hwr_host || '';
             updateSourceConfigFields();
           })
           .catch(e => {
@@ -1281,6 +1299,10 @@
           var backupPath = document.getElementById('source-backup-path').value.trim();
           var pairingCode = document.getElementById('source-pairing-code').value.trim();
           var deviceAccount = document.getElementById('source-device-account').value.trim();
+          var hwrApplicationKey = document.getElementById('source-hwr-application-key').value.trim();
+          var hwrHMAC = document.getElementById('source-hwr-hmac').value.trim();
+          var hwrLangOverride = document.getElementById('source-hwr-lang-override').value.trim();
+          var hwrHost = document.getElementById('source-hwr-host').value.trim();
 
           if (!name) { statusEl.textContent = 'Name is required.'; statusEl.style.color = '#c00'; return; }
           if ((type === 'supernote' || type === 'boox') && !notesPath) { statusEl.textContent = 'Notes path is required.'; statusEl.style.color = '#c00'; return; }
@@ -1288,8 +1310,11 @@
           if (type === 'remarkable' && !pairingCode) { statusEl.textContent = 'Pairing code is required.'; statusEl.style.color = '#c00'; return; }
 
           var configObj = {};
+          if (id) {
+            try { configObj = JSON.parse(document.getElementById('source-current-config').value || '{}'); } catch(e) { configObj = {}; }
+          }
           if (type === 'supernote' || type === 'boox') {
-            configObj.notes_path = notesPath;
+            configObj = { notes_path: notesPath };
           }
           if (type === 'supernote' && backupPath) {
             configObj.backup_path = backupPath;
@@ -1299,6 +1324,24 @@
             configObj.pairing_code = pairingCode;
             if (deviceAccount) {
               configObj.device_account = deviceAccount;
+            } else {
+              delete configObj.device_account;
+            }
+            if (hwrApplicationKey) {
+              configObj.hwr_application_key = hwrApplicationKey;
+            }
+            if (hwrHMAC) {
+              configObj.hwr_hmac = hwrHMAC;
+            }
+            if (hwrLangOverride) {
+              configObj.hwr_lang_override = hwrLangOverride;
+            } else {
+              delete configObj.hwr_lang_override;
+            }
+            if (hwrHost) {
+              configObj.hwr_host = hwrHost;
+            } else {
+              delete configObj.hwr_host;
             }
           }
 
