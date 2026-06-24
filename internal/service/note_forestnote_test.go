@@ -29,6 +29,7 @@ type fakeFNReader struct {
 	folderPaths map[string][]syncstore.FolderRow // folderID → ancestor chain
 	deletePages map[string][]string              // notebookID → page IDs to return from SoftDeleteNotebook
 	deleted     []string                         // notebookIDs passed to SoftDeleteNotebook
+	textRefs    map[string][]syncstore.TextBoxRef
 }
 
 func (f *fakeFNReader) ListFolderContents(_ context.Context, id string) ([]syncstore.FolderRow, []syncstore.NotebookRow, error) {
@@ -43,7 +44,7 @@ func (f *fakeFNReader) SoftDeleteNotebook(_ context.Context, nb string) ([]strin
 	return f.deletePages[nb], nil
 }
 func (f *fakeFNReader) ListNotebookTextBoxes(_ context.Context, nb string) ([]syncstore.TextBoxRef, error) {
-	return nil, nil
+	return f.textRefs[nb], nil
 }
 func (f *fakeFNReader) LiveNotebookPageIDs(_ context.Context, nb string) ([]string, error) {
 	var ids []string
@@ -326,6 +327,82 @@ func TestReprocessForestNoteNotebook_DelegatesAndNilSafe(t *testing.T) {
 	}
 }
 
+func TestForestNoteTextBoxServiceDelegates(t *testing.T) {
+	t.Run("list requires reader and returns refs", func(t *testing.T) {
+		s := &noteService{logger: slog.Default()}
+		if _, err := s.ListForestNoteTextBoxes(context.Background(), "nbA"); err == nil {
+			t.Fatal("want error when reader is not wired")
+		}
+		r := &fakeFNReader{textRefs: map[string][]syncstore.TextBoxRef{
+			"nbA": {{ID: "box1", PageID: "pgA", Text: "hello"}},
+		}}
+		s.SetForestNoteReader(r)
+		got, err := s.ListForestNoteTextBoxes(context.Background(), "nbA")
+		if err != nil {
+			t.Fatalf("ListForestNoteTextBoxes: %v", err)
+		}
+		if len(got) != 1 || got[0].ID != "box1" || got[0].Text != "hello" {
+			t.Fatalf("text boxes = %+v", got)
+		}
+	})
+
+	t.Run("edit requires reprocessor and delegates", func(t *testing.T) {
+		s := &noteService{logger: slog.Default()}
+		if err := s.EditForestNoteTextBox(context.Background(), "box1", "new"); err == nil {
+			t.Fatal("want error when reprocessor is not wired")
+		}
+		rp := &fakeReprocessor{}
+		s.SetForestNoteReprocessor(rp)
+		if err := s.EditForestNoteTextBox(context.Background(), "box1", "new"); err != nil {
+			t.Fatalf("EditForestNoteTextBox: %v", err)
+		}
+		if len(rp.called) != 1 || rp.called[0] != "edit:box1" {
+			t.Fatalf("edit calls = %+v", rp.called)
+		}
+	})
+}
+
+func TestExportForestNoteNotebookPDF(t *testing.T) {
+	t.Run("renders live pages into a PDF with safe filename", func(t *testing.T) {
+		r := &fakeFNReader{
+			meta: map[string]syncstore.NotebookRow{
+				"nbA": {ID: "nbA", Name: "Journal: Week/One"},
+			},
+			pages: map[string][]syncstore.PageRef{
+				"nbA": {{ID: "pgA"}, {ID: "pgB"}},
+			},
+			live: map[string]bool{"pgA": true, "pgB": true},
+		}
+		s := &noteService{fnReader: r, logger: slog.Default()}
+		rc, filename, err := s.ExportForestNoteNotebookPDF(context.Background(), "nbA")
+		if err != nil {
+			t.Fatalf("ExportForestNoteNotebookPDF: %v", err)
+		}
+		defer rc.Close()
+		body, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read PDF: %v", err)
+		}
+		if filename != "Journal_ Week_One.pdf" {
+			t.Fatalf("filename = %q", filename)
+		}
+		if len(body) < 5 || string(body[:5]) != "%PDF-" {
+			t.Fatalf("export did not produce a PDF, first bytes=%q len=%d", body[:min(len(body), 8)], len(body))
+		}
+	})
+
+	t.Run("empty notebook errors", func(t *testing.T) {
+		r := &fakeFNReader{
+			meta:  map[string]syncstore.NotebookRow{"nbA": {ID: "nbA", Name: "Empty"}},
+			pages: map[string][]syncstore.PageRef{"nbA": nil},
+		}
+		s := &noteService{fnReader: r, logger: slog.Default()}
+		if _, _, err := s.ExportForestNoteNotebookPDF(context.Background(), "nbA"); err == nil {
+			t.Fatal("want error for empty notebook")
+		}
+	})
+}
+
 // fakeEmbedIndex tracks Delete calls.
 type fakeEmbedIndex struct{ deleted []string }
 
@@ -359,7 +436,6 @@ func TestBuildForestNoteTree_NestingAndUnfiled(t *testing.T) {
 		t.Errorf("unfiled = %+v, want 2 (loose + orphan)", unfiled)
 	}
 }
-
 
 // TestGetProcessorStatus_PopulatesForestNoteWhenWired verifies that when a
 // ForestNoteReprocessor is wired and its bridge has non-zero state (or even

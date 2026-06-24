@@ -126,18 +126,28 @@ func (m *mockNoteStore) TransferJob(ctx context.Context, oldPath, newPath string
 
 type mockProcessor struct {
 	enqueued []string
+	skipped  []string
+	unskip   []string
+	started  int
+	stopped  int
 	status   processor.ProcessorStatus
 }
 
-func (m *mockProcessor) Start(ctx context.Context) error   { return nil }
-func (m *mockProcessor) Stop() error                       { return nil }
+func (m *mockProcessor) Start(ctx context.Context) error   { m.started++; return nil }
+func (m *mockProcessor) Stop() error                       { m.stopped++; return nil }
 func (m *mockProcessor) Status() processor.ProcessorStatus { return m.status }
 func (m *mockProcessor) Enqueue(ctx context.Context, path string, opts ...processor.EnqueueOption) error {
 	m.enqueued = append(m.enqueued, path)
 	return nil
 }
-func (m *mockProcessor) Skip(ctx context.Context, path, reason string) error { return nil }
-func (m *mockProcessor) Unskip(ctx context.Context, path string) error       { return nil }
+func (m *mockProcessor) Skip(ctx context.Context, path, reason string) error {
+	m.skipped = append(m.skipped, path+":"+reason)
+	return nil
+}
+func (m *mockProcessor) Unskip(ctx context.Context, path string) error {
+	m.unskip = append(m.unskip, path)
+	return nil
+}
 func (m *mockProcessor) GetJob(ctx context.Context, path string) (*processor.Job, error) {
 	return nil, nil
 }
@@ -145,6 +155,9 @@ func (m *mockProcessor) GetJob(ctx context.Context, path string) (*processor.Job
 type mockBooxStore struct {
 	notes    []booxpipeline.BooxNoteEntry
 	enqueued []string
+	skipped  []string
+	unskip   []string
+	retried  int
 }
 
 func (m *mockBooxStore) ListNotes(ctx context.Context) ([]booxpipeline.BooxNoteEntry, error) {
@@ -161,10 +174,19 @@ func (m *mockBooxStore) EnqueueJob(ctx context.Context, path string) error {
 func (m *mockBooxStore) GetLatestJob(ctx context.Context, path string) (*booxpipeline.BooxJob, error) {
 	return nil, nil
 }
-func (m *mockBooxStore) RetryAllFailed(ctx context.Context) (int64, error)       { return 0, nil }
-func (m *mockBooxStore) DeleteNote(ctx context.Context, path string) error       { return nil }
-func (m *mockBooxStore) SkipNote(ctx context.Context, path, reason string) error { return nil }
-func (m *mockBooxStore) UnskipNote(ctx context.Context, path string) error       { return nil }
+func (m *mockBooxStore) RetryAllFailed(ctx context.Context) (int64, error) {
+	m.retried++
+	return 0, nil
+}
+func (m *mockBooxStore) DeleteNote(ctx context.Context, path string) error { return nil }
+func (m *mockBooxStore) SkipNote(ctx context.Context, path, reason string) error {
+	m.skipped = append(m.skipped, path+":"+reason)
+	return nil
+}
+func (m *mockBooxStore) UnskipNote(ctx context.Context, path string) error {
+	m.unskip = append(m.unskip, path)
+	return nil
+}
 func (m *mockBooxStore) GetQueueStatus(ctx context.Context) (booxpipeline.QueueStatus, error) {
 	return booxpipeline.QueueStatus{}, nil
 }
@@ -211,6 +233,14 @@ func (m *mockFileScanner) ScanNow(ctx context.Context) {
 	m.scanned++
 }
 
+type mockBooxProcessor struct {
+	started int
+	stopped int
+}
+
+func (m *mockBooxProcessor) Start(context.Context) error { m.started++; return nil }
+func (m *mockBooxProcessor) Stop()                       { m.stopped++ }
+
 func TestNoteService_ListFiles(t *testing.T) {
 	ns := &mockNoteStore{
 		files: []notestore.NoteFile{
@@ -244,6 +274,77 @@ func TestNoteService_ListFiles(t *testing.T) {
 	}
 	if !names["SN Note 1"] || !names["SN Note 2"] || !names["Boox Note 1"] {
 		t.Errorf("missing files in merged list: %v", names)
+	}
+}
+
+func TestNoteService_SourcePresenceAndControls(t *testing.T) {
+	proc := &mockProcessor{}
+	booxStore := &mockBooxStore{}
+	booxProc := &mockBooxProcessor{}
+	scanner := &mockFileScanner{}
+	svc := &noteService{
+		noteStore:     &mockNoteStore{},
+		proc:          proc,
+		booxStore:     booxStore,
+		booxProc:      booxProc,
+		scanner:       scanner,
+		booxNotesPath: "/boox",
+		logger:        slog.Default(),
+	}
+
+	if !svc.HasSupernoteSource() || !svc.HasBooxSource() || svc.HasForestNoteSource() {
+		t.Fatalf("presence flags wrong: super=%v boox=%v fn=%v", svc.HasSupernoteSource(), svc.HasBooxSource(), svc.HasForestNoteSource())
+	}
+	if err := svc.ScanFiles(context.Background()); err != nil {
+		t.Fatalf("ScanFiles: %v", err)
+	}
+	if scanner.scanned != 1 {
+		t.Fatalf("scanner calls = %d, want 1", scanner.scanned)
+	}
+
+	if err := svc.Skip(context.Background(), "/notes/a.note", "done"); err != nil {
+		t.Fatalf("Skip supernote: %v", err)
+	}
+	if err := svc.Unskip(context.Background(), "/notes/a.note"); err != nil {
+		t.Fatalf("Unskip supernote: %v", err)
+	}
+	if len(proc.skipped) != 1 || proc.skipped[0] != "/notes/a.note:done" || len(proc.unskip) != 1 {
+		t.Fatalf("supernote skip/unskip calls: skipped=%v unskip=%v", proc.skipped, proc.unskip)
+	}
+
+	if err := svc.Skip(context.Background(), "/boox/a.note", "later"); err != nil {
+		t.Fatalf("Skip boox: %v", err)
+	}
+	if err := svc.Unskip(context.Background(), "/boox/a.note"); err != nil {
+		t.Fatalf("Unskip boox: %v", err)
+	}
+	if len(booxStore.skipped) != 1 || booxStore.skipped[0] != "/boox/a.note:later" || len(booxStore.unskip) != 1 {
+		t.Fatalf("boox skip/unskip calls: skipped=%v unskip=%v", booxStore.skipped, booxStore.unskip)
+	}
+
+	if err := svc.RetryFailed(context.Background()); err != nil {
+		t.Fatalf("RetryFailed: %v", err)
+	}
+	if booxStore.retried != 1 {
+		t.Fatalf("RetryAllFailed calls = %d, want 1", booxStore.retried)
+	}
+	if err := svc.StartProcessor(context.Background()); err != nil {
+		t.Fatalf("StartProcessor: %v", err)
+	}
+	if err := svc.StopProcessor(context.Background()); err != nil {
+		t.Fatalf("StopProcessor: %v", err)
+	}
+	if proc.started != 1 || proc.stopped != 1 {
+		t.Fatalf("processor start/stop = %d/%d, want 1/1", proc.started, proc.stopped)
+	}
+	if err := svc.StartBooxProcessor(context.Background()); err != nil {
+		t.Fatalf("StartBooxProcessor: %v", err)
+	}
+	if err := svc.StopBooxProcessor(context.Background()); err != nil {
+		t.Fatalf("StopBooxProcessor: %v", err)
+	}
+	if booxProc.started != 1 || booxProc.stopped != 1 {
+		t.Fatalf("boox processor start/stop = %d/%d, want 1/1", booxProc.started, booxProc.stopped)
 	}
 }
 

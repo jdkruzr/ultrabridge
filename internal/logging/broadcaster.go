@@ -111,6 +111,8 @@ type BroadcastingHandler struct {
 	handler     slog.Handler
 	broadcaster *LogBroadcaster
 	levelFilter slog.Level
+	attrs       []slog.Attr
+	groups      []string
 }
 
 // NewBroadcastingHandler creates a handler that broadcasts entries to the
@@ -132,25 +134,35 @@ func (bh *BroadcastingHandler) Handle(ctx context.Context, record slog.Record) e
 	}
 
 	// Broadcast the entry as text
-	bh.broadcaster.Broadcast(formatLogEntry(record))
+	bh.broadcaster.Broadcast(formatLogEntry(record, bh.attrs, bh.groups))
 	return nil
 }
 
 // WithAttrs implements slog.Handler.
 func (bh *BroadcastingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	prefixed := make([]slog.Attr, 0, len(attrs))
+	for _, attr := range attrs {
+		prefixed = append(prefixed, prefixAttr(attr, bh.groups))
+	}
+	nextAttrs := append(cloneAttrs(bh.attrs), prefixed...)
 	return &BroadcastingHandler{
 		handler:     bh.handler.WithAttrs(attrs),
 		broadcaster: bh.broadcaster,
 		levelFilter: bh.levelFilter,
+		attrs:       nextAttrs,
+		groups:      cloneStrings(bh.groups),
 	}
 }
 
 // WithGroup implements slog.Handler.
 func (bh *BroadcastingHandler) WithGroup(name string) slog.Handler {
+	nextGroups := append(cloneStrings(bh.groups), name)
 	return &BroadcastingHandler{
 		handler:     bh.handler.WithGroup(name),
 		broadcaster: bh.broadcaster,
 		levelFilter: bh.levelFilter,
+		attrs:       cloneAttrs(bh.attrs),
+		groups:      nextGroups,
 	}
 }
 
@@ -160,7 +172,7 @@ func (bh *BroadcastingHandler) Enabled(ctx context.Context, level slog.Level) bo
 }
 
 // formatLogEntry formats a log record with all attributes for broadcasting.
-func formatLogEntry(record slog.Record) string {
+func formatLogEntry(record slog.Record, handlerAttrs []slog.Attr, groups []string) string {
 	var b strings.Builder
 	b.WriteString(record.Time.UTC().Format("15:04:05"))
 	b.WriteString(" [")
@@ -168,13 +180,46 @@ func formatLogEntry(record slog.Record) string {
 	b.WriteString("] ")
 	b.WriteString(record.Message)
 
+	for _, a := range handlerAttrs {
+		appendAttr(&b, a)
+	}
 	record.Attrs(func(a slog.Attr) bool {
-		b.WriteString("  ")
-		b.WriteString(a.Key)
-		b.WriteString("=")
-		b.WriteString(fmt.Sprintf("%v", a.Value.Any()))
+		appendAttr(&b, prefixAttr(a, groups))
 		return true
 	})
 
 	return b.String()
+}
+
+func appendAttr(b *strings.Builder, a slog.Attr) {
+	b.WriteString("  ")
+	b.WriteString(a.Key)
+	b.WriteString("=")
+	b.WriteString(fmt.Sprintf("%v", a.Value.Any()))
+}
+
+func prefixAttr(a slog.Attr, groups []string) slog.Attr {
+	if len(groups) == 0 || a.Key == "" {
+		return a
+	}
+	a.Key = strings.Join(append(cloneStrings(groups), a.Key), ".")
+	return a
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneAttrs(in []slog.Attr) []slog.Attr {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]slog.Attr, len(in))
+	copy(out, in)
+	return out
 }

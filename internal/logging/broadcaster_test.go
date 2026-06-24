@@ -1,6 +1,10 @@
 package logging
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -352,6 +356,35 @@ func TestRingBufferBackfillMultipleSubscribers(t *testing.T) {
 		}
 	case <-time.After(timeout):
 		t.Errorf("ch2 timeout on new message")
+	}
+}
+
+func TestBroadcastingHandlerIncludesAttrsAndGroups(t *testing.T) {
+	broadcaster := NewLogBroadcaster()
+	id, ch := broadcaster.Subscribe()
+	defer broadcaster.Unsubscribe(id)
+
+	var sink bytes.Buffer
+	handler := NewBroadcastingHandler(slog.NewTextHandler(&sink, nil), broadcaster).
+		WithAttrs([]slog.Attr{slog.String("component", "sync")}).
+		WithGroup("request").
+		WithAttrs([]slog.Attr{slog.String("id", "abc")})
+
+	record := slog.NewRecord(time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC), slog.LevelInfo, "started", 0)
+	record.AddAttrs(slog.Int("count", 3))
+	if err := handler.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	select {
+	case msg := <-ch:
+		for _, want := range []string{"[INFO] started", "component=sync", "request.id=abc", "request.count=3"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("broadcast %q missing %q", msg, want)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for broadcast")
 	}
 }
 

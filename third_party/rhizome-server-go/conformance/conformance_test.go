@@ -22,7 +22,9 @@ import (
 	"github.com/jdkruzr/rhizome/server-go/wirecodec"
 )
 
-// vectorsDir walks up from the test's working directory to find /conformance/vectors.
+// vectorsDir walks up from the test's working directory to find the shared
+// vectors. Standalone Rhizome checkouts keep them under /conformance/vectors;
+// UltraBridge vendors this module with the shared contract under /docs/sync/vectors.
 func vectorsDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -30,13 +32,18 @@ func vectorsDir(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	for {
-		cand := filepath.Join(dir, "conformance", "vectors")
-		if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
-			return cand
+		for _, rel := range []string{
+			filepath.Join("conformance", "vectors"),
+			filepath.Join("docs", "sync", "vectors"),
+		} {
+			cand := filepath.Join(dir, rel)
+			if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+				return cand
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("could not locate conformance/vectors above %q", dir)
+			t.Fatalf("could not locate shared vectors above %q", dir)
 		}
 		dir = parent
 	}
@@ -48,11 +55,19 @@ type wireOp struct {
 	SiteID string                     `json:"site_id"`
 	OpSeq  int64                      `json:"op_seq"`
 	OpTs   int64                      `json:"op_ts"`
+	WallTs int64                      `json:"wall_ts"`
 	Cols   map[string]json.RawMessage `json:"cols"`
 }
 
 func (w wireOp) toOp() syncstore.Op {
-	return syncstore.Op{Table: w.Table, PK: w.PK, SiteID: w.SiteID, OpSeq: w.OpSeq, OpTs: w.OpTs, Cols: w.Cols}
+	return syncstore.Op{Table: w.Table, PK: w.PK, SiteID: w.SiteID, OpSeq: w.OpSeq, OpTs: w.timestamp(), Cols: w.Cols}
+}
+
+func (w wireOp) timestamp() int64 {
+	if w.OpTs != 0 {
+		return w.OpTs
+	}
+	return w.WallTs
 }
 
 type wireCase struct {
@@ -133,13 +148,22 @@ var knownCols = registry.ForestNote().KnownCols()
 
 func TestVectors(t *testing.T) {
 	var merge, wireCodec, hlcN, compactionN, schemaEvoN, skipped int
+	var sawExplicitCategory bool
 	for _, entry := range loadVectors(t) {
 		entry := entry
 		t.Run(entry.v.Name, func(t *testing.T) {
 			if entry.v.Name == "" {
 				t.Fatalf("%s: missing name", entry.file)
 			}
-			switch entry.v.Category {
+			category := entry.v.Category
+			if category != "" {
+				sawExplicitCategory = true
+			} else if entry.v.ExpectedState != nil {
+				// UltraBridge's vendored shared vectors use the original merge-only
+				// shape: no category field, ops + expected_state, and wall_ts.
+				category = "merge"
+			}
+			switch category {
 			case "merge":
 				assertMerge(t, entry.v)
 				merge++
@@ -166,13 +190,13 @@ func TestVectors(t *testing.T) {
 	if merge == 0 {
 		t.Fatalf("expected at least one merge vector")
 	}
-	if hlcN == 0 {
+	if sawExplicitCategory && hlcN == 0 {
 		t.Fatalf("expected at least one hlc vector")
 	}
-	if compactionN == 0 {
+	if sawExplicitCategory && compactionN == 0 {
 		t.Fatalf("expected at least one compaction vector")
 	}
-	if schemaEvoN == 0 {
+	if sawExplicitCategory && schemaEvoN == 0 {
 		t.Fatalf("expected at least one schema-evolution vector")
 	}
 	t.Logf("conformance: %d merge, %d wire-codec, %d hlc, %d compaction, %d schema-evolution asserted, %d skipped", merge, wireCodec, hlcN, compactionN, schemaEvoN, skipped)
@@ -210,10 +234,10 @@ func assertCompaction(t *testing.T, v vector) {
 			t.Fatalf("%s / entry %d: seq = %d, want %d (order or selection wrong)", v.Name, i, got.Seq, want.Seq)
 		}
 		w := want.Op
-		if got.Op.PK != w.PK || got.Op.Table != w.Table || got.Op.SiteID != w.SiteID || got.Op.OpSeq != w.OpSeq || got.Op.OpTs != w.OpTs {
+		if got.Op.PK != w.PK || got.Op.Table != w.Table || got.Op.SiteID != w.SiteID || got.Op.OpSeq != w.OpSeq || got.Op.OpTs != w.timestamp() {
 			t.Fatalf("%s / entry %d (seq %d): identity (%s,%s,%s,%d,%d) want (%s,%s,%s,%d,%d)",
 				v.Name, i, got.Seq, got.Op.Table, got.Op.PK, got.Op.SiteID, got.Op.OpSeq, got.Op.OpTs,
-				w.Table, w.PK, w.SiteID, w.OpSeq, w.OpTs)
+				w.Table, w.PK, w.SiteID, w.OpSeq, w.timestamp())
 		}
 		if !colsEqual(got.Op.Cols, w.Cols) {
 			t.Fatalf("%s / entry %d (seq %d): cols mismatch\n got %v\nwant %v", v.Name, i, got.Seq, got.Op.Cols, w.Cols)
@@ -273,9 +297,9 @@ func assertMerge(t *testing.T, v vector) {
 			if !ok {
 				t.Fatalf("%s / %s / %s: expected surviving row missing", v.Name, table, pk)
 			}
-			if w.SiteID != er.SiteID || w.OpSeq != er.OpSeq || w.OpTs != er.OpTs {
+			if w.SiteID != er.SiteID || w.OpSeq != er.OpSeq || w.OpTs != er.timestamp() {
 				t.Fatalf("%s / %s / %s: winner key (%s,%d,%d) want (%s,%d,%d)",
-					v.Name, table, pk, w.SiteID, w.OpSeq, w.OpTs, er.SiteID, er.OpSeq, er.OpTs)
+					v.Name, table, pk, w.SiteID, w.OpSeq, w.OpTs, er.SiteID, er.OpSeq, er.timestamp())
 			}
 			if !colsEqual(w.Cols, er.Cols) {
 				t.Fatalf("%s / %s / %s: cols mismatch\n got %v\nwant %v", v.Name, table, pk, w.Cols, er.Cols)

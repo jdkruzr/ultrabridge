@@ -6,11 +6,19 @@ import (
 	rmsource "github.com/sysop/ultrabridge/internal/source/remarkable"
 )
 
-type remarkableDeviceService struct {
-	admin *rmsource.Source
+// RemarkableAdmin is the source-level read seam for reMarkable device and
+// document management. *remarkable.Source satisfies it; keeping this narrow
+// lets the service mapping be tested without starting the device protocol.
+type RemarkableAdmin interface {
+	Devices(ctx context.Context) ([]rmsource.DeviceRow, error)
+	ListDocuments(ctx context.Context) ([]rmsource.Document, error)
 }
 
-func NewRemarkableDeviceService(admin *rmsource.Source) RemarkableDeviceService {
+type remarkableDeviceService struct {
+	admin RemarkableAdmin
+}
+
+func NewRemarkableDeviceService(admin RemarkableAdmin) RemarkableDeviceService {
 	if admin == nil {
 		return nil
 	}

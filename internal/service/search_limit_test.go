@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/sysop/ultrabridge/internal/rag"
@@ -68,4 +69,55 @@ func TestSearchService_LimitClamping(t *testing.T) {
 			t.Errorf("nil-retriever Search should return nil; got %v", got)
 		}
 	})
+}
+
+func TestSearchService_RequestPlumbingAndResultMapping(t *testing.T) {
+	body := "intro " + strings.Repeat("context ", 30) + "needle " + strings.Repeat("tail ", 30)
+	r := &fakeRetriever{results: []rag.SearchResult{{
+		NotePath:   "/notes/work/alpha.note",
+		Page:       3,
+		TitleText:  "Alpha",
+		BodyText:   body,
+		Score:      0.75,
+		SourceType: rag.SourceBoox,
+	}}}
+	svc := &searchService{
+		retriever: r,
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	got, err := svc.Search(context.Background(), "needle", "work", []string{rag.SourceBoox}, 9)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if r.lastReq.Query != "needle" || r.lastReq.Folder != "work" || r.lastReq.Limit != 9 {
+		t.Fatalf("request not plumbed: %+v", r.lastReq)
+	}
+	if len(r.lastReq.Sources) != 1 || r.lastReq.Sources[0] != rag.SourceBoox {
+		t.Fatalf("sources not plumbed: %+v", r.lastReq.Sources)
+	}
+	if len(got) != 1 {
+		t.Fatalf("results len = %d, want 1", len(got))
+	}
+	res := got[0]
+	if res.Path != "/notes/work/alpha.note" || res.Page != 3 || res.Title != "Alpha" || res.SourceType != rag.SourceBoox || res.Score != float32(0.75) {
+		t.Fatalf("result mapping mismatch: %+v", res)
+	}
+	if !strings.Contains(res.Snippet, "needle") || !strings.HasPrefix(res.Snippet, "…") {
+		t.Fatalf("snippet = %q; want centered truncation containing query", res.Snippet)
+	}
+}
+
+func TestMakeSnippetEdges(t *testing.T) {
+	if got := makeSnippet("short body", "missing", 20); got != "short body" {
+		t.Fatalf("short snippet = %q", got)
+	}
+	long := strings.Repeat("abc ", 100)
+	if got := makeSnippet(long, "not-present", 25); len(got) > 28 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("missing-term snippet = %q", got)
+	}
+	centered := makeSnippet(strings.Repeat("left ", 40)+"needle "+strings.Repeat("right ", 40), "needle", 60)
+	if !strings.HasPrefix(centered, "…") || !strings.HasSuffix(centered, "…") || !strings.Contains(centered, "needle") {
+		t.Fatalf("centered snippet = %q", centered)
+	}
 }

@@ -180,3 +180,45 @@ func TestSync_BridgeNotifiedOfChangedPages(t *testing.T) {
 		t.Errorf("bridge pages = %+v, want [page %s]", cb.pages, pg1)
 	}
 }
+
+func TestSync_PageTextTriggering(t *testing.T) {
+	pageTextCols := func(text string) map[string]any {
+		return map[string]any{
+			"text":       text,
+			"ocr_at":     float64(1000),
+			"model":      "model",
+			"created_at": float64(1000),
+			"deleted_at": nil,
+		}
+	}
+
+	t.Run("client OCR wakes bridge", func(t *testing.T) {
+		cb := &captureBridge{}
+		svc := newSvc(t, cb, 0)
+		op := syncstore.Op{
+			Table: "page_text_from_client", PK: pg1, SiteID: siteA, OpSeq: 1, WallTS: 1000,
+			Cols: pageTextCols("device words"),
+		}
+		if _, err := svc.Sync(context.Background(), req(siteA, 0, op)); err != nil {
+			t.Fatalf("push client OCR: %v", err)
+		}
+		if len(cb.pages) != 1 || cb.pages[0] != (syncstore.TablePK{Table: "page", PK: pg1}) {
+			t.Fatalf("client OCR bridge pages = %+v, want page %s", cb.pages, pg1)
+		}
+	})
+
+	t.Run("server OCR does not wake bridge", func(t *testing.T) {
+		cb := &captureBridge{}
+		svc := newSvc(t, cb, 0)
+		op := syncstore.Op{
+			Table: "page_text_from_server", PK: pg1, SiteID: siteA, OpSeq: 1, WallTS: 1000,
+			Cols: pageTextCols("server words"),
+		}
+		if _, err := svc.Sync(context.Background(), req(siteA, 0, op)); err != nil {
+			t.Fatalf("push server OCR: %v", err)
+		}
+		if len(cb.pages) != 0 {
+			t.Fatalf("server OCR bridge pages = %+v, want none", cb.pages)
+		}
+	})
+}

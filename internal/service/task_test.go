@@ -207,6 +207,39 @@ func TestTaskService_BulkActions(t *testing.T) {
 	}
 }
 
+func TestTaskService_ListIncludingDeleted(t *testing.T) {
+	store := &mockTaskStore{tasks: map[string]taskstore.Task{
+		"live": {
+			TaskID:    "live",
+			Title:     sql.NullString{String: "Live", Valid: true},
+			Status:    sql.NullString{String: "needsAction", Valid: true},
+			IsDeleted: "N",
+		},
+		"ghost": {
+			TaskID:    "ghost",
+			Title:     sql.NullString{String: "Ghost", Valid: true},
+			Status:    sql.NullString{String: "completed", Valid: true},
+			IsDeleted: "Y",
+		},
+	}}
+	svc := NewTaskService(store, nil)
+
+	got, err := svc.ListIncludingDeleted(context.Background())
+	if err != nil {
+		t.Fatalf("ListIncludingDeleted: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d tasks, want 2: %+v", len(got), got)
+	}
+	deleted := map[string]bool{}
+	for _, task := range got {
+		deleted[task.ID] = task.Deleted
+	}
+	if deleted["live"] || !deleted["ghost"] {
+		t.Fatalf("deleted flags = %+v, want live=false ghost=true", deleted)
+	}
+}
+
 func TestTaskService_Update(t *testing.T) {
 	store := &mockTaskStore{tasks: map[string]taskstore.Task{}}
 	notifier := &mockNotifier{}
@@ -479,7 +512,6 @@ func TestMapInternalTask(t *testing.T) {
 	})
 }
 
-
 // TestTaskService_PurgeDeleted covers the new hard-purge path: positive days
 // translates into a cutoff that the store sees, non-positive days is rejected
 // at the service boundary, and a nil store is a safe no-op.
@@ -582,7 +614,6 @@ type errStore struct {
 func (e *errStore) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged, skipped int64, err error) {
 	return 0, 0, e.err
 }
-
 
 // TestTaskService_Create_WithMetadata covers the extended write surface:
 // URL + Priority land in structured columns; Categories + Comment land in

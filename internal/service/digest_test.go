@@ -12,7 +12,12 @@ import (
 // DeleteDigest touches are meaningful; the list methods return empty.
 type fakeDigestStore struct {
 	item        *digeststore.Digest
+	items       []digeststore.Digest
+	groups      []digeststore.Digest
+	total       int64
 	getErr      error
+	listErr     error
+	groupsErr   error
 	softDeleted []struct {
 		userID, id int64
 	}
@@ -20,9 +25,21 @@ type fakeDigestStore struct {
 }
 
 func (f *fakeDigestStore) ListItems(context.Context, string, string, int, int) ([]digeststore.Digest, int64, error) {
-	return nil, 0, nil
+	if f.listErr != nil {
+		return nil, 0, f.listErr
+	}
+	total := f.total
+	if total == 0 {
+		total = int64(len(f.items))
+	}
+	return f.items, total, nil
 }
-func (f *fakeDigestStore) ListGroups(context.Context) ([]digeststore.Digest, error) { return nil, nil }
+func (f *fakeDigestStore) ListGroups(context.Context) ([]digeststore.Digest, error) {
+	if f.groupsErr != nil {
+		return nil, f.groupsErr
+	}
+	return f.groups, nil
+}
 func (f *fakeDigestStore) GetItem(_ context.Context, id int64) (*digeststore.Digest, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
@@ -164,5 +181,50 @@ func TestToDigestView_ExposesDetailFields(t *testing.T) {
 	if v.SourcePath != "NOTE/Note/x.note" || v.SourceType != 2 ||
 		v.HandwriteInnerName != "abc.mark" || v.NotePage != 2 || !v.HasHandwriting {
 		t.Errorf("detail fields not exposed: %+v", v)
+	}
+}
+
+func TestListDigests_MapsGroupsTagsAndSourceLabels(t *testing.T) {
+	store := &fakeDigestStore{
+		items: []digeststore.Digest{
+			{ID: 1, Name: "A", Content: "excerpt", Tags: " work, urgent ,", ParentUniqueIdentifier: "grp1", SourceType: 2, HandwriteInnerName: "a.mark", Metadata: `{"note_page":"4"}`, LastModifiedTime: 200},
+			{ID: 2, Name: "B", Tags: "solo", ParentUniqueIdentifier: "missing-group", SourceType: 1},
+		},
+		groups: []digeststore.Digest{{UniqueIdentifier: "grp1", Name: "Reading"}},
+		total:  9,
+	}
+	svc := NewDigestService(store, nil).(*digestService)
+
+	got, total, err := svc.ListDigests(context.Background(), "", "", 1, 20)
+	if err != nil {
+		t.Fatalf("ListDigests: %v", err)
+	}
+	if total != 9 || len(got) != 2 {
+		t.Fatalf("total=%d len=%d, want 9/2", total, len(got))
+	}
+	if got[0].Group != "Reading" || got[0].SourceLabel != "Note" || !got[0].HasHandwriting || got[0].NotePage != 4 {
+		t.Fatalf("first digest mapping wrong: %+v", got[0])
+	}
+	if len(got[0].Tags) != 2 || got[0].Tags[0] != "work" || got[0].Tags[1] != "urgent" {
+		t.Fatalf("tags = %+v, want [work urgent]", got[0].Tags)
+	}
+	if got[1].Group != "missing-group" || got[1].SourceLabel != "PDF" {
+		t.Fatalf("fallback group/source label wrong: %+v", got[1])
+	}
+}
+
+func TestListGroups_MapsUIDAndName(t *testing.T) {
+	store := &fakeDigestStore{groups: []digeststore.Digest{
+		{UniqueIdentifier: "grp1", Name: "Work"},
+		{UniqueIdentifier: "grp2", Name: "Personal"},
+	}}
+	svc := NewDigestService(store, nil).(*digestService)
+
+	got, err := svc.ListGroups(context.Background())
+	if err != nil {
+		t.Fatalf("ListGroups: %v", err)
+	}
+	if len(got) != 2 || got[0].UID != "grp1" || got[0].Name != "Work" || got[1].UID != "grp2" {
+		t.Fatalf("groups = %+v", got)
 	}
 }

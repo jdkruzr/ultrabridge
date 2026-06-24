@@ -73,6 +73,84 @@ func TestGetContentByPrefix(t *testing.T) {
 	}
 }
 
+func TestIndexPageAndGetContentPageOrdering(t *testing.T) {
+	idx := openTestIndex(t)
+	ctx := context.Background()
+
+	if err := idx.IndexPage(ctx, "/ordered.note", 2, "api", "third page", "", ""); err != nil {
+		t.Fatalf("IndexPage page 2: %v", err)
+	}
+	if err := idx.IndexPage(ctx, "/ordered.note", 0, "api", "first page", "Title", "tag"); err != nil {
+		t.Fatalf("IndexPage page 0: %v", err)
+	}
+	if err := idx.IndexPage(ctx, "/ordered.note", 1, "api", "second page", "", ""); err != nil {
+		t.Fatalf("IndexPage page 1: %v", err)
+	}
+
+	docs, err := idx.GetContent(ctx, "/ordered.note")
+	if err != nil {
+		t.Fatalf("GetContent: %v", err)
+	}
+	if len(docs) != 3 {
+		t.Fatalf("GetContent len = %d, want 3", len(docs))
+	}
+	for i, doc := range docs {
+		if doc.Page != i {
+			t.Fatalf("docs[%d].Page = %d, want %d; docs=%+v", i, doc.Page, i, docs)
+		}
+	}
+	if docs[0].TitleText != "Title" || docs[0].Keywords != "tag" || docs[0].Source != "api" {
+		t.Fatalf("page 0 metadata not preserved: %+v", docs[0])
+	}
+}
+
+func TestListFoldersAndFolderFilter(t *testing.T) {
+	idx := openTestIndex(t)
+	ctx := context.Background()
+	docs := []NoteDocument{
+		{Path: "/notes/work/alpha.note", BodyText: "quarterly planning"},
+		{Path: "/notes/personal/beta.note", BodyText: "quarterly home"},
+		{Path: "/loose.note", BodyText: "quarterly loose"},
+	}
+	for _, d := range docs {
+		if err := idx.Index(ctx, d); err != nil {
+			t.Fatalf("Index %s: %v", d.Path, err)
+		}
+	}
+
+	folders, err := idx.ListFolders(ctx)
+	if err != nil {
+		t.Fatalf("ListFolders: %v", err)
+	}
+	if len(folders) != 2 || folders[0] != "personal" || folders[1] != "work" {
+		t.Fatalf("folders = %v, want [personal work]", folders)
+	}
+
+	results, err := idx.Search(ctx, SearchQuery{Text: "quarterly", Folder: "work"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Path != "/notes/work/alpha.note" {
+		t.Fatalf("folder-filtered results = %+v, want only work note", results)
+	}
+}
+
+func TestSearchQuotedInputIsEscaped(t *testing.T) {
+	idx := openTestIndex(t)
+	ctx := context.Background()
+	if err := idx.Index(ctx, NoteDocument{Path: "/quotes.note", BodyText: `he said "exact phrase" aloud`}); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+
+	results, err := idx.Search(ctx, SearchQuery{Text: `"exact phrase"`})
+	if err != nil {
+		t.Fatalf("Search quoted input should not produce FTS syntax error: %v", err)
+	}
+	if len(results) != 1 || results[0].Path != "/quotes.note" {
+		t.Fatalf("quoted search results = %+v, want quotes.note", results)
+	}
+}
+
 // Rename repoints FTS entries to the new path; the old path stops matching and
 // the new path matches.
 func TestSearch_Rename(t *testing.T) {

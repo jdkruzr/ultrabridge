@@ -1174,7 +1174,6 @@ func TestPreserveValueDateRoundTrip(t *testing.T) {
 	})
 }
 
-
 // TestMergeBlobMetadataPatch_PreservesUntouchedFields is the regression for
 // the "silent CATEGORIES loss on corrupt-blob fallback" review finding: a
 // patch that touches only Comment must not clear CATEGORIES, regardless of
@@ -1261,6 +1260,25 @@ func TestMergeBlobMetadataPatch_PreservesUntouchedFields(t *testing.T) {
 			t.Errorf("recovery from corrupt blob should emit empty CATEGORIES: %v", got.Categories)
 		}
 	})
+}
+
+func TestCategoriesEscapingRoundTrip(t *testing.T) {
+	cats := []string{"plain", "comma,inside", "semi;inside", `slash\inside`, "line\nbreak"}
+	blob := BuildBlobWithMetadata("cat-test", BlobMetadata{
+		Categories: cats,
+	})
+	got := ParseBlobMetadata(blob)
+	if len(got.Categories) != len(cats) {
+		t.Fatalf("categories len = %d, want %d: %v", len(got.Categories), len(cats), got.Categories)
+	}
+	for i := range cats {
+		if got.Categories[i] != cats[i] {
+			t.Fatalf("category %d = %q, want %q (all=%v)", i, got.Categories[i], cats[i], got.Categories)
+		}
+	}
+	if !strings.Contains(blob, `comma\,inside`) || !strings.Contains(blob, `semi\;inside`) || !strings.Contains(blob, `slash\\inside`) || !strings.Contains(blob, `line\nbreak`) {
+		t.Fatalf("blob did not contain expected RFC5545 escapes:\n%s", blob)
+	}
 }
 
 // TestBuildBlobWithMetadata_NoSummary is the regression for the empty-SUMMARY

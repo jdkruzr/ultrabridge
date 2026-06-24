@@ -130,6 +130,81 @@ func TestMCPPortRoundtrip(t *testing.T) {
 	}
 }
 
+func TestSPCQuotaBytesParsesInt64WithDefault(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	cfg, err := Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load default: %v", err)
+	}
+	if cfg.SPCQuotaBytes != 1<<40 {
+		t.Fatalf("default SPCQuotaBytes = %d, want %d", cfg.SPCQuotaBytes, int64(1<<40))
+	}
+
+	if err := notedb.SetSetting(ctx, db, KeySPCQuotaBytes, "1234567890123"); err != nil {
+		t.Fatalf("SetSetting valid int64: %v", err)
+	}
+	cfg, err = Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load valid int64: %v", err)
+	}
+	if cfg.SPCQuotaBytes != 1234567890123 {
+		t.Fatalf("SPCQuotaBytes = %d, want 1234567890123", cfg.SPCQuotaBytes)
+	}
+
+	if err := notedb.SetSetting(ctx, db, KeySPCQuotaBytes, "not-an-int"); err != nil {
+		t.Fatalf("SetSetting invalid int64: %v", err)
+	}
+	cfg, err = Load(ctx, db)
+	if err != nil {
+		t.Fatalf("Load invalid int64: %v", err)
+	}
+	if cfg.SPCQuotaBytes != 1<<40 {
+		t.Fatalf("invalid SPCQuotaBytes should fall back to default, got %d", cfg.SPCQuotaBytes)
+	}
+}
+
+func TestEnsureTaskAttachSecret(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	secret, err := EnsureTaskAttachSecret(ctx, db)
+	if err != nil {
+		t.Fatalf("EnsureTaskAttachSecret generate: %v", err)
+	}
+	if len(secret) != 64 {
+		t.Fatalf("generated secret len = %d, want 64", len(secret))
+	}
+	persisted, err := notedb.GetSetting(ctx, db, KeyTaskAttachSecret)
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if persisted != secret {
+		t.Fatalf("persisted secret mismatch: got %q want %q", persisted, secret)
+	}
+	again, err := EnsureTaskAttachSecret(ctx, db)
+	if err != nil {
+		t.Fatalf("EnsureTaskAttachSecret existing: %v", err)
+	}
+	if again != secret {
+		t.Fatalf("existing secret changed: got %q want %q", again, secret)
+	}
+
+	t.Setenv("UB_TASK_ATTACH_SECRET", "env-secret")
+	envSecret, err := EnsureTaskAttachSecret(ctx, db)
+	if err != nil {
+		t.Fatalf("EnsureTaskAttachSecret env: %v", err)
+	}
+	if envSecret != "env-secret" {
+		t.Fatalf("env override = %q, want env-secret", envSecret)
+	}
+	persistedAfterEnv, _ := notedb.GetSetting(ctx, db, KeyTaskAttachSecret)
+	if persistedAfterEnv != secret {
+		t.Fatalf("env override should not persist, DB has %q want %q", persistedAfterEnv, secret)
+	}
+}
+
 // TestLoadEnvVarOverride verifies that env vars override DB values.
 // Covers: platform-neutral-config.AC1.3
 func TestLoadEnvVarOverride(t *testing.T) {

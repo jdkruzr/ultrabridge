@@ -105,6 +105,48 @@ func TestCalendarHomeSetPath(t *testing.T) {
 	}
 }
 
+func TestCurrentUserPrincipalAndGetCalendar(t *testing.T) {
+	store := newMockTaskStore()
+	backend := NewBackend(store, "/caldav/", "Test Collection", "preserve", nil)
+	ctx := context.Background()
+
+	principal, err := backend.CurrentUserPrincipal(ctx)
+	if err != nil {
+		t.Fatalf("CurrentUserPrincipal: %v", err)
+	}
+	if principal != "/caldav/user/" {
+		t.Fatalf("principal = %q, want /caldav/user/", principal)
+	}
+
+	cal, err := backend.GetCalendar(ctx, "/caldav/user/calendars/tasks/")
+	if err != nil {
+		t.Fatalf("GetCalendar valid path: %v", err)
+	}
+	if cal.Path != "/caldav/user/calendars/tasks/" || cal.Name != "Test Collection" {
+		t.Fatalf("calendar = %+v", cal)
+	}
+	if _, err := backend.GetCalendar(ctx, "/caldav/user/calendars/missing/"); err == nil {
+		t.Fatal("GetCalendar missing path should error")
+	}
+}
+
+func TestSetCollectionNameAffectsRuntimeCalendars(t *testing.T) {
+	store := newMockTaskStore()
+	backend := NewBackend(store, "/caldav", "Old Name", "preserve", nil)
+
+	backend.SetCollectionName("Fresh Name")
+	if got := backend.CollectionName(); got != "Fresh Name" {
+		t.Fatalf("CollectionName = %q, want Fresh Name", got)
+	}
+	calendars, err := backend.ListCalendars(context.Background())
+	if err != nil {
+		t.Fatalf("ListCalendars: %v", err)
+	}
+	if len(calendars) != 1 || calendars[0].Name != "Fresh Name" {
+		t.Fatalf("runtime calendar name not updated: %+v", calendars)
+	}
+}
+
 // TestListCalendarsSupportedComponents verifies AC2.2: ListCalendars returns collection with VTODO support
 func TestListCalendarsSupportedComponents(t *testing.T) {
 	store := newMockTaskStore()
