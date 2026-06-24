@@ -28,14 +28,33 @@ const (
 )
 
 type protocol struct {
-	cfg    Config
-	store  *store
-	logger *slog.Logger
-	hub    *hub
+	cfg     Config
+	store   *store
+	logger  *slog.Logger
+	hub     *hub
+	indexer *metadataIndexer
 }
 
-func newProtocol(cfg Config, store *store, logger *slog.Logger, h *hub) *protocol {
-	return &protocol{cfg: cfg, store: store, logger: logger, hub: h}
+func newProtocol(cfg Config, store *store, logger *slog.Logger, h *hub, indexer *metadataIndexer) *protocol {
+	return &protocol{cfg: cfg, store: store, logger: logger, hub: h, indexer: indexer}
+}
+
+func (p *protocol) refreshMetadataIndex(ctx context.Context) {
+	if p.indexer == nil {
+		return
+	}
+	if err := p.indexer.indexAll(ctx); err != nil {
+		p.logger.Warn("remarkable metadata indexing failed", "error", err)
+	}
+}
+
+func (p *protocol) deleteMetadataIndex(ctx context.Context, id string) {
+	if p.indexer == nil {
+		return
+	}
+	if err := p.indexer.deleteDocument(ctx, id); err != nil {
+		p.logger.Warn("remarkable metadata delete failed", "document_id", id, "error", err)
+	}
 }
 
 // notifyUpgrader upgrades the device's notification handshake to a websocket.
@@ -295,6 +314,7 @@ func (p *protocol) handleUpdateStatus(w http.ResponseWriter, r *http.Request, cl
 			return
 		}
 	}
+	p.refreshMetadataIndex(r.Context())
 	type statusResponse struct {
 		ID      string `json:"ID"`
 		Message string `json:"Message"`
@@ -325,6 +345,9 @@ func (p *protocol) handleDelete(w http.ResponseWriter, r *http.Request, claims t
 	resp := make([]statusResponse, 0, len(req))
 	for _, item := range req {
 		err := p.store.deleteDocument(r.Context(), item.ID)
+		if err == nil {
+			p.deleteMetadataIndex(r.Context(), item.ID)
+		}
 		resp = append(resp, statusResponse{ID: item.ID, Success: err == nil})
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -412,6 +435,7 @@ func (p *protocol) handleSignedBlobUpload(w http.ResponseWriter, r *http.Request
 
 func (p *protocol) handleSyncComplete(w http.ResponseWriter, r *http.Request, claims tokenClaims) {
 	writeJSON(w, http.StatusOK, map[string]string{"id": claims.DeviceID})
+	p.refreshMetadataIndex(r.Context())
 	p.notify(claims) // legacy v2 sync-complete → push to peers
 }
 
@@ -431,6 +455,7 @@ func (p *protocol) handlePutRootV3(w http.ResponseWriter, r *http.Request, claim
 		return
 	}
 	writeJSON(w, http.StatusOK, syncRootResponse{Generation: gen, Hash: req.Hash})
+	p.refreshMetadataIndex(r.Context())
 	p.notify(claims) // v3/v4 root commit → push to peers
 }
 

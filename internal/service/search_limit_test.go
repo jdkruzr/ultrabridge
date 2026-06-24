@@ -108,6 +108,34 @@ func TestSearchService_RequestPlumbingAndResultMapping(t *testing.T) {
 	}
 }
 
+func TestSearchService_MetadataPageSentinelIsNotExposed(t *testing.T) {
+	r := &fakeRetriever{results: []rag.SearchResult{{
+		NotePath:   "remarkable://doc-1",
+		Page:       -1,
+		TitleText:  "Alpha Plan",
+		BodyText:   "Alpha Plan\nFolder: Projects",
+		SourceType: rag.SourceRemarkable,
+	}}}
+	svc := &searchService{
+		retriever: r,
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	got, err := svc.Search(context.Background(), "Alpha", "", []string{rag.SourceRemarkable}, 5)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("results len = %d, want 1", len(got))
+	}
+	if got[0].Page != 0 {
+		t.Fatalf("display page = %d, want sentinel hidden as 0", got[0].Page)
+	}
+	if got[0].Title != "Alpha Plan" || got[0].Path != "remarkable://doc-1" {
+		t.Fatalf("result = %+v", got[0])
+	}
+}
+
 func TestMakeSnippetEdges(t *testing.T) {
 	if got := makeSnippet("short body", "missing", 20); got != "short body" {
 		t.Fatalf("short snippet = %q", got)

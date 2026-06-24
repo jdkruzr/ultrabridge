@@ -232,6 +232,57 @@ func TestProtocol_LegacyDocumentFlow(t *testing.T) {
 	}
 }
 
+func TestProtocol_LegacyMetadataRefreshesSearchIndex(t *testing.T) {
+	db := testDB(t)
+	dataDir := t.TempDir()
+	idx := &recordingMetadataIndex{}
+	row := source.SourceRow{
+		Type:       "remarkable",
+		Name:       "RM",
+		ConfigJSON: `{"data_path":"` + dataDir + `","pairing_code":"123456"}`,
+	}
+	src, err := NewSource(db, row, source.SharedDeps{Indexer: idx})
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	mux := http.NewServeMux()
+	src.RegisterRoutes(mux)
+	userToken := pairUserToken(t, mux, "rm-device-index", "reMarkable 2")
+
+	metaBody, _ := json.Marshal([]map[string]any{{
+		"ID":             "doc-indexed",
+		"Version":        1,
+		"ModifiedClient": "2026-06-20T12:00:00Z",
+		"Type":           "DocumentType",
+		"VissibleName":   "Indexed Plan",
+	}})
+	req := httptest.NewRequest(http.MethodPut, "/document-storage/json/2/upload/update-status", bytes.NewReader(metaBody))
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-status = %d body=%s", w.Code, w.Body.String())
+	}
+	if len(idx.calls) != 1 || idx.calls[0].path != "remarkable://doc-indexed" || idx.calls[0].titleText != "Indexed Plan" {
+		t.Fatalf("index calls = %+v", idx.calls)
+	}
+
+	deleteBody, _ := json.Marshal([]map[string]string{{"ID": "doc-indexed"}})
+	req = httptest.NewRequest(http.MethodPut, "/document-storage/json/2/delete", bytes.NewReader(deleteBody))
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete = %d body=%s", w.Code, w.Body.String())
+	}
+	if len(idx.deleted) != 1 || idx.deleted[0] != "remarkable://doc-indexed" {
+		t.Fatalf("deleted = %+v", idx.deleted)
+	}
+}
+
 func TestProtocol_BlobSignedURLAndDirectRead(t *testing.T) {
 	db := testDB(t)
 	row := source.SourceRow{

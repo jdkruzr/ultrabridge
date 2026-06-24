@@ -117,9 +117,13 @@ func (s *searchService) Search(ctx context.Context, query, folder string, source
 	}
 	results := make([]SearchResult, 0, len(rr))
 	for _, r := range rr {
+		page := r.Page
+		if page < 0 {
+			page = 0
+		}
 		results = append(results, SearchResult{
 			Path:       r.NotePath,
-			Page:       r.Page,
+			Page:       page,
 			Title:      r.TitleText,
 			Snippet:    makeSnippet(r.BodyText, query, 240),
 			Score:      float32(r.Score),

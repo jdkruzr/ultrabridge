@@ -21,6 +21,7 @@ type Source struct {
 	store    *store
 	protocol *protocol
 	hub      *hub
+	indexer  *metadataIndexer
 }
 
 // NewSource constructs a reMarkable source from a source row and dependencies.
@@ -51,7 +52,13 @@ func (s *Source) Start(ctx context.Context) error {
 		logger = slog.Default()
 	}
 	s.hub = newHub(logger)
-	s.protocol = newProtocol(s.cfg, s.store, logger, s.hub)
+	s.indexer = newMetadataIndexer(s.store, s.deps.Indexer, logger)
+	if s.indexer != nil {
+		if err := s.indexer.indexAll(ctx); err != nil {
+			logger.Warn("remarkable metadata indexing failed", "error", err)
+		}
+	}
+	s.protocol = newProtocol(s.cfg, s.store, logger, s.hub, s.indexer)
 	return nil
 }
 
