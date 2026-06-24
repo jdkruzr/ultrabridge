@@ -484,6 +484,8 @@
             <div class="nav-links">
                 <a class="nav-item {{if eq .activeTab "tasks"}}active{{end}}"
                    href="/" hx-get="/" hx-target="#main-content" hx-push-url="true">Tasks</a>
+                <a class="nav-item {{if eq .activeTab "search"}}active{{end}}"
+                   href="/search" hx-get="/search" hx-target="#main-content" hx-push-url="true">Search</a>
 
                 {{/* Supernote group: Files + Digests (digests are Supernote-only). */}}
                 {{if or .HasSupernoteSource .HasDigests}}
@@ -524,8 +526,6 @@
                    href="/files" hx-get="/files" hx-target="#main-content" hx-push-url="true">Files</a>
                 {{end}}
 
-                <a class="nav-item {{if eq .activeTab "search"}}active{{end}}"
-                   href="/search" hx-get="/search" hx-target="#main-content" hx-push-url="true">Search</a>
                 {{if .chatEnabled}}
                 <a class="nav-item {{if eq .activeTab "chat"}}active{{end}}"
                    href="/chat" hx-get="/chat" hx-target="#main-content" hx-push-url="true">Chat</a>
