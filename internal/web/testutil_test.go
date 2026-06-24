@@ -202,6 +202,12 @@ type mockNoteService struct {
 	fnExportPDF       []byte
 	fnTextBoxes       []syncstore.TextBoxRef
 	fnEdited          []string
+
+	// reMarkable-tab fixtures
+	remarkableEnabled bool
+	rmEntries         []service.RemarkableEntry
+	rmCrumbs          []service.RemarkableCrumb
+	rmDetail          service.RemarkableDocumentDetail
 }
 
 func (m *mockNoteService) ListFiles(ctx context.Context, path, sort, order string, page, perPage int) ([]service.NoteFile, int, error) {
@@ -325,6 +331,21 @@ func (m *mockNoteService) BulkDelete(ctx context.Context, paths []string) error 
 func (m *mockNoteService) SetEmbedIndex(d service.EmbedIndex)             {}
 func (m *mockNoteService) SetForestNoteReader(r service.ForestNoteReader) {}
 func (m *mockNoteService) HasForestNoteSource() bool                      { return m.forestNoteEnabled }
+func (m *mockNoteService) SetRemarkableReader(r service.RemarkableReader) {}
+func (m *mockNoteService) HasRemarkableSource() bool                      { return m.remarkableEnabled }
+func (m *mockNoteService) ListRemarkableDocuments(ctx context.Context) ([]service.RemarkableDocument, error) {
+	out := make([]service.RemarkableDocument, 0, len(m.rmEntries))
+	for _, e := range m.rmEntries {
+		out = append(out, service.RemarkableDocument{ID: e.ID, Name: e.Name, Type: e.Type, Parent: e.Parent, PageCount: e.PageCount})
+	}
+	return out, nil
+}
+func (m *mockNoteService) ListRemarkableFolder(ctx context.Context, folderID, sort, order string) ([]service.RemarkableCrumb, []service.RemarkableEntry, error) {
+	return m.rmCrumbs, m.rmEntries, nil
+}
+func (m *mockNoteService) GetRemarkableDocumentDetail(ctx context.Context, documentID string) (service.RemarkableDocumentDetail, error) {
+	return m.rmDetail, nil
+}
 func (m *mockNoteService) ListForestNoteTree(ctx context.Context) ([]service.ForestNoteTreeNode, []service.ForestNoteNotebook, error) {
 	return m.fnTree, m.fnUnfiled, nil
 }

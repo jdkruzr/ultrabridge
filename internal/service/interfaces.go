@@ -216,6 +216,38 @@ type ForestNotePage struct {
 	Source   string `json:"source,omitempty"`    // OCR provenance (e.g. "forestnote")
 }
 
+// RemarkableCrumb is one hop in the reMarkable folder breadcrumb trail.
+type RemarkableCrumb struct {
+	FolderID string `json:"folder_id"`
+	Name     string `json:"name"`
+}
+
+// RemarkableEntry is one metadata-only row in the reMarkable Files tab.
+type RemarkableEntry struct {
+	IsFolder  bool   `json:"is_folder"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"` // "folder" | "document"
+	Parent    string `json:"parent"`
+	Path      string `json:"path,omitempty"`
+	PageCount int    `json:"page_count"`
+}
+
+// RemarkableDocumentDetail is the first structural detail view for a synced
+// reMarkable node. Render/OCR availability stay explicit false until later
+// chunks wire real page rendering and indexing.
+type RemarkableDocumentDetail struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	Parent          string   `json:"parent"`
+	Path            string   `json:"path"`
+	PageCount       int      `json:"page_count"`
+	FolderPath      []string `json:"folder_path,omitempty"`
+	RenderAvailable bool     `json:"render_available"`
+	OCRAvailable    bool     `json:"ocr_available"`
+}
+
 // EmbeddingJobStatus represents the background processing state.
 type EmbeddingJobStatus struct {
 	Running        bool                      `json:"running"`
@@ -376,10 +408,17 @@ type NoteService interface {
 	// ExportForestNoteNotebookPDF renders a notebook's live pages to a single PDF.
 	ExportForestNoteNotebookPDF(ctx context.Context, notebookID string) (stream io.ReadCloser, filename string, err error)
 
+	// reMarkable (synced cloud-protocol source, metadata-only in this chunk)
+	SetRemarkableReader(r RemarkableReader)
+	ListRemarkableDocuments(ctx context.Context) ([]RemarkableDocument, error)
+	ListRemarkableFolder(ctx context.Context, folderID, sortField, order string) (crumbs []RemarkableCrumb, entries []RemarkableEntry, err error)
+	GetRemarkableDocumentDetail(ctx context.Context, documentID string) (RemarkableDocumentDetail, error)
+
 	// Source Presence
 	HasSupernoteSource() bool
 	HasBooxSource() bool
 	HasForestNoteSource() bool
+	HasRemarkableSource() bool
 	ListVersions(ctx context.Context, path string) (interface{}, error)
 
 	// Pipeline Control (Supernote)

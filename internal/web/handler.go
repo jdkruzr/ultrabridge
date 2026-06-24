@@ -318,6 +318,7 @@ func NewHandler(
 	h.mux.HandleFunc("GET /files/supernote", h.handleFilesSupernote)
 	h.mux.HandleFunc("GET /files/boox", h.handleFilesBoox)
 	h.mux.HandleFunc("GET /files/forestnote", h.handleFilesForestNote)
+	h.mux.HandleFunc("GET /files/remarkable", h.handleFilesRemarkable)
 	h.mux.HandleFunc("GET /files/forestnote/render", h.handleForestNoteRender)
 	h.mux.HandleFunc("POST /files/forestnote/delete", h.handleForestNoteDelete)
 	h.mux.HandleFunc("POST /files/forestnote/reprocess", h.handleForestNoteReprocess)
@@ -510,10 +511,14 @@ func (h *Handler) handleFiles(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/files/supernote"+query, http.StatusSeeOther)
 	case h.notes.HasBooxSource():
 		http.Redirect(w, r, "/files/boox"+query, http.StatusSeeOther)
+	case h.notes.HasForestNoteSource():
+		http.Redirect(w, r, "/files/forestnote"+query, http.StatusSeeOther)
+	case h.notes.HasRemarkableSource():
+		http.Redirect(w, r, "/files/remarkable"+query, http.StatusSeeOther)
 	default:
 		data := map[string]interface{}{
 			"activeTab":  "files",
-			"filesError": "No note sources configured. Add a Supernote or Boox source in Settings.",
+			"filesError": "No note sources configured. Add a source in Settings.",
 		}
 		h.renderTemplate(w, r, "files_supernote", data)
 	}
@@ -708,6 +713,52 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 	data["pipelinePanel"] = pipelinePanel{Note: "Re-OCR is per-notebook — open a notebook to reprocess it."}
 	data["syncModel"] = source.SyncModelFor("forestnote")
 	h.renderTemplate(w, r, "files_forestnote", data)
+}
+
+// handleFilesRemarkable renders the metadata-only reMarkable Files tab. Real
+// page rendering/OCR are intentionally left to later chunks; this establishes
+// the first-class source structure and stable remarkable:// paths.
+func (h *Handler) handleFilesRemarkable(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	data := map[string]interface{}{"activeTab": "files-remarkable"}
+	if !h.notes.HasRemarkableSource() {
+		data["filesError"] = "No reMarkable source configured. Add a source in Settings."
+		h.renderTemplate(w, r, "files_remarkable", data)
+		return
+	}
+
+	if docID := r.URL.Query().Get("document"); docID != "" {
+		detail, err := h.notes.GetRemarkableDocumentDetail(ctx, docID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "document not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		data["detail"] = detail
+		data["syncModel"] = source.SyncModelFor("remarkable")
+		h.renderTemplate(w, r, "files_remarkable", data)
+		return
+	}
+
+	folderID := r.URL.Query().Get("folder")
+	sortField, sortOrder := r.URL.Query().Get("sort"), r.URL.Query().Get("order")
+	crumbs, entries, err := h.notes.ListRemarkableFolder(ctx, folderID, sortField, sortOrder)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "folder not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	data["rmEntries"], data["rmCrumbs"], data["rmFolderID"] = entries, crumbs, folderID
+	data["filesSort"], data["filesOrder"] = sortField, sortOrder
+	data["syncModel"] = source.SyncModelFor("remarkable")
+	h.renderTemplate(w, r, "files_remarkable", data)
 }
 
 // handleForestNoteDelete soft-deletes a notebook (UB-local) and de-indexes its
@@ -2021,6 +2072,7 @@ func (h *Handler) baseTemplateData(ctx context.Context) map[string]interface{} {
 	if h.notes != nil {
 		data["HasSupernoteSource"] = h.notes.HasSupernoteSource()
 		data["HasBooxSource"] = h.notes.HasBooxSource()
+		data["HasRemarkableSource"] = h.notes.HasRemarkableSource()
 		fnSourceWired = h.notes.HasForestNoteSource()
 	}
 	// Source-type flags for the search facet and the device-grouped nav.

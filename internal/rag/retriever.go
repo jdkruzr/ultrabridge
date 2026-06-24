@@ -23,6 +23,7 @@ const (
 	SourceSupernote  = "supernote"
 	SourceBoox       = "boox"
 	SourceForestNote = "forestnote"
+	SourceRemarkable = "remarkable"
 	SourceDigest     = "digest"
 )
 
@@ -258,6 +259,11 @@ func (r *Retriever) enrichResult(ctx context.Context, notePath string, page int,
 	if fnpath.Is(notePath) {
 		result.SourceType = SourceForestNote
 		result.Device = "ForestNote"
+		return result, nil
+	}
+	if strings.HasPrefix(notePath, "remarkable://") {
+		result.SourceType = SourceRemarkable
+		result.Device = "reMarkable"
 		return result, nil
 	}
 

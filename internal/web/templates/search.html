@@ -26,6 +26,9 @@
           {{if .HasForestNote}}
           <label><input type="checkbox" name="source" value="forestnote" {{if index .searchSources "forestnote"}}checked{{end}}> ForestNote</label>
           {{end}}
+          {{if .HasRemarkableSource}}
+          <label><input type="checkbox" name="source" value="remarkable" {{if index .searchSources "remarkable"}}checked{{end}}> reMarkable</label>
+          {{end}}
           {{if .HasDigests}}
           <label><input type="checkbox" name="source" value="digest" {{if index .searchSources "digest"}}checked{{end}}> Digests</label>
           {{end}}
@@ -48,12 +51,14 @@
                       <span class="badge badge-boox" title="Boox">B</span>
                     {{else if eq .SourceType "forestnote"}}
                       <span class="badge badge-fn" title="ForestNote">FN</span>
+                    {{else if eq .SourceType "remarkable"}}
+                      <span class="badge badge-rm" title="reMarkable">RM</span>
                     {{else}}
                       <span class="badge badge-sn" title="Supernote">SN</span>
                     {{end}}
                   </td>
                   <td>
-                    {{if or (eq .SourceType "digest") (eq .SourceType "forestnote")}}
+                    {{if or (eq .SourceType "digest") (eq .SourceType "forestnote") (eq .SourceType "remarkable")}}
                       {{/* Opaque-path sources: show the title (or path) as plain text. */}}
                       {{if .Title}}{{.Title}}{{else}}{{.Path}}{{end}}
                     {{else}}

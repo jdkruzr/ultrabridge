@@ -423,6 +423,7 @@ func TestRetrieverSourceFilter(t *testing.T) {
 	// One indexed doc per source, all matching the same keyword.
 	insertTestNote(t, db, "digest://uid-1", 0, "Digest One", "alpha digest excerpt")
 	insertTestNote(t, db, "forestnote://nb/pg-1", 0, "", "alpha forestnote page")
+	insertTestNote(t, db, "remarkable://doc-1", 0, "Project Plan", "alpha remarkable page")
 	insertBooxNote(t, db, "/notes/boox.note", "Palma2", "Work", "alpha boox content")
 	insertSupernoteNote(t, db, "/notes/sn.note", "Note/Work/sn.note", "alpha supernote content")
 
@@ -442,6 +443,7 @@ func TestRetrieverSourceFilter(t *testing.T) {
 	want := map[string]string{
 		"digest://uid-1":       SourceDigest,
 		"forestnote://nb/pg-1": SourceForestNote,
+		"remarkable://doc-1":   SourceRemarkable,
 		"/notes/boox.note":     SourceBoox,
 		"/notes/sn.note":       SourceSupernote,
 	}

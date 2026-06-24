@@ -755,6 +755,9 @@ func main() {
 			noteSvc.SetForestNoteReader(fnSource.Store())
 			noteSvc.SetForestNoteReprocessor(fnSource)
 		}
+		if rmSource != nil {
+			noteSvc.SetRemarkableReader(rmSource)
+		}
 
 		// 3. Search Service
 		var chatStore *chat.Store

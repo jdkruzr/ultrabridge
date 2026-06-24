@@ -1,0 +1,78 @@
+<!-- reMarkable Files Tab -->
+<div id="files-remarkable" class="tab-content active">
+  <div class="card">
+    <div class="toolbar">
+      <h2>reMarkable Files</h2>
+      <div class="flex-spacer"></div>
+      {{if .detail}}
+      <a class="btn-small" href="/files/remarkable" hx-get="/files/remarkable" hx-target="#main-content" hx-push-url="true">Back</a>
+      {{end}}
+    </div>
+    {{if .syncModel}}{{template "_sync_model_banner" .syncModel}}{{end}}
+  </div>
+
+  {{if .filesError}}
+  <div class="empty-state"><p>{{.filesError}}</p></div>
+  {{else if .detail}}
+  <div class="card">
+    <h2>{{.detail.Name}}</h2>
+    <div class="table-container">
+      <table>
+        <tbody>
+          <tr><th>Document ID</th><td><code>{{.detail.ID}}</code></td></tr>
+          <tr><th>Path</th><td><code>{{.detail.Path}}</code></td></tr>
+          <tr><th>Type</th><td>{{.detail.Type}}</td></tr>
+          <tr><th>Pages</th><td>{{.detail.PageCount}}</td></tr>
+          <tr><th>Folder</th><td>{{if .detail.FolderPath}}{{range $i, $p := .detail.FolderPath}}{{if $i}} / {{end}}{{$p}}{{end}}{{else}}Home{{end}}</td></tr>
+          <tr><th>Rendering</th><td>Rendering is not available yet.</td></tr>
+          <tr><th>OCR</th><td>OCR is not available yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{else}}
+  <div class="card">
+    {{if .rmCrumbs}}
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      {{range $i, $c := .rmCrumbs}}
+        {{if $i}}<span class="text-muted">/</span>{{end}}
+        <a href="/files/remarkable?folder={{$c.FolderID | urlquery}}" hx-get="/files/remarkable?folder={{$c.FolderID | urlquery}}" hx-target="#main-content" hx-push-url="true">{{$c.Name}}</a>
+      {{end}}
+    </nav>
+    {{end}}
+
+    {{if .rmEntries}}
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Pages</th>
+            <th>Path</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .rmEntries}}
+          <tr>
+            <td class="text-bold">
+              {{if .IsFolder}}
+              <a href="/files/remarkable?folder={{.ID | urlquery}}" hx-get="/files/remarkable?folder={{.ID | urlquery}}" hx-target="#main-content" hx-push-url="true">{{.Name}}</a>
+              {{else}}
+              <a href="/files/remarkable?document={{.ID | urlquery}}" hx-get="/files/remarkable?document={{.ID | urlquery}}" hx-target="#main-content" hx-push-url="true">{{.Name}}</a>
+              {{end}}
+            </td>
+            <td>{{.Type}}</td>
+            <td>{{if .IsFolder}}-{{else}}{{.PageCount}}{{end}}</td>
+            <td class="text-small"><code>{{.Path}}</code></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty-state"><p>No reMarkable documents synced yet.</p></div>
+    {{end}}
+  </div>
+  {{end}}
+</div>

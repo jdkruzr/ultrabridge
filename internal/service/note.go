@@ -24,6 +24,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/notestore"
 	"github.com/sysop/ultrabridge/internal/processor"
 	"github.com/sysop/ultrabridge/internal/search"
+	rmsource "github.com/sysop/ultrabridge/internal/source/remarkable"
 	"github.com/sysop/ultrabridge/internal/syncbridge"
 	"github.com/sysop/ultrabridge/internal/syncstore"
 )
@@ -115,6 +116,19 @@ type ForestNoteReprocessor interface {
 	Status() syncbridge.Status
 }
 
+// RemarkableReader is the metadata-only read seam for the reMarkable Files tab.
+// *remarkable.Source satisfies it after Start; later renderer/indexer chunks
+// can extend this seam without mixing device management into NoteService.
+type RemarkableReader interface {
+	ListDocuments(ctx context.Context) ([]rmsource.Document, error)
+}
+
+const RemarkablePathPrefix = "remarkable://"
+
+func RemarkablePath(documentID string) string {
+	return RemarkablePathPrefix + documentID
+}
+
 type noteService struct {
 	noteStore     notestore.NoteStore
 	proc          processor.Processor
@@ -125,6 +139,7 @@ type noteService struct {
 	embedIndex    EmbedIndex            // optional; set via SetEmbedIndex
 	fnReader      ForestNoteReader      // optional; set via SetForestNoteReader
 	fnReprocessor ForestNoteReprocessor // optional; set via SetForestNoteReprocessor
+	rmReader      RemarkableReader      // optional; set via SetRemarkableReader
 	scanner       FileScanner
 	noteDB        *sql.DB // for settings
 	booxCachePath string
@@ -179,6 +194,12 @@ func (s *noteService) SetForestNoteReprocessor(r ForestNoteReprocessor) { s.fnRe
 // HasForestNoteSource reports whether a ForestNote source is active (a reader is
 // wired). Lets the web layer render an empty state instead of failing.
 func (s *noteService) HasForestNoteSource() bool { return s.fnReader != nil }
+
+// SetRemarkableReader wires the reMarkable document tree into the note-facing
+// service layer. The first chunk is metadata-only; no renderer/indexer is wired.
+func (s *noteService) SetRemarkableReader(r RemarkableReader) { s.rmReader = r }
+
+func (s *noteService) HasRemarkableSource() bool { return s.rmReader != nil }
 
 func (s *noteService) ListFiles(ctx context.Context, path string, sortField, order string, page, perPage int) ([]NoteFile, int, error) {
 	var files []NoteFile
@@ -887,6 +908,79 @@ func (s *noteService) ExportForestNoteNotebookPDF(ctx context.Context, notebookI
 	return io.NopCloser(&buf), sanitizeFilename(meta.Name, notebookID) + ".pdf", nil
 }
 
+// ListRemarkableDocuments returns the full synced reMarkable tree in the public
+// API shape, preserving the existing /api/v1/remarkable/documents contract.
+func (s *noteService) ListRemarkableDocuments(ctx context.Context) ([]RemarkableDocument, error) {
+	if s.rmReader == nil {
+		return nil, nil
+	}
+	docs, err := s.rmReader.ListDocuments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RemarkableDocument, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, RemarkableDocument{
+			ID: d.ID, Name: displayRemarkableName(d), Type: d.Type, Parent: d.Parent, PageCount: d.PageCount,
+		})
+	}
+	return out, nil
+}
+
+// ListRemarkableFolder returns the direct children of folderID from the synced
+// reMarkable document tree. It is metadata-only until the renderer/indexer work
+// lands; document paths are stable opaque remarkable:// ids for future reuse.
+func (s *noteService) ListRemarkableFolder(ctx context.Context, folderID, sortField, order string) ([]RemarkableCrumb, []RemarkableEntry, error) {
+	if s.rmReader == nil {
+		return nil, nil, nil
+	}
+	docs, err := s.rmReader.ListDocuments(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	byID, children := indexRemarkableDocuments(docs)
+	if folderID != "" {
+		d, ok := byID[folderID]
+		if !ok || d.Type != "folder" {
+			return nil, nil, sql.ErrNoRows
+		}
+	}
+	entries := make([]RemarkableEntry, 0, len(children[folderID]))
+	for _, d := range children[folderID] {
+		entries = append(entries, mapRemarkableEntry(d))
+	}
+	sortRemarkableEntries(entries, sortField, order)
+	return remarkableCrumbs(folderID, byID), entries, nil
+}
+
+// GetRemarkableDocumentDetail returns a metadata-only detail view for one
+// synced reMarkable node.
+func (s *noteService) GetRemarkableDocumentDetail(ctx context.Context, documentID string) (RemarkableDocumentDetail, error) {
+	if s.rmReader == nil {
+		return RemarkableDocumentDetail{}, fmt.Errorf("remarkable source not available")
+	}
+	docs, err := s.rmReader.ListDocuments(ctx)
+	if err != nil {
+		return RemarkableDocumentDetail{}, err
+	}
+	byID, _ := indexRemarkableDocuments(docs)
+	d, ok := byID[documentID]
+	if !ok {
+		return RemarkableDocumentDetail{}, sql.ErrNoRows
+	}
+	return RemarkableDocumentDetail{
+		ID:              d.ID,
+		Name:            displayRemarkableName(d),
+		Type:            d.Type,
+		Parent:          d.Parent,
+		Path:            RemarkablePath(d.ID),
+		PageCount:       d.PageCount,
+		FolderPath:      remarkableFolderPath(d.Parent, byID),
+		RenderAvailable: false,
+		OCRAvailable:    false,
+	}, nil
+}
+
 // sanitizeFilename keeps a notebook name safe for a Content-Disposition filename,
 // falling back to the notebook id when the name is empty or all-unsafe.
 func sanitizeFilename(name, fallback string) string {
@@ -1528,6 +1622,110 @@ func mapBooxSummary(bn booxpipeline.BooxNoteEntry) BooxNoteSummary {
 		ModifiedAt:  mtime,
 		JobStatus:   bn.JobStatus,
 	}
+}
+
+func indexRemarkableDocuments(docs []rmsource.Document) (map[string]rmsource.Document, map[string][]rmsource.Document) {
+	byID := make(map[string]rmsource.Document, len(docs))
+	children := make(map[string][]rmsource.Document)
+	for _, d := range docs {
+		byID[d.ID] = d
+		children[d.Parent] = append(children[d.Parent], d)
+	}
+	return byID, children
+}
+
+func mapRemarkableEntry(d rmsource.Document) RemarkableEntry {
+	return RemarkableEntry{
+		IsFolder:  d.Type == "folder",
+		ID:        d.ID,
+		Name:      displayRemarkableName(d),
+		Type:      d.Type,
+		Parent:    d.Parent,
+		Path:      RemarkablePath(d.ID),
+		PageCount: d.PageCount,
+	}
+}
+
+func displayRemarkableName(d rmsource.Document) string {
+	if strings.TrimSpace(d.Name) != "" {
+		return d.Name
+	}
+	return d.ID
+}
+
+func remarkableCrumbs(folderID string, byID map[string]rmsource.Document) []RemarkableCrumb {
+	crumbs := []RemarkableCrumb{{FolderID: "", Name: "Home"}}
+	if folderID == "" {
+		return crumbs
+	}
+	var chain []rmsource.Document
+	for id := folderID; id != ""; {
+		d, ok := byID[id]
+		if !ok {
+			break
+		}
+		chain = append(chain, d)
+		id = d.Parent
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		crumbs = append(crumbs, RemarkableCrumb{FolderID: chain[i].ID, Name: displayRemarkableName(chain[i])})
+	}
+	return crumbs
+}
+
+func remarkableFolderPath(parentID string, byID map[string]rmsource.Document) []string {
+	if parentID == "" {
+		return nil
+	}
+	var chain []string
+	for id := parentID; id != ""; {
+		d, ok := byID[id]
+		if !ok {
+			break
+		}
+		chain = append(chain, displayRemarkableName(d))
+		id = d.Parent
+	}
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return chain
+}
+
+func sortRemarkableEntries(entries []RemarkableEntry, sortField, order string) {
+	if sortField == "" {
+		sortField = "name"
+	}
+	if order == "" {
+		order = "asc"
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsFolder != entries[j].IsFolder {
+			return entries[i].IsFolder
+		}
+		var cmp int
+		switch sortField {
+		case "pages":
+			cmp = entries[i].PageCount - entries[j].PageCount
+			if cmp == 0 {
+				cmp = strings.Compare(strings.ToLower(entries[i].Name), strings.ToLower(entries[j].Name))
+			}
+		case "type":
+			cmp = strings.Compare(entries[i].Type, entries[j].Type)
+			if cmp == 0 {
+				cmp = strings.Compare(strings.ToLower(entries[i].Name), strings.ToLower(entries[j].Name))
+			}
+		default:
+			cmp = strings.Compare(strings.ToLower(entries[i].Name), strings.ToLower(entries[j].Name))
+			if cmp == 0 {
+				cmp = strings.Compare(entries[i].ID, entries[j].ID)
+			}
+		}
+		if order == "desc" {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
 }
 
 // sortNoteFiles sorts files in place: directories first, then by the named

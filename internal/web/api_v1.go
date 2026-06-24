@@ -77,6 +77,7 @@ func (h *Handler) RegisterAPIv1() {
 	// reMarkable device management. Read-only in phase 1.
 	h.mux.HandleFunc("GET /api/v1/remarkable/devices", h.handleV1ListRemarkableDevices)
 	h.mux.HandleFunc("GET /api/v1/remarkable/documents", h.handleV1ListRemarkableDocuments)
+	h.mux.HandleFunc("GET /api/v1/remarkable/documents/{id}", h.handleV1GetRemarkableDocument)
 }
 
 // --- Tasks ---
@@ -376,6 +377,19 @@ func (h *Handler) handleV1ListRemarkableDevices(w http.ResponseWriter, r *http.R
 // handleV1ListRemarkableDocuments returns the synced reMarkable document/folder
 // tree (read-only). 404 when no reMarkable source is wired.
 func (h *Handler) handleV1ListRemarkableDocuments(w http.ResponseWriter, r *http.Request) {
+	if h.notes != nil && h.notes.HasRemarkableSource() {
+		docs, err := h.notes.ListRemarkableDocuments(r.Context())
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, "failed to list remarkable documents")
+			return
+		}
+		if docs == nil {
+			docs = []service.RemarkableDocument{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"documents": docs})
+		return
+	}
 	if h.rmDevices == nil {
 		http.NotFound(w, r)
 		return
@@ -390,6 +404,24 @@ func (h *Handler) handleV1ListRemarkableDocuments(w http.ResponseWriter, r *http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"documents": docs})
+}
+
+func (h *Handler) handleV1GetRemarkableDocument(w http.ResponseWriter, r *http.Request) {
+	if h.notes == nil || !h.notes.HasRemarkableSource() {
+		http.NotFound(w, r)
+		return
+	}
+	detail, err := h.notes.GetRemarkableDocumentDetail(r.Context(), r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apiError(w, http.StatusNotFound, "remarkable document not found")
+			return
+		}
+		apiError(w, http.StatusInternalServerError, "failed to get remarkable document")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(detail)
 }
 
 // handleV1PruneSyncDevice deletes a device's sync registry row (spec §4.3

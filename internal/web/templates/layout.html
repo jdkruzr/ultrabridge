@@ -288,6 +288,7 @@
         .badge-boox { background: #6b7280; color: white; margin-left: 0.5rem; }
         .badge-sn { background: #3b82f6; color: white; margin-left: 0.5rem; }
         .badge-fn { background: #16a34a; color: white; margin-left: 0.5rem; }
+        .badge-rm { background: #111827; color: white; margin-left: 0.5rem; }
         .badge-digest { background: #9333ea; color: white; margin-left: 0.5rem; }
         .search-facet { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-secondary); }
         .search-facet label { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; }
@@ -500,7 +501,14 @@
                    href="/files/forestnote" hx-get="/files/forestnote" hx-target="#main-content" hx-push-url="true">Files</a>
                 {{end}}
 
-                {{if and (not .HasSupernoteSource) (not .HasBooxSource) (not .HasDigests) (not .HasForestNote)}}
+                {{/* reMarkable group: metadata-first Files surface. */}}
+                {{if .HasRemarkableSource}}
+                <div class="nav-group-label">reMarkable</div>
+                <a class="nav-item nav-sub {{if eq .activeTab "files-remarkable"}}active{{end}}"
+                   href="/files/remarkable" hx-get="/files/remarkable" hx-target="#main-content" hx-push-url="true">Files</a>
+                {{end}}
+
+                {{if and (not .HasSupernoteSource) (not .HasBooxSource) (not .HasDigests) (not .HasForestNote) (not .HasRemarkableSource)}}
                 <a class="nav-item {{if eq .activeTab "files"}}active{{end}}"
                    href="/files" hx-get="/files" hx-target="#main-content" hx-push-url="true">Files</a>
                 {{end}}
