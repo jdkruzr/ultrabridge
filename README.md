@@ -309,10 +309,12 @@ The SPC server and the main app are **two listeners on different ports**: `:8089
 
 | Hostname (example) | Routes to | Serves |
 |--------------------|-----------|--------|
-| `sn.example.com`   | `:8089`   | Supernote device sync (SPC) |
+| `supernote.example.com` | `:8089` | Supernote device/Partner App sync (SPC) |
 | `ub.example.com`   | `:8443`   | Web UI, CalDAV, Boox/WebDAV, MCP |
 
 Pick any names you like, but they must be **distinct**. A proxy routes by `Host` header to a single backend, so one hostname can't reach both ports. Point the Supernote at the `:8089` hostname; point browsers, CalDAV clients, and Boox devices at the `:8443` one.
+
+In practice, keep using a Supernote-named domain for SPC traffic, such as `supernote.example.com` (or this install's `supernote.broken.works`). Do not multiplex SPC paths under the UltraBridge web hostname (`ub.example.com` / `ultrabridge.broken.works`); the web app has its own `/api/*` surface, and the Supernote device and Partner App expect the bog-standard SPC contract on their host.
 
 Two requirements for the `:8089` proxy host:
 
