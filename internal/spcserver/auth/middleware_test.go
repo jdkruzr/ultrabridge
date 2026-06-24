@@ -101,12 +101,18 @@ func TestMiddlewareHarvestNoOpWhenSet(t *testing.T) {
 	store.m[UserIDSettingKey] = "existing-id"
 	store.setCalls = 0
 
-	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	var gotUID string
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		gotUID = UserID(r.Context())
+	})
 	h := Middleware(testSecret, store, next)
 	req := httptest.NewRequest(http.MethodPost, "/api/user/query", nil)
 	req.Header.Set("x-access-token", Mint("a-different-id", testSecret))
 	h.ServeHTTP(httptest.NewRecorder(), req)
 
+	if gotUID != "existing-id" {
+		t.Errorf("UserID(ctx) should use canonical spc_user_id: got %q", gotUID)
+	}
 	if store.m[UserIDSettingKey] != "existing-id" {
 		t.Errorf("harvest must not overwrite existing spc_user_id, got %q", store.m[UserIDSettingKey])
 	}

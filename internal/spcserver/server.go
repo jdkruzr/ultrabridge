@@ -354,6 +354,9 @@ func (s *Server) registerRoutes() {
 	// Engine.IO v3 websocket on the same listener (1c). The device connects to
 	// /socket.io/ directly over websocket; demux is by path.
 	sockHandler := socketio.NewHandler(s.cfg.JWTSecret, s.reg, s.cfg.Logger)
+	sockHandler.SetUserIDResolver(func(ctx context.Context, verified string) string {
+		return auth.CanonicalUserID(ctx, store, verified)
+	})
 	if s.cfg.DigestDeliverer != nil {
 		sockHandler.SetDigestQueue(s.cfg.DigestDeliverer)
 	}

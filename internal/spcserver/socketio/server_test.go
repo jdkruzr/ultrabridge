@@ -1,6 +1,7 @@
 package socketio
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -145,5 +146,38 @@ func TestEmitReachesClient(t *testing.T) {
 	}
 	if got := readFrame(t, c); got != `42["ServerMessage",{"op":"STARTSYNC"}]` {
 		t.Errorf("pushed frame: got %q", got)
+	}
+}
+
+// TestCanonicalUserIDRegistersConnection verifies a valid cached token with a
+// non-canonical userId still registers the socket under UB's stored single-user
+// identity, so STARTSYNC and digest pushes reach the client.
+func TestCanonicalUserIDRegistersConnection(t *testing.T) {
+	reg := NewRegistry()
+	h := NewHandler(wsSecret, reg, nil)
+	h.SetUserIDResolver(func(context.Context, string) string { return "canonical" })
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	c, _, err := dialWS(t, srv, auth.Mint("cached-real-spc-id", wsSecret))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	readFrame(t, c) // open
+	readFrame(t, c) // proactive 40 connect
+
+	deadline := time.Now().Add(2 * time.Second)
+	for reg.Emit("canonical", "ServerMessage", map[string]string{"op": "STARTSYNC"}) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("conn never registered under canonical user")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := readFrame(t, c); got != `42["ServerMessage",{"op":"STARTSYNC"}]` {
+		t.Errorf("pushed frame: got %q", got)
+	}
+	if delivered := reg.Emit("cached-real-spc-id", "ServerMessage", map[string]string{"op": "wrong"}); delivered != 0 {
+		t.Errorf("connection should not remain registered under token user, delivered=%d", delivered)
 	}
 }

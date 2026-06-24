@@ -27,17 +27,26 @@ type DigestQueue interface {
 	AckDigest(ctx context.Context, userID string)
 }
 
+// UserIDResolver maps a verified token userId onto the identity UB should use
+// for routing sockets and queues.
+type UserIDResolver func(ctx context.Context, verified string) string
+
 type Handler struct {
-	secret   string
-	reg      *Registry
-	logger   *slog.Logger
-	upgrader websocket.Upgrader
-	digest   DigestQueue
+	secret         string
+	reg            *Registry
+	logger         *slog.Logger
+	upgrader       websocket.Upgrader
+	digest         DigestQueue
+	userIDResolver UserIDResolver
 }
 
 // SetDigestQueue wires the digest-tombstone delivery seam (SPC server mode with
 // a digest store; nil otherwise). Set before serving.
 func (h *Handler) SetDigestQueue(q DigestQueue) { h.digest = q }
+
+// SetUserIDResolver wires canonical single-user identity mapping. nil keeps the
+// verified token userId unchanged.
+func (h *Handler) SetUserIDResolver(f UserIDResolver) { h.userIDResolver = f }
 
 // NewHandler builds the websocket handler. permessage-deflate is intentionally
 // not negotiated (EnableCompression stays false) — see the 1c design note; the
@@ -65,6 +74,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+	if h.userIDResolver != nil {
+		userID = h.userIDResolver(r.Context(), userID)
 	}
 
 	ws, err := h.upgrader.Upgrade(w, r, nil)

@@ -37,12 +37,30 @@ func WithUserID(ctx context.Context, uid string) context.Context {
 	return context.WithValue(ctx, userIDCtxKey, uid)
 }
 
+// CanonicalUserID maps a verified token userId onto UB's stored single-user
+// identity. The first valid token still seeds spc_user_id, but once that setting
+// exists it wins over later cached real-SPC tokens so all source data, sockets,
+// and push queues stay in one user lane.
+func CanonicalUserID(ctx context.Context, store SettingStore, verified string) string {
+	if store == nil {
+		return verified
+	}
+	existing, err := store.Get(ctx, UserIDSettingKey)
+	if err != nil {
+		return verified
+	}
+	if existing != "" {
+		return existing
+	}
+	_ = store.Set(ctx, UserIDSettingKey, verified)
+	return verified
+}
+
 // Middleware gates a handler on a valid x-access-token. On success it puts the
-// verified userId in the request context and, the first time it sees a valid
-// token, harvests that userId into store under UserIDSettingKey — this adopts
-// the device's real-SPC userId when it presents its existing token during the
-// NPM cutover. On failure it writes the SPC "not logged in" envelope (E0712),
-// which prompts the device to re-login, and does not call next.
+// canonical UB userId in the request context and, the first time it sees a valid
+// token, harvests that userId into store under UserIDSettingKey. On failure it
+// writes the SPC "not logged in" envelope (E0712), which prompts the device to
+// re-login, and does not call next.
 func Middleware(secret string, store SettingStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		uid, err := Verify(r.Header.Get("x-access-token"), secret)
@@ -53,11 +71,7 @@ func Middleware(secret string, store SettingStore, next http.Handler) http.Handl
 			return
 		}
 
-		if store != nil {
-			if existing, _ := store.Get(r.Context(), UserIDSettingKey); existing == "" {
-				_ = store.Set(r.Context(), UserIDSettingKey, uid)
-			}
-		}
+		uid = CanonicalUserID(r.Context(), store, uid)
 
 		next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), uid)))
 	})
