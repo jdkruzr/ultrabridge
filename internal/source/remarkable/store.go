@@ -123,6 +123,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			document_id TEXT NOT NULL,
 			page INTEGER NOT NULL,
 			revision TEXT NOT NULL DEFAULT '',
+			manual INTEGER NOT NULL DEFAULT 0,
 			status TEXT NOT NULL DEFAULT 'pending',
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT NOT NULL DEFAULT '',
@@ -137,6 +138,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("remarkable migrate: %w", err)
 		}
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE remarkable_ocr_jobs ADD COLUMN manual INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return fmt.Errorf("remarkable migrate OCR manual column: %w", err)
 	}
 	return nil
 }

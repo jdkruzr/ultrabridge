@@ -34,6 +34,7 @@ type ocrJob struct {
 	DocumentID string
 	Page       int
 	Revision   string
+	Manual     bool
 }
 
 type ocrProcessor struct {
@@ -121,7 +122,7 @@ func (p *ocrProcessor) ReprocessDocument(ctx context.Context, documentID string)
 	if !doc.Renderable {
 		return fmt.Errorf("remarkable document is not renderable: %s", doc.RenderableWhy)
 	}
-	if err := p.enqueueDocument(ctx, doc, true); err != nil {
+	if err := p.enqueueDocument(ctx, doc, true, true); err != nil {
 		return err
 	}
 	p.notify()
@@ -151,7 +152,13 @@ func (p *ocrProcessor) EnqueueMissingStale(ctx context.Context) error {
 		if !doc.Renderable {
 			continue
 		}
-		if err := p.enqueueDocument(ctx, doc, false); err != nil {
+		if !shouldAutoOCRDocument(doc) {
+			if err := p.store.deleteAutomaticOCRJobs(ctx, doc.ID); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := p.enqueueDocument(ctx, doc, false, false); err != nil {
 			return err
 		}
 	}
@@ -166,7 +173,7 @@ func (p *ocrProcessor) DeleteDocument(ctx context.Context, documentID string) er
 	return p.store.deleteOCRJobs(ctx, documentID)
 }
 
-func (p *ocrProcessor) enqueueDocument(ctx context.Context, doc RenderDocument, force bool) error {
+func (p *ocrProcessor) enqueueDocument(ctx context.Context, doc RenderDocument, force, manual bool) error {
 	pages := doc.PageCount
 	if pages == 0 {
 		pages = len(doc.PageOrder)
@@ -175,11 +182,19 @@ func (p *ocrProcessor) enqueueDocument(ctx context.Context, doc RenderDocument, 
 		pages = 1
 	}
 	for i := 0; i < pages; i++ {
-		if err := p.store.enqueueOCRPage(ctx, doc.ID, i, doc.Revision, force); err != nil {
+		if err := p.store.enqueueOCRPage(ctx, doc.ID, i, doc.Revision, force, manual); err != nil {
 			return fmt.Errorf("enqueue %s page %d: %w", doc.ID, i, err)
 		}
 	}
 	return nil
+}
+
+func shouldAutoOCRDocument(doc RenderDocument) bool {
+	fileType := strings.ToLower(strings.TrimSpace(doc.FileType))
+	if fileType == "pdf" || fileType == "epub" || doc.PDFPath != "" {
+		return false
+	}
+	return len(doc.PageRM) > 0
 }
 
 func (p *ocrProcessor) loop(ctx context.Context) {
@@ -226,7 +241,7 @@ func (p *ocrProcessor) processJob(ctx context.Context, job ocrJob) {
 		return
 	}
 	if doc.Revision != "" && job.Revision != "" && doc.Revision != job.Revision {
-		_ = p.store.enqueueOCRPage(ctx, doc.ID, job.Page, doc.Revision, true)
+		_ = p.store.enqueueOCRPage(ctx, doc.ID, job.Page, doc.Revision, true, job.Manual)
 		_ = p.store.completeOCRJob(ctx, job.ID)
 		p.notify()
 		return
@@ -265,28 +280,34 @@ func (p *ocrProcessor) fail(ctx context.Context, job ocrJob, err error) {
 	p.logger.Warn("remarkable OCR job failed", "document_id", job.DocumentID, "page", job.Page, "error", err)
 }
 
-func (s *store) enqueueOCRPage(ctx context.Context, documentID string, page int, revision string, force bool) error {
+func (s *store) enqueueOCRPage(ctx context.Context, documentID string, page int, revision string, force, manual bool) error {
 	now := time.Now().UnixMilli()
+	manualInt := 0
+	if manual {
+		manualInt = 1
+	}
 	if force {
 		_, err := s.db.ExecContext(ctx, `
-			INSERT INTO remarkable_ocr_jobs(document_id, page, revision, status, attempts, last_error, queued_at, started_at, finished_at)
-			VALUES(?, ?, ?, ?, 0, '', ?, 0, 0)
+			INSERT INTO remarkable_ocr_jobs(document_id, page, revision, manual, status, attempts, last_error, queued_at, started_at, finished_at)
+			VALUES(?, ?, ?, ?, ?, 0, '', ?, 0, 0)
 			ON CONFLICT(document_id, page) DO UPDATE SET
 				revision=excluded.revision,
+				manual=excluded.manual,
 				status=excluded.status,
 				attempts=0,
 				last_error='',
 				queued_at=excluded.queued_at,
 				started_at=0,
 				finished_at=0`,
-			documentID, page, revision, ocrStatusPending, now)
+			documentID, page, revision, manualInt, ocrStatusPending, now)
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO remarkable_ocr_jobs(document_id, page, revision, status, attempts, last_error, queued_at, started_at, finished_at)
-		VALUES(?, ?, ?, ?, 0, '', ?, 0, 0)
+		INSERT INTO remarkable_ocr_jobs(document_id, page, revision, manual, status, attempts, last_error, queued_at, started_at, finished_at)
+		VALUES(?, ?, ?, ?, ?, 0, '', ?, 0, 0)
 		ON CONFLICT(document_id, page) DO UPDATE SET
 			revision=excluded.revision,
+			manual=excluded.manual,
 			status=excluded.status,
 			attempts=0,
 			last_error='',
@@ -294,7 +315,7 @@ func (s *store) enqueueOCRPage(ctx context.Context, documentID string, page int,
 			started_at=0,
 			finished_at=0
 		WHERE remarkable_ocr_jobs.revision <> excluded.revision`,
-		documentID, page, revision, ocrStatusPending, now)
+		documentID, page, revision, manualInt, ocrStatusPending, now)
 	return err
 }
 
@@ -306,19 +327,21 @@ func (s *store) claimNextOCRJob(ctx context.Context) (*ocrJob, error) {
 	defer tx.Rollback()
 
 	var job ocrJob
+	var manual int
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, document_id, page, revision
+		SELECT id, document_id, page, revision, manual
 		FROM remarkable_ocr_jobs
 		WHERE status = ?
 		ORDER BY queued_at ASC, id ASC
 		LIMIT 1`, ocrStatusPending).
-		Scan(&job.ID, &job.DocumentID, &job.Page, &job.Revision)
+		Scan(&job.ID, &job.DocumentID, &job.Page, &job.Revision, &manual)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	job.Manual = manual != 0
 	now := time.Now().UnixMilli()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE remarkable_ocr_jobs
@@ -353,6 +376,11 @@ func (s *store) failOCRJob(ctx context.Context, id int64, msg string) error {
 
 func (s *store) deleteOCRJobs(ctx context.Context, documentID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM remarkable_ocr_jobs WHERE document_id = ?`, documentID)
+	return err
+}
+
+func (s *store) deleteAutomaticOCRJobs(ctx context.Context, documentID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM remarkable_ocr_jobs WHERE document_id = ? AND manual = 0`, documentID)
 	return err
 }
 
