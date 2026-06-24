@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"sync/atomic"
 
 	"github.com/sysop/ultrabridge/internal/appconfig"
@@ -79,6 +80,11 @@ func (s *configService) UpdateSource(ctx context.Context, id string, src interfa
 	if !ok {
 		return fmt.Errorf("invalid source type")
 	}
+	rowID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || rowID <= 0 {
+		return fmt.Errorf("invalid source id")
+	}
+	updatedSrc.ID = rowID
 	if err := source.UpdateSource(ctx, s.noteDB, *updatedSrc); err != nil {
 		return err
 	}

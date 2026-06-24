@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/sysop/ultrabridge/internal/appconfig"
@@ -78,9 +79,12 @@ func TestConfigServiceSourcesLifecycle(t *testing.T) {
 		t.Fatalf("sources after add = %+v", rows)
 	}
 
-	rows[0].Name = "ForestNote"
-	rows[0].Enabled = false
-	if err := svc.UpdateSource(ctx, "", &rows[0]); err != nil {
+	update := rows[0]
+	updateID := update.ID
+	update.ID = 0 // Browser update bodies omit id; the path id is authoritative.
+	update.Name = "ForestNote"
+	update.Enabled = false
+	if err := svc.UpdateSource(ctx, fmt.Sprint(updateID), &update); err != nil {
 		t.Fatalf("UpdateSource: %v", err)
 	}
 	rowsAny, err = svc.ListSources(ctx)

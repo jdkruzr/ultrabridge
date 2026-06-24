@@ -246,7 +246,6 @@ func TestUpdateSourceSucceeds(t *testing.T) {
 
 	// Update it
 	update := source.SourceRow{
-		ID:      id,
 		Type:    "supernote",
 		Name:    "Updated",
 		Enabled: true,
