@@ -740,6 +740,9 @@ func (h *Handler) handleFilesRemarkable(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		data["detail"] = detail
+		if detail.RenderAvailable {
+			data["detailGrid"] = remarkableDetailView(detail)
+		}
 		data["syncModel"] = source.SyncModelFor("remarkable")
 		h.renderTemplate(w, r, "files_remarkable", data)
 		return
@@ -2363,6 +2366,32 @@ func forestNoteDetailView(d service.ForestNoteNotebookDetail, targetPageID strin
 	}
 }
 
+func remarkableDetailView(d service.RemarkableDocumentDetail) detailView {
+	folder := "Home"
+	if len(d.FolderPath) > 0 {
+		folder = strings.Join(d.FolderPath, " / ")
+	}
+	pages := make([]detailPage, 0, d.PageCount)
+	for i := 0; i < d.PageCount; i++ {
+		pages = append(pages, detailPage{
+			ImgURL:  "/files/render?path=" + url.QueryEscape(d.Path) + "&page=" + strconv.Itoa(i) + "&v=1",
+			Caption: "Page " + strconv.Itoa(i+1),
+		})
+	}
+	return detailView{
+		Title:   d.Name,
+		BackURL: "/files/remarkable",
+		Meta: []detailKV{
+			{Label: "Document ID", Value: d.ID},
+			{Label: "Folder", Value: folder},
+			{Label: "Pages", Value: strconv.Itoa(d.PageCount)},
+			{Label: "Path", Value: d.Path},
+		},
+		Pages:    pages,
+		EmptyMsg: "This reMarkable document has no renderable pages yet.",
+	}
+}
+
 // formatTimestampMs formats a millisecond UTC unix timestamp as the UI does
 // ("Never" for 0). Shared by the formatTimestamp template func and Go-side
 // detail builders.
@@ -2431,6 +2460,9 @@ func (h *Handler) validNotePath(path string) bool {
 	// would mangle the "//"). The note service resolves it against the syncstore
 	// mirror, so there is no directory to escape. Check the raw path first.
 	if fnpath.Is(path) {
+		return true
+	}
+	if strings.HasPrefix(path, service.RemarkablePathPrefix) {
 		return true
 	}
 	cleaned := filepath.Clean(path)

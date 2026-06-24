@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"io"
 	"log/slog"
@@ -22,7 +23,9 @@ import (
 	"github.com/sysop/ultrabridge/internal/forestrender"
 	"github.com/sysop/ultrabridge/internal/notedb"
 	"github.com/sysop/ultrabridge/internal/notestore"
+	"github.com/sysop/ultrabridge/internal/pdfrender"
 	"github.com/sysop/ultrabridge/internal/processor"
+	"github.com/sysop/ultrabridge/internal/rmrender"
 	"github.com/sysop/ultrabridge/internal/search"
 	rmsource "github.com/sysop/ultrabridge/internal/source/remarkable"
 	"github.com/sysop/ultrabridge/internal/syncbridge"
@@ -121,9 +124,11 @@ type ForestNoteReprocessor interface {
 // can extend this seam without mixing device management into NoteService.
 type RemarkableReader interface {
 	ListDocuments(ctx context.Context) ([]rmsource.Document, error)
+	RenderDocument(ctx context.Context, documentID string) (rmsource.RenderDocument, error)
 }
 
 const RemarkablePathPrefix = "remarkable://"
+const remarkableRendererVersion = "v1"
 
 func RemarkablePath(documentID string) string {
 	return RemarkablePathPrefix + documentID
@@ -623,6 +628,9 @@ func (s *noteService) RenderPage(ctx context.Context, path string, pageIdx int) 
 	if fnpath.Is(path) {
 		return s.renderForestNotePage(ctx, path)
 	}
+	if strings.HasPrefix(path, RemarkablePathPrefix) {
+		return s.renderRemarkablePage(ctx, path, pageIdx)
+	}
 	if s.isBooxPath(path) {
 		return s.renderBooxPage(ctx, path, pageIdx)
 	}
@@ -677,6 +685,95 @@ func (s *noteService) renderForestNotePage(ctx context.Context, path string) (io
 		return nil, "", err
 	}
 	return io.NopCloser(&buf), "image/jpeg", nil
+}
+
+func (s *noteService) renderRemarkablePage(ctx context.Context, path string, pageIdx int) (io.ReadCloser, string, error) {
+	if s.rmReader == nil {
+		return nil, "", fmt.Errorf("remarkable source not available")
+	}
+	documentID := strings.TrimPrefix(path, RemarkablePathPrefix)
+	if documentID == "" {
+		return nil, "", fmt.Errorf("remarkable path missing document id")
+	}
+	if pageIdx < 0 {
+		pageIdx = 0
+	}
+	doc, err := s.rmReader.RenderDocument(ctx, documentID)
+	if err != nil {
+		return nil, "", err
+	}
+	if doc.PageCount > 0 && pageIdx >= doc.PageCount {
+		return nil, "", fmt.Errorf("page index %d out of range", pageIdx)
+	}
+	cachePath := remarkableRenderCachePath(doc, pageIdx)
+	if cachePath != "" {
+		if f, err := os.Open(cachePath); err == nil {
+			return f, "image/jpeg", nil
+		}
+	}
+
+	var base image.Image
+	var pdfJPEG []byte
+	if doc.PDFPath != "" {
+		pdfJPEG, err = pdfrender.RenderPage(doc.PDFPath, pageIdx, 144)
+		if err != nil && len(doc.PageRM) == 0 {
+			return nil, "", fmt.Errorf("render source pdf: %w", err)
+		}
+		if err == nil {
+			base, _, _ = image.Decode(bytes.NewReader(pdfJPEG))
+		}
+	}
+
+	pageID := ""
+	if pageIdx < len(doc.PageOrder) {
+		pageID = doc.PageOrder[pageIdx]
+	}
+	rmBlob, hasRM := doc.PageRM[pageID]
+	if !hasRM && doc.PDFPath != "" && len(pdfJPEG) > 0 {
+		writeRemarkableRenderCache(cachePath, pdfJPEG)
+		return io.NopCloser(bytes.NewReader(pdfJPEG)), "image/jpeg", nil
+	}
+	if !hasRM {
+		return nil, "", fmt.Errorf("remarkable page %d not renderable", pageIdx)
+	}
+
+	rmData, err := os.ReadFile(rmBlob.Path)
+	if err != nil {
+		return nil, "", fmt.Errorf("read remarkable page: %w", err)
+	}
+	parsed, err := rmrender.Parse(rmData)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse remarkable page: %w", err)
+	}
+	img, err := rmrender.RenderPageOn(parsed, base)
+	if err != nil {
+		return nil, "", fmt.Errorf("render remarkable page: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		return nil, "", err
+	}
+	writeRemarkableRenderCache(cachePath, buf.Bytes())
+	return io.NopCloser(&buf), "image/jpeg", nil
+}
+
+func remarkableRenderCachePath(doc rmsource.RenderDocument, pageIdx int) string {
+	if doc.CacheDir == "" || doc.Revision == "" {
+		return ""
+	}
+	id := strings.NewReplacer("/", "_", "\\", "_").Replace(doc.ID)
+	rev := strings.NewReplacer("/", "_", "\\", "_").Replace(doc.Revision)
+	return filepath.Join(doc.CacheDir, id, fmt.Sprintf("%s-page_%d-%s.jpg", rev, pageIdx, remarkableRendererVersion))
+}
+
+func writeRemarkableRenderCache(path string, data []byte) {
+	if path == "" || len(data) == 0 {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0o644)
 }
 
 // ListForestNoteTree returns the live folder tree (roots) plus notebooks that
@@ -1042,9 +1139,17 @@ func (s *noteService) GetRemarkableDocumentDetail(ctx context.Context, documentI
 		Path:            RemarkablePath(d.ID),
 		PageCount:       d.PageCount,
 		FolderPath:      remarkableFolderPath(d.Parent, byID),
-		RenderAvailable: false,
+		RenderAvailable: s.remarkableRenderAvailable(ctx, d.ID),
 		OCRAvailable:    false,
 	}, nil
+}
+
+func (s *noteService) remarkableRenderAvailable(ctx context.Context, documentID string) bool {
+	if s.rmReader == nil {
+		return false
+	}
+	doc, err := s.rmReader.RenderDocument(ctx, documentID)
+	return err == nil && doc.Renderable
 }
 
 // sanitizeFilename keeps a notebook name safe for a Content-Disposition filename,

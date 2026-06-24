@@ -135,3 +135,75 @@ func TestListDocumentTree_LegacyFallback(t *testing.T) {
 		t.Errorf("legacy doc = %+v, want legacy-1/Old Notebook/document", docs[0])
 	}
 }
+
+func TestRenderDocument_NotebookHashTree(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	meta := seedBlob(t, st, "h-meta",
+		`{"visibleName":"This Is a Test","type":"DocumentType","parent":""}`)
+	content := seedBlob(t, st, "h-content", `{
+		"fileType":"notebook",
+		"pageCount":1,
+		"cPages":{"pages":[{"id":"page-1"}]}
+	}`)
+	pageRM := seedBlob(t, st, "h-page-rm", "reMarkable .lines file, version=6          page")
+	pagePNG := seedBlob(t, st, "h-page-png", "png")
+	sub := seedBlob(t, st, "h-sub", indexFile(
+		entryLine(content, "0", "doc-1.content", 0, 100),
+		entryLine(meta, "0", "doc-1.metadata", 0, 100),
+		entryLine(pageRM, "0", "doc-1/page-1.rm", 0, 100),
+		entryLine(pagePNG, "0", "doc-1/page-1/asset.png", 0, 100),
+	))
+	top := seedBlob(t, st, "h-top", indexFile(entryLine(sub, "80000000", "doc-1", 4, 0)))
+	seedBlob(t, st, rootBlobID, top)
+
+	doc, err := st.renderDocument(ctx, "doc-1")
+	if err != nil {
+		t.Fatalf("renderDocument: %v", err)
+	}
+	if doc.Name != "This Is a Test" || doc.FileType != "notebook" || doc.PageCount != 1 || !doc.Renderable {
+		t.Fatalf("doc shape = %+v", doc)
+	}
+	if got := doc.PageOrder; len(got) != 1 || got[0] != "page-1" {
+		t.Fatalf("page order = %v, want [page-1]", got)
+	}
+	if doc.PageRM["page-1"].Hash != pageRM {
+		t.Fatalf("page rm = %+v, want hash %s", doc.PageRM["page-1"], pageRM)
+	}
+	if len(doc.PageAssets["page-1"]) != 1 || doc.PageAssets["page-1"][0].Hash != pagePNG {
+		t.Fatalf("page assets = %+v", doc.PageAssets["page-1"])
+	}
+}
+
+func TestRenderDocument_PDFHashTree(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	meta := seedBlob(t, st, "h-meta",
+		`{"visibleName":"Book","type":"DocumentType","parent":""}`)
+	content := seedBlob(t, st, "h-content", `{
+		"fileType":"pdf",
+		"pageCount":2,
+		"pages":["p1","p2"]
+	}`)
+	pdf := seedBlob(t, st, "h-pdf", "%PDF")
+	sub := seedBlob(t, st, "h-sub", indexFile(
+		entryLine(content, "0", "doc-1.content", 0, 100),
+		entryLine(meta, "0", "doc-1.metadata", 0, 100),
+		entryLine(pdf, "0", "doc-1.pdf", 0, 100),
+	))
+	top := seedBlob(t, st, "h-top", indexFile(entryLine(sub, "80000000", "doc-1", 3, 0)))
+	seedBlob(t, st, rootBlobID, top)
+
+	doc, err := st.renderDocument(ctx, "doc-1")
+	if err != nil {
+		t.Fatalf("renderDocument: %v", err)
+	}
+	if doc.FileType != "pdf" || doc.PageCount != 2 || !doc.Renderable || doc.PDFPath == "" {
+		t.Fatalf("pdf doc shape = %+v", doc)
+	}
+	if got := doc.PageOrder; len(got) != 2 || got[0] != "p1" || got[1] != "p2" {
+		t.Fatalf("page order = %v, want [p1 p2]", got)
+	}
+}

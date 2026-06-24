@@ -13,6 +13,8 @@
 
   {{if .filesError}}
   <div class="empty-state"><p>{{.filesError}}</p></div>
+  {{else if .detailGrid}}
+  {{template "_detail_page_grid" .detailGrid}}
   {{else if .detail}}
   <div class="card">
     <h2>{{.detail.Name}}</h2>

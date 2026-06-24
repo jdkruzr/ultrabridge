@@ -132,7 +132,7 @@ func newStore(db *sql.DB, dataPath string) *store {
 }
 
 func (s *store) ensurePaths() error {
-	for _, rel := range []string{"documents", "blobs"} {
+	for _, rel := range []string{"documents", "blobs", "rendered"} {
 		if err := os.MkdirAll(filepath.Join(s.dataPath, rel), 0o755); err != nil {
 			return err
 		}

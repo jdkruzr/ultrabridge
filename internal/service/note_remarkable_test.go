@@ -3,18 +3,27 @@ package service
 import (
 	"context"
 	"database/sql"
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	rmsource "github.com/sysop/ultrabridge/internal/source/remarkable"
 )
 
 type fakeRMReader struct {
-	docs []rmsource.Document
-	err  error
+	docs      []rmsource.Document
+	renderDoc rmsource.RenderDocument
+	err       error
+	renderErr error
 }
 
 func (f *fakeRMReader) ListDocuments(context.Context) ([]rmsource.Document, error) {
 	return f.docs, f.err
+}
+
+func (f *fakeRMReader) RenderDocument(context.Context, string) (rmsource.RenderDocument, error) {
+	return f.renderDoc, f.renderErr
 }
 
 func TestNoteService_RemarkablePresenceAndFolderListing(t *testing.T) {
@@ -68,10 +77,13 @@ func TestNoteService_RemarkablePresenceAndFolderListing(t *testing.T) {
 
 func TestNoteService_RemarkableDetail(t *testing.T) {
 	s := &noteService{}
-	s.SetRemarkableReader(&fakeRMReader{docs: []rmsource.Document{
-		{ID: "folder-1", Name: "Projects", Type: "folder", Parent: ""},
-		{ID: "doc-b", Name: "Beta", Type: "document", Parent: "folder-1", PageCount: 8},
-	}})
+	s.SetRemarkableReader(&fakeRMReader{
+		docs: []rmsource.Document{
+			{ID: "folder-1", Name: "Projects", Type: "folder", Parent: ""},
+			{ID: "doc-b", Name: "Beta", Type: "document", Parent: "folder-1", PageCount: 8},
+		},
+		renderDoc: rmsource.RenderDocument{ID: "doc-b", Renderable: true},
+	})
 
 	detail, err := s.GetRemarkableDocumentDetail(context.Background(), "doc-b")
 	if err != nil {
@@ -83,13 +95,57 @@ func TestNoteService_RemarkableDetail(t *testing.T) {
 	if len(detail.FolderPath) != 1 || detail.FolderPath[0] != "Projects" {
 		t.Fatalf("folder path = %+v", detail.FolderPath)
 	}
-	if detail.RenderAvailable || detail.OCRAvailable {
-		t.Fatalf("first structural chunk should not advertise render/OCR: %+v", detail)
+	if !detail.RenderAvailable || detail.OCRAvailable {
+		t.Fatalf("detail should advertise render only: %+v", detail)
 	}
 
 	if _, err := s.GetRemarkableDocumentDetail(context.Background(), "missing"); err != sql.ErrNoRows {
 		t.Fatalf("missing detail err = %v, want sql.ErrNoRows", err)
 	}
+}
+
+func TestNoteService_RenderRemarkablePage(t *testing.T) {
+	rmPath := writeMinimalRM(t)
+	s := &noteService{}
+	s.SetRemarkableReader(&fakeRMReader{
+		docs: []rmsource.Document{{ID: "doc-1", Name: "Sketch", Type: "document", PageCount: 1}},
+		renderDoc: rmsource.RenderDocument{
+			ID:         "doc-1",
+			PageCount:  1,
+			PageOrder:  []string{"page-1"},
+			PageRM:     map[string]rmsource.RenderBlob{"page-1": {Hash: "h-page", Path: rmPath}},
+			Renderable: true,
+		},
+	})
+
+	rc, ct, err := s.RenderPage(context.Background(), "remarkable://doc-1", 0)
+	if err != nil {
+		t.Fatalf("RenderPage: %v", err)
+	}
+	defer rc.Close()
+	if ct != "image/jpeg" {
+		t.Fatalf("content type = %q, want image/jpeg", ct)
+	}
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read render: %v", err)
+	}
+	if len(data) < 2 || !strings.HasPrefix(string(data[:2]), "\xff\xd8") {
+		t.Fatalf("render did not produce a JPEG, len=%d", len(data))
+	}
+}
+
+func writeMinimalRM(t *testing.T) string {
+	t.Helper()
+	header := []byte("reMarkable .lines file, version=6")
+	for len(header) < 43 {
+		header = append(header, ' ')
+	}
+	path := t.TempDir() + "/page.rm"
+	if err := os.WriteFile(path, header, 0o644); err != nil {
+		t.Fatalf("write rm: %v", err)
+	}
+	return path
 }
 
 func entryNames(entries []RemarkableEntry) []string {

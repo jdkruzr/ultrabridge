@@ -92,3 +92,11 @@ func (s *Source) ListDocuments(ctx context.Context) ([]Document, error) {
 	}
 	return s.store.listDocumentTree(ctx)
 }
+
+// RenderDocument resolves the synced blob bundle needed to render one document.
+func (s *Source) RenderDocument(ctx context.Context, documentID string) (RenderDocument, error) {
+	if s.store == nil {
+		return RenderDocument{}, fmt.Errorf("remarkable source not started")
+	}
+	return s.store.renderDocument(ctx, documentID)
+}
