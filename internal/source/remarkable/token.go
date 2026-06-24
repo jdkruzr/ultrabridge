@@ -29,8 +29,10 @@ import (
 const (
 	// baseUserScopes grants modern sync (sync:tortoise = "sync15"/v3+, which UB
 	// implements) alongside the integration/screenshare/docedit scopes the
-	// device expects on a Connect account.
-	baseUserScopes = "intgr screenshare docedit sync:tortoise"
+	// device expects on a Connect account. hws advertises Connect handwriting
+	// search; without it the tablet gates the local search UI before it calls
+	// /search/v1/settings.
+	baseUserScopes = "intgr screenshare docedit hws sync:tortoise"
 	hwrUserScopes  = "hwcmail:-1 hwc"
 
 	// userTokenVersion mirrors rmfakecloud's tokenVersion.

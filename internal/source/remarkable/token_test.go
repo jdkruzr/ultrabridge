@@ -13,10 +13,17 @@ func TestUserScopesForConfigAddsHWRWhenConfigured(t *testing.T) {
 		t.Fatalf("scopes without hwr config = %q, should not include hwc", got)
 	}
 	got := userScopesForConfig(Config{HWRApplicationKey: "app-key", HWRHMAC: "hmac-secret"})
-	for _, want := range []string{"intgr", "sync:tortoise", "hwcmail:-1", "hwc"} {
+	for _, want := range []string{"intgr", "sync:tortoise", "hws", "hwcmail:-1", "hwc"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("scopes = %q, missing %q", got, want)
 		}
+	}
+}
+
+func TestUserScopesForConfigAlwaysAdvertisesSearch(t *testing.T) {
+	got := userScopesForConfig(Config{})
+	if !strings.Contains(got, "hws") {
+		t.Fatalf("scopes = %q, missing handwriting search scope", got)
 	}
 }
 
