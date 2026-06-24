@@ -22,6 +22,7 @@ type Source struct {
 	protocol *protocol
 	hub      *hub
 	indexer  *metadataIndexer
+	ocr      *ocrProcessor
 }
 
 // NewSource constructs a reMarkable source from a source row and dependencies.
@@ -58,11 +59,24 @@ func (s *Source) Start(ctx context.Context) error {
 			logger.Warn("remarkable metadata indexing failed", "error", err)
 		}
 	}
-	s.protocol = newProtocol(s.cfg, s.store, logger, s.hub, s.indexer)
+	s.ocr = newOCRProcessor(s.store, ocrDeps{
+		indexer:    s.deps.Indexer,
+		ocrClient:  s.deps.OCRClient,
+		embedder:   s.deps.Embedder,
+		embedStore: s.deps.EmbedStore,
+		embedModel: s.deps.EmbedModel,
+	}, logger)
+	if s.ocr != nil {
+		s.ocr.Start(ctx)
+	}
+	s.protocol = newProtocol(s.cfg, s.store, logger, s.hub, s.indexer, s.ocr)
 	return nil
 }
 
 func (s *Source) Stop() {
+	if s.ocr != nil {
+		s.ocr.Stop()
+	}
 	if s.hub != nil {
 		s.hub.close()
 	}
@@ -99,4 +113,21 @@ func (s *Source) RenderDocument(ctx context.Context, documentID string) (RenderD
 		return RenderDocument{}, fmt.Errorf("remarkable source not started")
 	}
 	return s.store.renderDocument(ctx, documentID)
+}
+
+// ReprocessDocument forces all renderable pages in a document through the
+// server-side fulltext OCR backend.
+func (s *Source) ReprocessDocument(ctx context.Context, documentID string) error {
+	if s.ocr == nil {
+		return fmt.Errorf("remarkable OCR is not configured")
+	}
+	return s.ocr.ReprocessDocument(ctx, documentID)
+}
+
+// OCRStatus returns the render-to-fulltext queue snapshot.
+func (s *Source) OCRStatus(ctx context.Context) (OCRQueueStatus, error) {
+	if s.ocr == nil {
+		return OCRQueueStatus{}, nil
+	}
+	return s.ocr.Status(ctx)
 }

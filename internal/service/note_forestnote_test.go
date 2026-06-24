@@ -58,7 +58,8 @@ func (f *fakeFNReader) LiveNotebookPageIDs(_ context.Context, nb string) ([]stri
 // Delete carry behavior, the rest are no-ops.
 type fakeSearchIndex struct {
 	byPrefix map[string]search.NoteDocument // note_path → doc
-	deleted  []string                       // paths passed to Delete
+	byPath   map[string][]search.NoteDocument
+	deleted  []string // paths passed to Delete
 }
 
 func (f *fakeSearchIndex) Index(context.Context, search.NoteDocument) error { return nil }
@@ -72,8 +73,8 @@ func (f *fakeSearchIndex) Delete(_ context.Context, path string) error {
 func (f *fakeSearchIndex) IndexPage(context.Context, string, int, string, string, string, string) error {
 	return nil
 }
-func (f *fakeSearchIndex) GetContent(context.Context, string) ([]search.NoteDocument, error) {
-	return nil, nil
+func (f *fakeSearchIndex) GetContent(_ context.Context, path string) ([]search.NoteDocument, error) {
+	return f.byPath[path], nil
 }
 func (f *fakeSearchIndex) GetContentByPrefix(_ context.Context, _ string) (map[string]search.NoteDocument, error) {
 	return f.byPrefix, nil

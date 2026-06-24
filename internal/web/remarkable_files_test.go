@@ -75,6 +75,22 @@ func TestAPIv1RemarkableDocumentDetail(t *testing.T) {
 	}
 }
 
+func TestHandleRemarkableReprocess(t *testing.T) {
+	h := newTestHandler()
+	notes := h.notes.(*mockNoteService)
+
+	req := httptest.NewRequest(http.MethodPost, "/files/remarkable/reprocess", strings.NewReader("document=doc-1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("POST /files/remarkable/reprocess = %d body=%s", w.Code, w.Body.String())
+	}
+	if len(notes.rmReprocessed) != 1 || notes.rmReprocessed[0] != "doc-1" {
+		t.Fatalf("rmReprocessed = %v", notes.rmReprocessed)
+	}
+}
+
 func TestSearchPage_RemarkableFacetAndBadge(t *testing.T) {
 	h := newTestHandler()
 	notes := h.notes.(*mockNoteService)

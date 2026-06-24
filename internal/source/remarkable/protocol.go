@@ -33,27 +33,38 @@ type protocol struct {
 	logger  *slog.Logger
 	hub     *hub
 	indexer *metadataIndexer
+	ocr     *ocrProcessor
 }
 
-func newProtocol(cfg Config, store *store, logger *slog.Logger, h *hub, indexer *metadataIndexer) *protocol {
-	return &protocol{cfg: cfg, store: store, logger: logger, hub: h, indexer: indexer}
+func newProtocol(cfg Config, store *store, logger *slog.Logger, h *hub, indexer *metadataIndexer, ocr *ocrProcessor) *protocol {
+	return &protocol{cfg: cfg, store: store, logger: logger, hub: h, indexer: indexer, ocr: ocr}
 }
 
 func (p *protocol) refreshMetadataIndex(ctx context.Context) {
-	if p.indexer == nil {
-		return
+	if p.indexer != nil {
+		if err := p.indexer.indexAll(ctx); err != nil {
+			p.logger.Warn("remarkable metadata indexing failed", "error", err)
+		}
 	}
-	if err := p.indexer.indexAll(ctx); err != nil {
-		p.logger.Warn("remarkable metadata indexing failed", "error", err)
+	if p.ocr != nil {
+		go func() {
+			if err := p.ocr.EnqueueMissingStale(context.Background()); err != nil {
+				p.logger.Warn("remarkable OCR enqueue failed", "error", err)
+			}
+		}()
 	}
 }
 
 func (p *protocol) deleteMetadataIndex(ctx context.Context, id string) {
-	if p.indexer == nil {
-		return
+	if p.indexer != nil {
+		if err := p.indexer.deleteDocument(ctx, id); err != nil {
+			p.logger.Warn("remarkable metadata delete failed", "document_id", id, "error", err)
+		}
 	}
-	if err := p.indexer.deleteDocument(ctx, id); err != nil {
-		p.logger.Warn("remarkable metadata delete failed", "document_id", id, "error", err)
+	if p.ocr != nil {
+		if err := p.ocr.DeleteDocument(ctx, id); err != nil {
+			p.logger.Warn("remarkable OCR delete failed", "document_id", id, "error", err)
+		}
 	}
 }
 

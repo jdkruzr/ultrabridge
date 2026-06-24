@@ -118,6 +118,20 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			payload_path TEXT NOT NULL,
 			updated_at INTEGER NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS remarkable_ocr_jobs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			document_id TEXT NOT NULL,
+			page INTEGER NOT NULL,
+			revision TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			queued_at INTEGER NOT NULL DEFAULT 0,
+			started_at INTEGER NOT NULL DEFAULT 0,
+			finished_at INTEGER NOT NULL DEFAULT 0,
+			UNIQUE(document_id, page)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_remarkable_ocr_jobs_status ON remarkable_ocr_jobs(status, queued_at)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {

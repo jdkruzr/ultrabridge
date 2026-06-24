@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sysop/ultrabridge/internal/search"
 	rmsource "github.com/sysop/ultrabridge/internal/source/remarkable"
 )
 
@@ -18,12 +19,26 @@ type fakeRMReader struct {
 	renderErr error
 }
 
+type fakeRMReprocessor struct {
+	reprocessed []string
+	status      rmsource.OCRQueueStatus
+}
+
 func (f *fakeRMReader) ListDocuments(context.Context) ([]rmsource.Document, error) {
 	return f.docs, f.err
 }
 
 func (f *fakeRMReader) RenderDocument(context.Context, string) (rmsource.RenderDocument, error) {
 	return f.renderDoc, f.renderErr
+}
+
+func (f *fakeRMReprocessor) ReprocessDocument(_ context.Context, documentID string) error {
+	f.reprocessed = append(f.reprocessed, documentID)
+	return nil
+}
+
+func (f *fakeRMReprocessor) OCRStatus(context.Context) (rmsource.OCRQueueStatus, error) {
+	return f.status, nil
 }
 
 func TestNoteService_RemarkablePresenceAndFolderListing(t *testing.T) {
@@ -76,7 +91,12 @@ func TestNoteService_RemarkablePresenceAndFolderListing(t *testing.T) {
 }
 
 func TestNoteService_RemarkableDetail(t *testing.T) {
-	s := &noteService{}
+	s := &noteService{searchIndex: &fakeSearchIndex{byPath: map[string][]search.NoteDocument{
+		"remarkable://doc-b": {
+			{Path: "remarkable://doc-b", Page: -1, BodyText: "metadata should not become a page"},
+			{Path: "remarkable://doc-b", Page: 1, BodyText: "second page text", Source: "api"},
+		},
+	}}}
 	s.SetRemarkableReader(&fakeRMReader{
 		docs: []rmsource.Document{
 			{ID: "folder-1", Name: "Projects", Type: "folder", Parent: ""},
@@ -98,9 +118,32 @@ func TestNoteService_RemarkableDetail(t *testing.T) {
 	if !detail.RenderAvailable || detail.OCRAvailable {
 		t.Fatalf("detail should advertise render only: %+v", detail)
 	}
+	if len(detail.Pages) != 8 || detail.Pages[1].BodyText != "second page text" || detail.Pages[1].Source != "api" {
+		t.Fatalf("detail pages = %+v", detail.Pages)
+	}
 
 	if _, err := s.GetRemarkableDocumentDetail(context.Background(), "missing"); err != sql.ErrNoRows {
 		t.Fatalf("missing detail err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestNoteService_RemarkableReprocessAndStatus(t *testing.T) {
+	reproc := &fakeRMReprocessor{status: rmsource.OCRQueueStatus{Pending: 2, InProgress: 1, Done: 3, Failed: 4}}
+	s := &noteService{}
+	s.SetRemarkableReprocessor(reproc)
+
+	if err := s.ReprocessRemarkableDocument(context.Background(), "doc-1"); err != nil {
+		t.Fatalf("ReprocessRemarkableDocument: %v", err)
+	}
+	if len(reproc.reprocessed) != 1 || reproc.reprocessed[0] != "doc-1" {
+		t.Fatalf("reprocessed = %v", reproc.reprocessed)
+	}
+	status, err := s.GetProcessorStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetProcessorStatus: %v", err)
+	}
+	if status.Remarkable == nil || status.Remarkable.Pending != 2 || status.Remarkable.InProgress != 1 || status.Remarkable.Done != 3 || status.Remarkable.Failed != 4 {
+		t.Fatalf("remarkable status = %+v", status.Remarkable)
 	}
 }
 

@@ -762,6 +762,15 @@
                   fq.push(fn.processed + ' done');
                   parts.push('FN: ' + fq.join(', '));
                 }
+                if (data.remarkable) {
+                  var rm = data.remarkable;
+                  var rq = [];
+                  if (rm.in_progress > 0) rq.push('⚙ ' + rm.in_progress + ' in progress');
+                  if (rm.pending > 0) rq.push(rm.pending + ' queued');
+                  if (rm.failed > 0) rq.push(rm.failed + ' failed');
+                  rq.push(rm.done + ' done');
+                  parts.push('RM: ' + rq.join(', '));
+                }
                 el.textContent = parts.join(' | ');
               }
 
@@ -801,6 +810,16 @@
                     if (fn.pending > 0) s.push(fn.pending + ' queued');
                     if (fn.dropped > 0) s.push(fn.dropped + ' dropped');
                     gParts.push('FN: ' + s.join(', '));
+                  }
+                }
+                if (data.remarkable) {
+                  var rm = data.remarkable;
+                  if (rm.in_progress > 0 || rm.pending > 0 || rm.failed > 0) {
+                    var s = [];
+                    if (rm.in_progress > 0) s.push(rm.in_progress + ' in progress');
+                    if (rm.pending > 0) s.push(rm.pending + ' queued');
+                    if (rm.failed > 0) s.push(rm.failed + ' failed');
+                    gParts.push('RM: ' + s.join(', '));
                   }
                 }
                 if (gParts.length > 0) {

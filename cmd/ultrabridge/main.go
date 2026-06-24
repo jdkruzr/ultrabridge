@@ -757,6 +757,7 @@ func main() {
 		}
 		if rmSource != nil {
 			noteSvc.SetRemarkableReader(rmSource)
+			noteSvc.SetRemarkableReprocessor(rmSource)
 		}
 
 		// 3. Search Service

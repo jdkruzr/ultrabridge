@@ -208,6 +208,7 @@ type mockNoteService struct {
 	rmEntries         []service.RemarkableEntry
 	rmCrumbs          []service.RemarkableCrumb
 	rmDetail          service.RemarkableDocumentDetail
+	rmReprocessed     []string
 }
 
 func (m *mockNoteService) ListFiles(ctx context.Context, path, sort, order string, page, perPage int) ([]service.NoteFile, int, error) {
@@ -331,11 +332,12 @@ func (m *mockNoteService) BulkDelete(ctx context.Context, paths []string) error 
 	m.deletedPaths = append(m.deletedPaths, paths...)
 	return nil
 }
-func (m *mockNoteService) SetEmbedIndex(d service.EmbedIndex)             {}
-func (m *mockNoteService) SetForestNoteReader(r service.ForestNoteReader) {}
-func (m *mockNoteService) HasForestNoteSource() bool                      { return m.forestNoteEnabled }
-func (m *mockNoteService) SetRemarkableReader(r service.RemarkableReader) {}
-func (m *mockNoteService) HasRemarkableSource() bool                      { return m.remarkableEnabled }
+func (m *mockNoteService) SetEmbedIndex(d service.EmbedIndex)                       {}
+func (m *mockNoteService) SetForestNoteReader(r service.ForestNoteReader)           {}
+func (m *mockNoteService) HasForestNoteSource() bool                                { return m.forestNoteEnabled }
+func (m *mockNoteService) SetRemarkableReader(r service.RemarkableReader)           {}
+func (m *mockNoteService) SetRemarkableReprocessor(r service.RemarkableReprocessor) {}
+func (m *mockNoteService) HasRemarkableSource() bool                                { return m.remarkableEnabled }
 func (m *mockNoteService) ListRemarkableDocuments(ctx context.Context) ([]service.RemarkableDocument, error) {
 	out := make([]service.RemarkableDocument, 0, len(m.rmEntries))
 	for _, e := range m.rmEntries {
@@ -348,6 +350,10 @@ func (m *mockNoteService) ListRemarkableFolder(ctx context.Context, folderID, so
 }
 func (m *mockNoteService) GetRemarkableDocumentDetail(ctx context.Context, documentID string) (service.RemarkableDocumentDetail, error) {
 	return m.rmDetail, nil
+}
+func (m *mockNoteService) ReprocessRemarkableDocument(ctx context.Context, documentID string) error {
+	m.rmReprocessed = append(m.rmReprocessed, documentID)
+	return nil
 }
 func (m *mockNoteService) ListForestNoteTree(ctx context.Context) ([]service.ForestNoteTreeNode, []service.ForestNoteNotebook, error) {
 	return m.fnTree, m.fnUnfiled, nil

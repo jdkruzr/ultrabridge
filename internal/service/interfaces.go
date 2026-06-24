@@ -233,19 +233,26 @@ type RemarkableEntry struct {
 	PageCount int    `json:"page_count"`
 }
 
-// RemarkableDocumentDetail is the first structural detail view for a synced
-// reMarkable node. Render/OCR availability stay explicit false until later
-// chunks wire real page rendering and indexing.
+// RemarkablePage is one rendered/OCR'd page in a reMarkable detail view.
+type RemarkablePage struct {
+	Index    int    `json:"index"`
+	BodyText string `json:"body_text,omitempty"`
+	Source   string `json:"source,omitempty"`
+}
+
+// RemarkableDocumentDetail is the structural detail view for a synced
+// reMarkable node.
 type RemarkableDocumentDetail struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Type            string   `json:"type"`
-	Parent          string   `json:"parent"`
-	Path            string   `json:"path"`
-	PageCount       int      `json:"page_count"`
-	FolderPath      []string `json:"folder_path,omitempty"`
-	RenderAvailable bool     `json:"render_available"`
-	OCRAvailable    bool     `json:"ocr_available"`
+	ID              string           `json:"id"`
+	Name            string           `json:"name"`
+	Type            string           `json:"type"`
+	Parent          string           `json:"parent"`
+	Path            string           `json:"path"`
+	PageCount       int              `json:"page_count"`
+	FolderPath      []string         `json:"folder_path,omitempty"`
+	RenderAvailable bool             `json:"render_available"`
+	OCRAvailable    bool             `json:"ocr_available"`
+	Pages           []RemarkablePage `json:"pages,omitempty"`
 }
 
 // EmbeddingJobStatus represents the background processing state.
@@ -258,6 +265,7 @@ type EmbeddingJobStatus struct {
 	ActiveTask     *ActiveTask               `json:"active_task,omitempty"`
 	Boox           *booxpipeline.QueueStatus `json:"boox,omitempty"`
 	ForestNote     *ForestNoteQueueStatus    `json:"forestnote,omitempty"`
+	Remarkable     *RemarkableQueueStatus    `json:"remarkable,omitempty"`
 }
 
 // ForestNoteQueueStatus is the ForestNote sync bridge's work snapshot for
@@ -272,6 +280,14 @@ type ForestNoteQueueStatus struct {
 	Processed int64 `json:"processed"` // pages finished since process start
 	Dropped   int64 `json:"dropped"`   // enqueues lost to channel-full
 	Capacity  int   `json:"capacity"`  // channel buffer size
+}
+
+// RemarkableQueueStatus is the reMarkable render-to-fulltext OCR queue state.
+type RemarkableQueueStatus struct {
+	Pending    int `json:"pending"`
+	InProgress int `json:"in_progress"`
+	Done       int `json:"done"`
+	Failed     int `json:"failed"`
 }
 
 type ActiveTask struct {
@@ -409,11 +425,13 @@ type NoteService interface {
 	// ExportForestNoteNotebookPDF renders a notebook's live pages to a single PDF.
 	ExportForestNoteNotebookPDF(ctx context.Context, notebookID string) (stream io.ReadCloser, filename string, err error)
 
-	// reMarkable (synced cloud-protocol source, metadata-only in this chunk)
+	// reMarkable (synced cloud-protocol source)
 	SetRemarkableReader(r RemarkableReader)
+	SetRemarkableReprocessor(r RemarkableReprocessor)
 	ListRemarkableDocuments(ctx context.Context) ([]RemarkableDocument, error)
 	ListRemarkableFolder(ctx context.Context, folderID, sortField, order string) (crumbs []RemarkableCrumb, entries []RemarkableEntry, err error)
 	GetRemarkableDocumentDetail(ctx context.Context, documentID string) (RemarkableDocumentDetail, error)
+	ReprocessRemarkableDocument(ctx context.Context, documentID string) error
 
 	// Source Presence
 	HasSupernoteSource() bool

@@ -323,6 +323,7 @@ func NewHandler(
 	h.mux.HandleFunc("GET /files/forestnote/render", h.handleForestNoteRender)
 	h.mux.HandleFunc("POST /files/forestnote/delete", h.handleForestNoteDelete)
 	h.mux.HandleFunc("POST /files/forestnote/reprocess", h.handleForestNoteReprocess)
+	h.mux.HandleFunc("POST /files/remarkable/reprocess", h.handleRemarkableReprocess)
 	h.mux.HandleFunc("GET /files/forestnote/export", h.handleForestNoteExport)
 	h.mux.HandleFunc("GET /digests", h.handleDigests)
 	h.mux.HandleFunc("GET /digests/{id}", h.handleDigestDetail)
@@ -716,9 +717,7 @@ func (h *Handler) handleFilesForestNote(w http.ResponseWriter, r *http.Request) 
 	h.renderTemplate(w, r, "files_forestnote", data)
 }
 
-// handleFilesRemarkable renders the metadata-only reMarkable Files tab. Real
-// page rendering/OCR are intentionally left to later chunks; this establishes
-// the first-class source structure and stable remarkable:// paths.
+// handleFilesRemarkable renders the reMarkable Files tab.
 func (h *Handler) handleFilesRemarkable(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -794,6 +793,20 @@ func (h *Handler) handleForestNoteReprocess(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	h.respondEmptyOrRedirect(w, r, "/files/forestnote?notebook="+url.QueryEscape(nb))
+}
+
+// handleRemarkableReprocess re-enqueues a document's pages for render/OCR/index.
+func (h *Handler) handleRemarkableReprocess(w http.ResponseWriter, r *http.Request) {
+	docID := r.FormValue("document")
+	if docID == "" {
+		http.Error(w, "missing document", http.StatusBadRequest)
+		return
+	}
+	if err := h.notes.ReprocessRemarkableDocument(r.Context(), docID); err != nil {
+		http.Error(w, "failed to reprocess document", http.StatusInternalServerError)
+		return
+	}
+	h.respondEmptyOrRedirect(w, r, "/files/remarkable?document="+url.QueryEscape(docID))
 }
 
 // handleForestNoteExport streams a notebook's pages as a single PDF.
@@ -2372,10 +2385,26 @@ func remarkableDetailView(d service.RemarkableDocumentDetail) detailView {
 		folder = strings.Join(d.FolderPath, " / ")
 	}
 	pages := make([]detailPage, 0, d.PageCount)
-	for i := 0; i < d.PageCount; i++ {
+	for i := 0; i < d.PageCount || i < len(d.Pages); i++ {
+		body, source := "", ""
+		if i < len(d.Pages) {
+			body = d.Pages[i].BodyText
+			source = d.Pages[i].Source
+		}
 		pages = append(pages, detailPage{
-			ImgURL:  "/files/render?path=" + url.QueryEscape(d.Path) + "&page=" + strconv.Itoa(i) + "&v=1",
-			Caption: "Page " + strconv.Itoa(i+1),
+			ImgURL:   "/files/render?path=" + url.QueryEscape(d.Path) + "&page=" + strconv.Itoa(i) + "&v=1",
+			Caption:  "Page " + strconv.Itoa(i+1),
+			BodyText: body,
+			Source:   source,
+		})
+	}
+	actions := []detailAction{}
+	if d.OCRAvailable && d.RenderAvailable {
+		actions = append(actions, detailAction{
+			Label:   "Re-OCR",
+			HxPost:  "/files/remarkable/reprocess",
+			Vals:    mustJSON(map[string]string{"document": d.ID}),
+			OnAfter: "if(event.detail.successful){setTimeout(updateProcessorStatus,250);}",
 		})
 	}
 	return detailView{
@@ -2387,6 +2416,7 @@ func remarkableDetailView(d service.RemarkableDocumentDetail) detailView {
 			{Label: "Pages", Value: strconv.Itoa(d.PageCount)},
 			{Label: "Path", Value: d.Path},
 		},
+		Actions:  actions,
 		Pages:    pages,
 		EmptyMsg: "This reMarkable document has no renderable pages yet.",
 	}
