@@ -37,12 +37,12 @@ func RenderPageOn(p Page, base image.Image) (image.Image, error) {
 	}
 
 	for _, st := range p.Strokes {
-		drawStroke(dc, st, w, h)
+		drawStroke(dc, st, w, h, p.CenteredX)
 	}
 	return dc.Image(), nil
 }
 
-func drawStroke(dc *gg.Context, st Stroke, canvasW, canvasH int) {
+func drawStroke(dc *gg.Context, st Stroke, canvasW, canvasH int, centeredX bool) {
 	if len(st.Points) < 2 {
 		return
 	}
@@ -54,19 +54,21 @@ func drawStroke(dc *gg.Context, st Stroke, canvasW, canvasH int) {
 	for i := 0; i < len(st.Points)-1; i++ {
 		p0, p1 := st.Points[i], st.Points[i+1]
 		dc.SetLineWidth(strokeWidth(st, p0, p1))
-		x0, y0 := mapPoint(p0, canvasW, canvasH)
-		x1, y1 := mapPoint(p1, canvasW, canvasH)
+		x0, y0 := mapPoint(p0, canvasW, canvasH, centeredX)
+		x1, y1 := mapPoint(p1, canvasW, canvasH, centeredX)
 		dc.MoveTo(x0, y0)
 		dc.LineTo(x1, y1)
 		dc.Stroke()
 	}
 }
 
-func mapPoint(p Point, canvasW, canvasH int) (float64, float64) {
+func mapPoint(p Point, canvasW, canvasH int, centeredX bool) (float64, float64) {
 	x, y := p.X, p.Y
 	// v6 line coordinates use a centered x-axis (-702..702) for the 1404px
 	// portrait page, so shift them onto the raster canvas.
-	x += defaultWidth / 2
+	if centeredX {
+		x += defaultWidth / 2
+	}
 	sx := float64(canvasW) / defaultWidth
 	sy := float64(canvasH) / defaultHeight
 	return x * sx, y * sy

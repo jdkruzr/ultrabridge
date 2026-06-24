@@ -8,7 +8,8 @@ import (
 )
 
 const (
-	headerText    = "reMarkable .lines file, version=6"
+	headerV6      = "reMarkable .lines file, version=6"
+	headerV5      = "reMarkable .lines file, version=5"
 	headerLen     = 43
 	blockLineItem = 5
 
@@ -24,9 +25,10 @@ const (
 // Page is one parsed reMarkable v6 page. V1 intentionally keeps only the
 // vector strokes needed for image rendering.
 type Page struct {
-	Width   int
-	Height  int
-	Strokes []Stroke
+	Width     int
+	Height    int
+	CenteredX bool
+	Strokes   []Stroke
 }
 
 type Stroke struct {
@@ -47,13 +49,21 @@ type Point struct {
 
 // Parse reads the v6 .rm page format used by current reMarkable firmware.
 func Parse(data []byte) (Page, error) {
-	p := Page{Width: 1404, Height: 1872}
 	if len(data) < headerLen {
-		return p, fmt.Errorf("rm file too small")
+		return Page{Width: 1404, Height: 1872}, fmt.Errorf("rm file too small")
 	}
-	if !bytes.HasPrefix(data, []byte(headerText)) {
-		return p, fmt.Errorf("unsupported rm header")
+	switch {
+	case bytes.HasPrefix(data, []byte(headerV6)):
+		return parseV6(data)
+	case bytes.HasPrefix(data, []byte(headerV5)):
+		return parseV5(data)
+	default:
+		return Page{Width: 1404, Height: 1872}, fmt.Errorf("unsupported rm header")
 	}
+}
+
+func parseV6(data []byte) (Page, error) {
+	p := Page{Width: 1404, Height: 1872, CenteredX: true}
 	r := newReader(data)
 	r.skip(headerLen)
 	for r.remaining() >= 8 {
@@ -79,6 +89,95 @@ func Parse(data []byte) (Page, error) {
 		r.pos = contentEnd
 	}
 	return p, nil
+}
+
+func parseV5(data []byte) (Page, error) {
+	p := Page{Width: 1404, Height: 1872}
+	r := newReader(data)
+	r.skip(headerLen)
+	layerCount, ok := r.u32()
+	if !ok {
+		return p, fmt.Errorf("v5 missing layer count")
+	}
+	for layer := uint32(0); layer < layerCount; layer++ {
+		strokeCount, ok := r.u32()
+		if !ok {
+			return p, fmt.Errorf("v5 layer %d missing stroke count", layer)
+		}
+		for i := uint32(0); i < strokeCount; i++ {
+			st, ok := parseV5Stroke(r)
+			if !ok {
+				return p, fmt.Errorf("v5 stroke %d in layer %d truncated", i, layer)
+			}
+			if len(st.Points) > 0 {
+				p.Strokes = append(p.Strokes, st)
+			}
+		}
+	}
+	return p, nil
+}
+
+func parseV5Stroke(r *reader) (Stroke, bool) {
+	pen, ok := r.u32()
+	if !ok {
+		return Stroke{}, false
+	}
+	color, ok := r.u32()
+	if !ok {
+		return Stroke{}, false
+	}
+	if !r.skip(4) {
+		return Stroke{}, false
+	}
+	width, ok := r.f32()
+	if !ok {
+		return Stroke{}, false
+	}
+	if !r.skip(4) {
+		return Stroke{}, false
+	}
+	segments, ok := r.u32()
+	if !ok {
+		return Stroke{}, false
+	}
+	st := Stroke{PenType: int(pen), Color: int(color), ThicknessScale: 1}
+	for i := uint32(0); i < segments; i++ {
+		x, ok := r.f32()
+		if !ok {
+			return Stroke{}, false
+		}
+		y, ok := r.f32()
+		if !ok {
+			return Stroke{}, false
+		}
+		pressure, ok := r.f32()
+		if !ok {
+			return Stroke{}, false
+		}
+		if !r.skip(4) {
+			return Stroke{}, false
+		}
+		pointWidth, ok := r.f32()
+		if !ok {
+			return Stroke{}, false
+		}
+		if !r.skip(4) {
+			return Stroke{}, false
+		}
+		w := pointWidth
+		if w <= 0 {
+			w = width
+		}
+		st.Points = append(st.Points, Point{
+			X: float64(x),
+			Y: float64(y),
+			// Keep v5 widths on roughly the same scale as v6's uint16 sample
+			// widths before strokeWidth applies the shared renderer scaling.
+			Width:    uint16(maxFloat32(w*10, 1)),
+			Pressure: uint8(clampFloat32(pressure*255, 0, 255)),
+		})
+	}
+	return st, true
 }
 
 func parseLineItem(r *reader) (Stroke, bool) {
@@ -171,6 +270,23 @@ func parsePoints(data []byte) []Point {
 		}
 	}
 	return points
+}
+
+func maxFloat32(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func clampFloat32(v, lo, hi float32) float32 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 type tag struct {

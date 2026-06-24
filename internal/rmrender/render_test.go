@@ -34,14 +34,66 @@ func TestParseAndRenderLineItem(t *testing.T) {
 	}
 }
 
+func TestParseAndRenderV5LineItem(t *testing.T) {
+	data := testV5RMFile()
+	page, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse v5: %v", err)
+	}
+	if page.CenteredX {
+		t.Fatal("v5 page should not use centered x coordinates")
+	}
+	if len(page.Strokes) != 1 || len(page.Strokes[0].Points) != 2 {
+		t.Fatalf("strokes = %+v", page.Strokes)
+	}
+	img, err := RenderPage(page)
+	if err != nil {
+		t.Fatalf("RenderPage v5: %v", err)
+	}
+	if imageBlank(img) {
+		t.Fatal("v5 rendered page appears blank")
+	}
+}
+
 func testRMFile(block []byte) []byte {
 	var out bytes.Buffer
-	header := []byte(headerText)
+	header := []byte(headerV6)
 	out.Write(header)
 	for out.Len() < headerLen {
 		out.WriteByte(' ')
 	}
 	out.Write(block)
+	return out.Bytes()
+}
+
+func testV5RMFile() []byte {
+	var out bytes.Buffer
+	header := []byte(headerV5)
+	out.Write(header)
+	for out.Len() < headerLen {
+		out.WriteByte(' ')
+	}
+	binary.Write(&out, binary.LittleEndian, uint32(1)) // layers
+	binary.Write(&out, binary.LittleEndian, uint32(1)) // strokes
+	binary.Write(&out, binary.LittleEndian, uint32(2)) // pen
+	binary.Write(&out, binary.LittleEndian, uint32(0)) // black
+	binary.Write(&out, binary.LittleEndian, uint32(0))
+	binary.Write(&out, binary.LittleEndian, math.Float32bits(2))
+	binary.Write(&out, binary.LittleEndian, uint32(0))
+	binary.Write(&out, binary.LittleEndian, uint32(2)) // points
+	for _, p := range []struct {
+		x, y, pressure, width float32
+	}{
+		{100, 120, 0.5, 3},
+		{220, 120, 0.5, 3},
+	} {
+		binary.Write(&out, binary.LittleEndian, math.Float32bits(p.x))
+		binary.Write(&out, binary.LittleEndian, math.Float32bits(p.y))
+		binary.Write(&out, binary.LittleEndian, math.Float32bits(p.pressure))
+		binary.Write(&out, binary.LittleEndian, math.Float32bits(0))
+		binary.Write(&out, binary.LittleEndian, math.Float32bits(p.width))
+		binary.Write(&out, binary.LittleEndian, math.Float32bits(0))
+	}
 	return out.Bytes()
 }
 
