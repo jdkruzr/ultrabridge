@@ -165,6 +165,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/official/user/check/exists/server", lh.CheckExistsServer)
 	s.mux.HandleFunc("POST /api/official/user/account/login/equipment", lh.Login)
 	s.mux.HandleFunc("POST /api/official/user/account/login/new", lh.Login)
+	s.mux.HandleFunc("GET /api/official/user/account/login/equipment", lh.LoginProbe)
+	s.mux.HandleFunc("GET /api/official/user/account/login/new", lh.LoginProbe)
 	s.mux.HandleFunc("POST /api/official/system/base/param", handlers.SystemBaseParam)
 	s.mux.HandleFunc("GET /api/query/email/publickey", handlers.EmailPublicKey)
 	s.mux.HandleFunc("POST /api/user/query/token", lh.QueryToken)
@@ -172,6 +174,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/terminal/user/bindEquipment", lh.BindEquipment)
 	s.mux.HandleFunc("POST /api/terminal/equipment/unlink", lh.Unlink)
 	s.mux.HandleFunc("GET /api/file/query/server", lh.FileQueryServer)
+	s.mux.HandleFunc("POST /api/file/query/server", lh.FileQueryServer)
 
 	// Protected probe — requires a valid x-access-token (1b).
 	protect := func(fn http.HandlerFunc) http.Handler {

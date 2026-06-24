@@ -168,3 +168,26 @@ func TestPartnerRoutesMountedWithAuthBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestPartnerPreLoginCompatibilityRoutes(t *testing.T) {
+	srv := newTestServer()
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/official/user/account/login/new"},
+		{http.MethodGet, "/api/official/user/account/login/equipment"},
+		{http.MethodPost, "/api/file/query/server"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s got HTTP %d body %q", tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"success":true`) {
+			t.Fatalf("%s %s should return pre-login success, got %q", tc.method, tc.path, rec.Body.String())
+		}
+	}
+}

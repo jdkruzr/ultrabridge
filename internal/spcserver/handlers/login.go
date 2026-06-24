@@ -86,6 +86,13 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// LoginProbe handles Partner App reachability probes that hit the login URL with
+// GET before the real POST challenge flow. It does not authenticate or mint a
+// token; it only tells the client this SPC-compatible host is alive.
+func (h *LoginHandler) LoginProbe(w http.ResponseWriter, r *http.Request) {
+	envelope.WriteJSON(w, envelope.OK())
+}
+
 // QueryToken handles POST /api/user/query/token: echoes the presented token.
 func (h *LoginHandler) QueryToken(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, dto.QueryTokenVO{
