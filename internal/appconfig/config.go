@@ -17,6 +17,7 @@ import (
 var runtimeKeys = []string{
 	KeySNInjectEnabled,
 	KeySNOCRPrompt,
+	KeyForestNoteOCRPrompt,
 	KeyBooxOCRPrompt,
 	KeyBooxTodoEnabled,
 	KeyBooxTodoPrompt,

@@ -90,7 +90,7 @@ func TestSettingsGroupMembership(t *testing.T) {
 			wantNot: []string{"OCR Configuration", "RAG Search", "<h2>Sources</h2>", "<h2>MCP</h2>", "CalDAV"},
 		},
 		"ai": {
-			want:    []string{"OCR Configuration", "RAG Search", "AI Chat", "config-ocr-model", "embed-enabled"},
+			want:    []string{"OCR Configuration", "Source OCR Prompts", "RAG Search", "AI Chat", "config-ocr-model", "embed-enabled", "forestnote-ocr-prompt"},
 			wantNot: []string{"<h2>Authentication</h2>", "CalDAV", "<h2>MCP</h2>", "<h2>Sources</h2>", "Debugging"},
 		},
 		"integrations": {
@@ -99,7 +99,7 @@ func TestSettingsGroupMembership(t *testing.T) {
 		},
 		"devices": {
 			want:    []string{"<h2>Sources</h2>", "<h2>Supernote</h2>", "<h2>ForestNote</h2>", "<h2>reMarkable</h2>", "<h2>Boox</h2>"},
-			wantNot: []string{"OCR Configuration", "<h2>MCP</h2>", "RAG Search", "<h2>Authentication</h2>"},
+			wantNot: []string{"OCR Configuration", "<h2>MCP</h2>", "RAG Search", "<h2>Authentication</h2>", "forestnote-ocr-prompt", "boox-ocr-prompt", "sn-ocr-prompt"},
 		},
 	}
 
@@ -180,6 +180,23 @@ func TestSettingsSaveRoundTrips(t *testing.T) {
 	}
 	if !cfg.LogVerboseAPI || cfg.CalDAVCollectionName != "My Tasks" {
 		t.Error("section=ai save blanked sibling sections (LogVerboseAPI / CalDAVCollectionName)")
+	}
+
+	postSettingsSave(t, h, url.Values{
+		"section":               {"ocr-prompts"},
+		"sn_ocr_prompt":         {"supernote prompt"},
+		"forestnote_ocr_prompt": {"forestnote prompt"},
+		"boox_ocr_prompt":       {"boox prompt"},
+	})
+	for key, want := range map[string]string{
+		appconfig.KeySNOCRPrompt:         "supernote prompt",
+		appconfig.KeyForestNoteOCRPrompt: "forestnote prompt",
+		appconfig.KeyBooxOCRPrompt:       "boox prompt",
+	} {
+		got, _ := notedb.GetSetting(context.Background(), h.noteDB, key)
+		if got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
 	}
 
 	// Partial PUT /api/config bodies update only their own field (the merge

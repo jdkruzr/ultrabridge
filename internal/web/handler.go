@@ -1278,17 +1278,18 @@ func (h *Handler) settingsData(r *http.Request) map[string]interface{} {
 		tokens, _ := mcpauth.ListTokens(ctx, h.noteDB)
 		data["MCPTokens"], data["MCPTokensEnabled"] = tokens, true
 
-		// Populate Boox-specific runtime settings. The Settings template
-		// references these as top-level fields (not Config.X) because
-		// they're stored in the settings table but not in the Config
-		// struct — read them on demand so the form fields render with
-		// current values.
+		// Runtime source settings live in the settings table but not the
+		// Config struct; read them on demand so forms show current values.
 		data["SNPipelineActive"] = h.notes != nil && h.notes.HasSupernoteSource()
 		data["BooxActive"] = h.notes != nil && h.notes.HasBooxSource()
 		if _, ok := h.sourceRowByType(ctx, "remarkable"); ok {
 			data["RemarkableSourceActive"] = true
 		}
+		snInjectEnabled, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeySNInjectEnabled)
+		snOCRPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeySNOCRPrompt)
 		fnOCRPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyForestNoteOCRPrompt)
+		data["SNInjectEnabled"] = snInjectEnabled != "false"
+		data["SNOCRPrompt"] = snOCRPrompt
 		data["ForestNoteOCRPrompt"] = fnOCRPrompt
 		// Relay-log compaction lives in the ForestNote source row's config_json (not appconfig);
 		// surface whether a source row exists (to gate the checkbox) and its current state (to
@@ -1524,7 +1525,9 @@ func settingsGroupForSection(section string) string {
 	switch section {
 	case "supernote", "ub-spc", "sync", "boox":
 		return "devices"
-	case "ai", "integrations", "system":
+	case "ai", "ocr-prompts":
+		return "ai"
+	case "integrations", "system":
 		return section
 	default:
 		return "devices"
@@ -1536,12 +1539,13 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	cfg := cObj.(*appconfig.Config)
 	switch r.FormValue("section") {
 	case "supernote":
-		// JIIX injection + OCR prompt are runtime-configurable keys read at job
-		// time by the Supernote source (notedb.GetSetting), not Config fields —
-		// write them directly so they take effect without a restart.
+		// JIIX injection is read at job time by the Supernote source
+		// (notedb.GetSetting), not from Config.
 		if h.noteDB != nil {
 			ctx := r.Context()
 			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeySNInjectEnabled, r.FormValue("inject_enabled"))
+			// Back-compat for old forms/bookmarks; the visible prompt editor now
+			// lives in AI & Processing under section=ocr-prompts.
 			if v := r.FormValue("ocr_prompt"); v != "" {
 				_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeySNOCRPrompt, v)
 			}
@@ -1591,10 +1595,12 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 				cfg.SyncBatchLimit = n
 			}
 		}
-		// OCR prompt is a runtime key read per page via closure (no restart);
-		// store it directly like the Boox prompt.
+		// Back-compat for old forms/bookmarks; the visible prompt editor now
+		// lives in AI & Processing under section=ocr-prompts.
 		if h.noteDB != nil {
-			_ = notedb.SetSetting(r.Context(), h.noteDB, appconfig.KeyForestNoteOCRPrompt, r.FormValue("forestnote_ocr_prompt"))
+			if _, ok := r.Form["forestnote_ocr_prompt"]; ok {
+				_ = notedb.SetSetting(r.Context(), h.noteDB, appconfig.KeyForestNoteOCRPrompt, r.FormValue("forestnote_ocr_prompt"))
+			}
 		}
 		// Relay-log compaction is read from the ForestNote SOURCE row's config_json at source Start
 		// (NOT appconfig — unlike SyncBatchLimit above, which only seeds a brand-new row and is a
@@ -1611,6 +1617,13 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		cfg.OllamaURL, cfg.OllamaEmbedModel = r.FormValue("ollama_url"), r.FormValue("ollama_embed_model")
 		cfg.ChatEnabled = r.FormValue("chat_enabled") == "true"
 		cfg.ChatAPIURL, cfg.ChatModel = r.FormValue("chat_api_url"), r.FormValue("chat_model")
+	case "ocr-prompts":
+		if h.noteDB != nil {
+			ctx := r.Context()
+			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeySNOCRPrompt, r.FormValue("sn_ocr_prompt"))
+			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeyForestNoteOCRPrompt, r.FormValue("forestnote_ocr_prompt"))
+			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeyBooxOCRPrompt, r.FormValue("boox_ocr_prompt"))
+		}
 	case "integrations":
 		if v := strings.TrimSpace(r.FormValue("caldav_collection_name")); v != "" {
 			cfg.CalDAVCollectionName = v
@@ -1624,6 +1637,8 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		// processor run without a restart.
 		if h.noteDB != nil {
 			ctx := r.Context()
+			// Back-compat for old forms/bookmarks; the visible prompt editor now
+			// lives in AI & Processing under section=ocr-prompts.
 			if v := r.FormValue("ocr_prompt"); v != "" {
 				_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeyBooxOCRPrompt, v)
 			}

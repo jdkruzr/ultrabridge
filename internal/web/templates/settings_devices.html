@@ -123,10 +123,6 @@
             </select>
         </div>
 
-        <div class="form-group">
-            <label for="sn-ocr-prompt">OCR Prompt</label>
-            <textarea id="sn-ocr-prompt" name="ocr_prompt" rows="3">{{.SNOCRPrompt}}</textarea>
-        </div>
         <button type="submit" class="btn-small">Save Supernote Settings</button>
       </form>
     {{end}}
@@ -270,12 +266,6 @@
       </div>
       {{end}}
 
-      <div class="form-group">
-        <label for="forestnote-ocr-prompt">OCR Prompt</label>
-        <p class="device-info" style="margin-bottom: 0.5rem;">Prompt sent to the vision model when transcribing synced ForestNote pages. Leave empty for the built-in default. Applies without restart.</p>
-        <textarea id="forestnote-ocr-prompt" name="forestnote_ocr_prompt" rows="3">{{.ForestNoteOCRPrompt}}</textarea>
-      </div>
-
       <button type="submit" class="btn-small">Save Sync Settings</button>
     </form>
     {{else}}
@@ -323,13 +313,6 @@
     {{else}}
       <form hx-post="/settings/save" hx-target="#main-content">
         <input type="hidden" name="section" value="boox">
-        <div class="form-group">
-            <label for="boox-ocr-prompt">OCR Prompt</label>
-            <textarea id="boox-ocr-prompt" name="ocr_prompt" rows="3">{{.BooxOCRPrompt}}</textarea>
-        </div>
-
-        <hr>
-
         <div class="form-group">
             <label for="boox-todo-enabled">Red Ink To-Do Extraction</label>
             <p class="device-info" style="margin-bottom: 0.5rem;">When enabled, a second OCR pass looks for red handwriting and creates CalDAV tasks from it.</p>

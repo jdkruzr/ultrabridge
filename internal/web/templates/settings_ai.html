@@ -39,6 +39,32 @@
   </div>
 
   <div class="card">
+    <h2>Source OCR Prompts</h2>
+    <p class="device-info" style="margin-bottom:1rem;">These prompts use the OCR provider and model above. Leave a field empty to use that source's built-in transcription prompt.</p>
+
+    <form hx-post="/settings/save" hx-target="#main-content">
+      <input type="hidden" name="section" value="ocr-prompts">
+
+      <div class="form-group">
+        <label for="sn-ocr-prompt">Supernote prompt override</label>
+        <textarea id="sn-ocr-prompt" name="sn_ocr_prompt" rows="3">{{.SNOCRPrompt}}</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="forestnote-ocr-prompt">ForestNote prompt override</label>
+        <textarea id="forestnote-ocr-prompt" name="forestnote_ocr_prompt" rows="3">{{.ForestNoteOCRPrompt}}</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="boox-ocr-prompt">Boox prompt override</label>
+        <textarea id="boox-ocr-prompt" name="boox_ocr_prompt" rows="3">{{.BooxOCRPrompt}}</textarea>
+      </div>
+
+      <button type="submit" class="btn-small">Save Prompt Overrides</button>
+    </form>
+  </div>
+
+  <div class="card">
     <h2>Search &amp; Chat</h2>
 
     <form hx-post="/settings/save" hx-target="#main-content">
