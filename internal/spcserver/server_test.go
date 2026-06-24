@@ -107,3 +107,64 @@ func TestUploadAuthBoundary(t *testing.T) {
 		t.Errorf("POST /api/oss/upload with bad signature: got %d, want 500", uprec.Code)
 	}
 }
+
+func TestPartnerRoutesMountedWithAuthBoundary(t *testing.T) {
+	srv := newTestServer()
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/file/3/files/list"},
+		{http.MethodPost, "/api/file/list/query"},
+		{http.MethodPost, "/api/file/path/query"},
+		{http.MethodPost, "/api/file/folder/list/query"},
+		{http.MethodPost, "/api/file/list/search"},
+		{http.MethodPost, "/api/file/label/list/search"},
+		{http.MethodPost, "/api/file/folder/add"},
+		{http.MethodPost, "/api/file/download/url"},
+		{http.MethodPost, "/api/file/upload/apply"},
+		{http.MethodPost, "/api/file/3/files/upload/confirm"},
+		{http.MethodPost, "/api/file/upload/finish"},
+		{http.MethodPost, "/api/file/move"},
+		{http.MethodPost, "/api/file/rename"},
+		{http.MethodPost, "/api/file/copy"},
+		{http.MethodPost, "/api/file/delete"},
+		{http.MethodPost, "/api/file/recycle/list/query"},
+		{http.MethodPost, "/api/file/recycle/revert"},
+		{http.MethodPost, "/api/file/recycle/delete"},
+		{http.MethodPost, "/api/file/recycle/clear"},
+		{http.MethodPost, "/api/file/note/to/png"},
+		{http.MethodPost, "/api/file/note/to/pdf"},
+		{http.MethodPost, "/api/file/pdfwithmark/to/pdf"},
+		{http.MethodGet, "/api/query/email/config"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code == http.StatusNotFound {
+			t.Fatalf("%s %s not mounted", tc.method, tc.path)
+		}
+		if !strings.Contains(rec.Body.String(), "E0712") {
+			t.Fatalf("%s %s without token: body %q lacks E0712", tc.method, tc.path, rec.Body.String())
+		}
+	}
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/official/system/base/param"},
+		{http.MethodGet, "/api/query/email/publickey"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code == http.StatusNotFound {
+			t.Fatalf("%s %s not mounted", tc.method, tc.path)
+		}
+		if strings.Contains(rec.Body.String(), "E0712") {
+			t.Fatalf("%s %s should be pre-login, got %q", tc.method, tc.path, rec.Body.String())
+		}
+	}
+}

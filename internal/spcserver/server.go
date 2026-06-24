@@ -165,6 +165,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/official/user/check/exists/server", lh.CheckExistsServer)
 	s.mux.HandleFunc("POST /api/official/user/account/login/equipment", lh.Login)
 	s.mux.HandleFunc("POST /api/official/user/account/login/new", lh.Login)
+	s.mux.HandleFunc("POST /api/official/system/base/param", handlers.SystemBaseParam)
+	s.mux.HandleFunc("GET /api/query/email/publickey", handlers.EmailPublicKey)
 	s.mux.HandleFunc("POST /api/user/query/token", lh.QueryToken)
 	s.mux.HandleFunc("POST /api/user/logout", lh.Logout)
 	s.mux.HandleFunc("POST /api/terminal/user/bindEquipment", lh.BindEquipment)
@@ -176,6 +178,7 @@ func (s *Server) registerRoutes() {
 		return auth.Middleware(s.cfg.JWTSecret, store, fn)
 	}
 	s.mux.Handle("POST /api/user/query", protect(handlers.UserQuery))
+	s.mux.Handle("GET /api/query/email/config", protect(handlers.EmailConfig))
 
 	// Schedule: groups, tasks, sort, summary stubs (1d) — all JWT-protected.
 	sched := &handlers.ScheduleHandler{
@@ -210,16 +213,28 @@ func (s *Server) registerRoutes() {
 		Meter:  capacity.New(s.cfg.FileRoot, s.cfg.QuotaBytes),
 		Logger: s.cfg.Logger,
 	}
+	webFiles := &handlers.WebFileHandler{
+		Root:   s.cfg.FileRoot,
+		Reg:    reg,
+		Logger: s.cfg.Logger,
+	}
 	s.mux.Handle("POST /api/file/2/files/synchronous/start", protect(files.SynchronousStart))
 	s.mux.Handle("POST /api/file/2/files/synchronous/end", protect(files.SynchronousEnd))
 	s.mux.Handle("POST /api/file/2/files/list_folder", protect(files.ListFolder))
 	s.mux.Handle("POST /api/file/3/files/list_folder_v3", protect(files.ListFolderV3))
+	s.mux.Handle("POST /api/file/3/files/list", protect(webFiles.ListByPath))
 	s.mux.Handle("POST /api/file/3/files/query_v3", protect(files.QueryByID))
 	s.mux.Handle("POST /api/file/3/files/query/by/path_v3", protect(files.QueryByPath))
 	s.mux.Handle("POST /api/file/capacity/query", protect(files.CapacityQuery))
 	s.mux.Handle("POST /api/file/2/users/get_space_usage", protect(files.GetSpaceUsage))
 	s.mux.Handle("POST /api/file/2/files/create_folder_v2", protect(files.CreateFolderV2))
 	s.mux.Handle("POST /api/file/2/files/query/deleteApi", protect(files.QueryByIDDeleteAPI))
+	s.mux.Handle("POST /api/file/list/query", protect(webFiles.ListQuery))
+	s.mux.Handle("POST /api/file/path/query", protect(webFiles.PathQuery))
+	s.mux.Handle("POST /api/file/folder/list/query", protect(webFiles.FolderListQuery))
+	s.mux.Handle("POST /api/file/list/search", protect(webFiles.Search))
+	s.mux.Handle("POST /api/file/label/list/search", protect(webFiles.Search))
+	s.mux.Handle("POST /api/file/folder/add", protect(webFiles.FolderAdd))
 
 	// File download (Phase 3) — read path, byte transfer. download_v3 and
 	// generate/download/url mint presigned URLs (JWT-protected business calls);
@@ -233,6 +248,7 @@ func (s *Server) registerRoutes() {
 	}
 	s.mux.Handle("POST /api/file/3/files/download_v3", protect(dl.DownloadV3))
 	s.mux.Handle("POST /api/oss/generate/download/url", protect(dl.GenerateDownloadURL))
+	s.mux.Handle("POST /api/file/download/url", protect(dl.WebDownloadURL))
 	s.mux.HandleFunc("GET /api/oss/download", dl.DownloadStream)
 
 	// File upload (Phase 4) — write path. apply/finish are JWT-protected business
@@ -259,7 +275,10 @@ func (s *Server) registerRoutes() {
 		Logger:      s.cfg.Logger,
 	}
 	s.mux.Handle("POST /api/file/3/files/upload/apply", protect(up.Apply))
+	s.mux.Handle("POST /api/file/upload/apply", protect(up.WebApply))
 	s.mux.Handle("POST /api/file/2/files/upload/finish", protect(up.Finish))
+	s.mux.Handle("POST /api/file/3/files/upload/confirm", protect(up.FinishConfirm))
+	s.mux.Handle("POST /api/file/upload/finish", protect(up.WebFinish))
 	s.mux.HandleFunc("POST /api/oss/upload", up.UploadStream)
 
 	// File mutations (Phase 4c) — delete (soft, to .recycle/), move, copy. All
@@ -276,6 +295,24 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("POST /api/file/3/files/delete_folder_v3", protect(mut.DeleteFolder))
 	s.mux.Handle("POST /api/file/3/files/move_v3", protect(mut.Move))
 	s.mux.Handle("POST /api/file/3/files/copy_v3", protect(mut.Copy))
+	s.mux.Handle("POST /api/file/move", protect(mut.WebMove))
+	s.mux.Handle("POST /api/file/rename", protect(mut.WebRename))
+	s.mux.Handle("POST /api/file/copy", protect(mut.WebCopy))
+	s.mux.Handle("POST /api/file/delete", protect(mut.WebDelete))
+	s.mux.Handle("POST /api/file/recycle/list/query", protect(mut.RecycleList))
+	s.mux.Handle("POST /api/file/recycle/revert", protect(mut.RecycleRevert))
+	s.mux.Handle("POST /api/file/recycle/delete", protect(mut.RecycleDelete))
+	s.mux.Handle("POST /api/file/recycle/clear", protect(mut.RecycleClear))
+
+	conv := &handlers.ConvertHandler{
+		Root:   s.cfg.FileRoot,
+		Reg:    reg,
+		Signer: &oss.Signer{Secret: s.cfg.OssSecret},
+		Logger: s.cfg.Logger,
+	}
+	s.mux.Handle("POST /api/file/note/to/png", protect(conv.NoteToPNG))
+	s.mux.Handle("POST /api/file/note/to/pdf", protect(conv.NoteToPDF))
+	s.mux.Handle("POST /api/file/pdfwithmark/to/pdf", protect(conv.PDFWithMarkToPDF))
 
 	// Digests / "summary" sync (Phase D) — the device-facing F_SummaryController.
 	// All JWT-protected (digests ride the data-sync channel alongside tasks). The
