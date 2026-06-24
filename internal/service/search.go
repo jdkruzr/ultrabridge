@@ -131,6 +131,7 @@ func (s *searchService) SearchAdvanced(ctx context.Context, query string, opts S
 		ModifiedFrom: opts.ModifiedFrom,
 		ModifiedTo:   opts.ModifiedTo,
 		Sort:         opts.Sort,
+		Mode:         normalizeSearchMode(opts.Mode),
 		Limit:        opts.Limit,
 	})
 	if err != nil {
@@ -156,6 +157,15 @@ func (s *searchService) SearchAdvanced(ctx context.Context, query string, opts S
 		})
 	}
 	return results, nil
+}
+
+func normalizeSearchMode(mode string) string {
+	switch mode {
+	case SearchModeKeyword:
+		return rag.SearchModeKeyword
+	default:
+		return rag.SearchModeHybrid
+	}
 }
 
 // makeSnippet builds a short preview from body text, centered on the first

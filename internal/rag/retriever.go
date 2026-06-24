@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,13 @@ const (
 	SourceDigest     = "digest"
 )
 
+const (
+	SearchModeKeyword = "keyword"
+	SearchModeHybrid  = "hybrid"
+)
+
+var titleDatePattern = regexp.MustCompile(`(?:^|[^0-9])([12][0-9]{3})-?([01][0-9])-?([0-3][0-9])(?:[^0-9]|$)`)
+
 // SearchRequest is the input for hybrid search.
 type SearchRequest struct {
 	Query        string
@@ -41,6 +49,7 @@ type SearchRequest struct {
 	ModifiedFrom time.Time
 	ModifiedTo   time.Time
 	Sort         string // relevance|date_asc|date_desc
+	Mode         string // keyword|hybrid; empty = hybrid for compatibility
 	Limit        int    // 0 = default (20)
 }
 
@@ -99,6 +108,10 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 	if limit <= 0 {
 		limit = 20
 	}
+	mode := req.Mode
+	if mode == "" {
+		mode = SearchModeHybrid
+	}
 
 	// Post-merge filters (source/folder/device/date) prune after fusion, so
 	// over-fetch from each leg to keep a full page when a filter is active.
@@ -123,9 +136,9 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 		return nil, fmt.Errorf("fts search: %w", err)
 	}
 
-	// 2. Vector similarity search (if embeddings available and embedder can embed query)
+	// 2. Vector similarity search (if embeddings available, requested, and embedder can embed query)
 	var vecRanked []rankedDoc
-	if r.embedStore != nil && r.embedder != nil {
+	if mode != SearchModeKeyword && r.embedStore != nil && r.embedder != nil {
 		allEmbeddings := r.embedStore.AllEmbeddings()
 		if len(allEmbeddings) > 0 {
 			queryVec, err := r.embedder.Embed(ctx, req.Query)
@@ -255,6 +268,9 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 	if req.Sort == "date_asc" || req.Sort == "date_desc" {
 		sort.SliceStable(results, func(i, j int) bool {
 			a, b := resultSortDate(results[i]), resultSortDate(results[j])
+			if a.IsZero() != b.IsZero() {
+				return !a.IsZero()
+			}
 			if a.Equal(b) {
 				return results[i].Score > results[j].Score
 			}
@@ -329,17 +345,12 @@ func (r *Retriever) enrichResult(ctx context.Context, notePath string, page int,
 		Score:    score,
 	}
 
-	var indexedAt sql.NullInt64
 	err := r.db.QueryRowContext(ctx,
-		`SELECT COALESCE(body_text, ''), COALESCE(title_text, ''), indexed_at FROM note_content WHERE note_path = ? AND page = ?`,
+		`SELECT COALESCE(body_text, ''), COALESCE(title_text, '') FROM note_content WHERE note_path = ? AND page = ?`,
 		notePath, page,
-	).Scan(&result.BodyText, &result.TitleText, &indexedAt)
+	).Scan(&result.BodyText, &result.TitleText)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("query note_content: %w", err)
-	}
-	if indexedAt.Valid && indexedAt.Int64 > 0 {
-		result.ModifiedAt = time.Unix(indexedAt.Int64, 0)
-		result.NoteDate = result.ModifiedAt
 	}
 
 	// Opaque-path sources are classified by their note_path namespace (no
@@ -396,20 +407,19 @@ func (r *Retriever) enrichResult(ctx context.Context, notePath string, page int,
 		result.Device = "reMarkable"
 		docID := strings.TrimPrefix(notePath, "remarkable://")
 		var parentID, modifiedClient sql.NullString
-		var updated sql.NullInt64
 		if err := r.db.QueryRowContext(ctx,
-			`SELECT parent_id, modified_client, updated_at FROM remarkable_documents WHERE id = ? AND deleted = 0`,
+			`SELECT parent_id, modified_client FROM remarkable_documents WHERE id = ? AND deleted = 0`,
 			docID,
-		).Scan(&parentID, &modifiedClient, &updated); err == nil {
+		).Scan(&parentID, &modifiedClient); err == nil {
 			result.LocationID = parentID.String
 			result.Folder = r.remarkableFolderPath(ctx, parentID.String)
 			if t, ok := parseRemarkableTime(modifiedClient.String); ok {
 				result.ModifiedAt = t
-			} else {
-				result.ModifiedAt = unixMilliTime(updated)
 			}
-			result.CreatedAt = result.ModifiedAt
 			result.NoteDate = result.ModifiedAt
+		}
+		if t, ok := parseTitleDate(result.TitleText); ok {
+			result.CreatedAt = t
 		}
 		if result.Folder == "" {
 			result.Folder = metadataFolderLine(result.BodyText)
@@ -515,6 +525,17 @@ func parseRemarkableTime(raw string) (time.Time, bool) {
 		if t, err := time.Parse(layout, raw); err == nil {
 			return t, true
 		}
+	}
+	return time.Time{}, false
+}
+
+func parseTitleDate(title string) (time.Time, bool) {
+	matches := titleDatePattern.FindStringSubmatch(title)
+	if len(matches) != 4 {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse("20060102", matches[1]+matches[2]+matches[3]); err == nil {
+		return t, true
 	}
 	return time.Time{}, false
 }

@@ -11,6 +11,10 @@
           <option value="date_desc" {{if eq .searchSort "date_desc"}}selected{{end}}>Most recent</option>
           <option value="date_asc" {{if eq .searchSort "date_asc"}}selected{{end}}>Earliest first</option>
         </select>
+        <select name="mode" style="width: auto;">
+          <option value="keyword" {{if eq .searchMode "keyword"}}selected{{end}}>Keyword</option>
+          <option value="hybrid" {{if eq .searchMode "hybrid"}}selected{{end}}>Semantic</option>
+        </select>
         <button type="submit">Search</button>
 
         {{if .searchError}}

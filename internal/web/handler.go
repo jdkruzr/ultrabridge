@@ -1013,9 +1013,13 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{"activeTab": "search"}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	opts, selectedSources, submitted := h.searchOptionsFromRequest(r)
+	if opts.Mode == "" {
+		opts.Mode = service.SearchModeKeyword
+	}
 	data["searchQuery"] = query
 	data["searchFolder"] = opts.Folder
 	data["searchSort"] = opts.Sort
+	data["searchMode"] = opts.Mode
 	data["searchCreatedFrom"] = r.URL.Query().Get("created_from")
 	data["searchCreatedTo"] = r.URL.Query().Get("created_to")
 	data["searchModifiedFrom"] = r.URL.Query().Get("modified_from")
@@ -1061,6 +1065,7 @@ func (h *Handler) searchOptionsFromRequest(r *http.Request) (service.SearchOptio
 		CreatedTo:    parseSearchDateEnd(q.Get("created_to")),
 		ModifiedFrom: parseSearchDateStart(q.Get("modified_from")),
 		ModifiedTo:   parseSearchDateEnd(q.Get("modified_to")),
+		Mode:         normalizeSearchMode(q.Get("mode")),
 	}
 	if raw := q.Get("limit"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
@@ -1103,6 +1108,15 @@ func normalizeSearchSort(raw string) string {
 		return raw
 	default:
 		return "relevance"
+	}
+}
+
+func normalizeSearchMode(raw string) string {
+	switch raw {
+	case service.SearchModeKeyword, service.SearchModeHybrid:
+		return raw
+	default:
+		return ""
 	}
 }
 

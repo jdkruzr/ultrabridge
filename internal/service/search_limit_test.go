@@ -54,6 +54,9 @@ func TestSearchService_LimitClamping(t *testing.T) {
 				t.Errorf("retriever Limit: got %d, want %d (caller passed %d)",
 					r.lastReq.Limit, tc.wantOut, tc.in)
 			}
+			if r.lastReq.Mode != rag.SearchModeHybrid {
+				t.Errorf("legacy Search mode = %q, want hybrid", r.lastReq.Mode)
+			}
 		})
 	}
 
@@ -152,6 +155,7 @@ func TestSearchService_AdvancedOptionsPlumbToRetriever(t *testing.T) {
 		CreatedFrom: createdFrom,
 		ModifiedTo:  modifiedTo,
 		Sort:        "date_desc",
+		Mode:        SearchModeKeyword,
 		Limit:       12,
 	})
 	if err != nil {
@@ -159,6 +163,9 @@ func TestSearchService_AdvancedOptionsPlumbToRetriever(t *testing.T) {
 	}
 	if r.lastReq.Sort != "date_desc" || r.lastReq.Limit != 12 {
 		t.Fatalf("sort/limit not plumbed: %+v", r.lastReq)
+	}
+	if r.lastReq.Mode != rag.SearchModeKeyword {
+		t.Fatalf("mode not plumbed: %+v", r.lastReq)
 	}
 	if !r.lastReq.CreatedFrom.Equal(createdFrom) || !r.lastReq.ModifiedTo.Equal(modifiedTo) {
 		t.Fatalf("dates not plumbed: %+v", r.lastReq)

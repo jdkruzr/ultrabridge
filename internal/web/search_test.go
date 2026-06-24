@@ -13,6 +13,7 @@ import (
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/rag"
 	"github.com/sysop/ultrabridge/internal/search"
+	"github.com/sysop/ultrabridge/internal/service"
 )
 
 // fakeRetriever returns canned hybrid-search results for tests.
@@ -142,5 +143,36 @@ func TestSearchPage_AllUncheckedSubmissionShowsValidation(t *testing.T) {
 	}
 	if strings.Contains(body, `value="supernote" checked`) || strings.Contains(body, `value="boox" checked`) {
 		t.Fatalf("unchecked submission should not re-check sources:\n%s", body)
+	}
+}
+
+func TestSearchPage_DefaultsToKeywordMode(t *testing.T) {
+	handler := newTestHandler()
+	req := httptest.NewRequest(http.MethodGet, "/search?q=alpha", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /search = %d", w.Code)
+	}
+	search := handler.search.(*mockSearchService)
+	if search.lastOpts.Mode != service.SearchModeKeyword {
+		t.Fatalf("web search mode = %q, want keyword", search.lastOpts.Mode)
+	}
+	if !strings.Contains(w.Body.String(), `<option value="keyword" selected>Keyword</option>`) {
+		t.Fatalf("keyword option should be selected:\n%s", w.Body.String())
+	}
+}
+
+func TestSearchPage_CanSelectHybridMode(t *testing.T) {
+	handler := newTestHandler()
+	req := httptest.NewRequest(http.MethodGet, "/search?q=alpha&mode=hybrid", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /search hybrid = %d", w.Code)
+	}
+	search := handler.search.(*mockSearchService)
+	if search.lastOpts.Mode != service.SearchModeHybrid {
+		t.Fatalf("web search mode = %q, want hybrid", search.lastOpts.Mode)
 	}
 }

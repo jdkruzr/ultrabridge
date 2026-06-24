@@ -56,6 +56,26 @@ func TestAPISearchSuccess(t *testing.T) {
 	if result.Page != 0 {
 		t.Errorf("Expected page 0, got %v", result.Page)
 	}
+	if searchSvc.lastOpts.Mode != "" {
+		t.Errorf("API search without mode should leave mode empty for service hybrid default, got %q", searchSvc.lastOpts.Mode)
+	}
+}
+
+func TestAPISearch_ModeParamThreadsThrough(t *testing.T) {
+	svc := &mockSearchService{embeddingPipelineConfigured: true}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	broadcaster := logging.NewLogBroadcaster()
+	handler := NewHandler(nil, nil, svc, nil, nil, "", "", logger, broadcaster)
+
+	req := httptest.NewRequest("GET", "/api/search?q=test&mode=keyword", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if svc.lastOpts.Mode != service.SearchModeKeyword {
+		t.Fatalf("API mode = %q, want keyword", svc.lastOpts.Mode)
+	}
 }
 
 // TestAPISearchMissingQ verifies AC3.5: missing q parameter returns 400
@@ -168,7 +188,6 @@ func TestAPIResponseContentType(t *testing.T) {
 		t.Errorf("Expected Content-Type 'application/json', got '%s'", contentType)
 	}
 }
-
 
 // TestAPISearch_LimitParamThreadsThrough is the regression for the
 // QA-found "search_notes ignores limit" bug (UB-1). The handler previously

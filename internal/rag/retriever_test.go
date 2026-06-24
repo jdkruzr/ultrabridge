@@ -544,6 +544,142 @@ func TestRetrieverDateSortNewestAndEarliest(t *testing.T) {
 	}
 }
 
+func TestRetrieverKeywordModeExcludesVectorOnlyCandidates(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	insertTestNote(t, db, "/notes/cambridge.note", 0, "Cambridge", "cambridge project notes")
+	insertTestNote(t, db, "/notes/unrelated.note", 0, "Unrelated", "web development guide")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	embedStore := NewStore(db, logger)
+	mockEmbedder := &mockRetrieverEmbedder{
+		vectors: map[string][]float32{
+			"cambridge": {1, 0, 0},
+		},
+	}
+	embedStore.Save(ctx, "/notes/unrelated.note", 0, 0, []float32{1, 0, 0}, "test-model")
+	retriever := NewRetriever(db, search.New(db), embedStore, mockEmbedder, logger)
+
+	keyword, err := retriever.Search(ctx, SearchRequest{Query: "cambridge", Mode: SearchModeKeyword, Limit: 20})
+	if err != nil {
+		t.Fatalf("keyword Search: %v", err)
+	}
+	gotKeyword := map[string]bool{}
+	for _, r := range keyword {
+		gotKeyword[r.NotePath] = true
+	}
+	if !gotKeyword["/notes/cambridge.note"] {
+		t.Fatalf("keyword results missing lexical match: %+v", keyword)
+	}
+	if gotKeyword["/notes/unrelated.note"] {
+		t.Fatalf("keyword mode included vector-only result: %+v", keyword)
+	}
+
+	hybrid, err := retriever.Search(ctx, SearchRequest{Query: "cambridge", Mode: SearchModeHybrid, Limit: 20})
+	if err != nil {
+		t.Fatalf("hybrid Search: %v", err)
+	}
+	gotHybrid := map[string]bool{}
+	for _, r := range hybrid {
+		gotHybrid[r.NotePath] = true
+	}
+	if !gotHybrid["/notes/unrelated.note"] {
+		t.Fatalf("hybrid mode should include vector-only result: %+v", hybrid)
+	}
+}
+
+func TestRetrieverKeywordDateSortDoesNotPromoteVectorOnlyCandidates(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	oldTime := time.Date(2023, 10, 17, 0, 0, 0, 0, time.UTC)
+	newTime := time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC)
+	insertBooxNoteWithTime(t, db, "/boox/cambridge.note", "Palma2", "Work", "cambridge meeting", oldTime)
+	insertBooxNoteWithTime(t, db, "/boox/unrelated.note", "Palma2", "Work", "web development guide", newTime)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	embedStore := NewStore(db, logger)
+	mockEmbedder := &mockRetrieverEmbedder{
+		vectors: map[string][]float32{
+			"cambridge": {1, 0, 0},
+		},
+	}
+	embedStore.Save(ctx, "/boox/unrelated.note", 0, 0, []float32{1, 0, 0}, "test-model")
+	retriever := NewRetriever(db, search.New(db), embedStore, mockEmbedder, logger)
+
+	results, err := retriever.Search(ctx, SearchRequest{
+		Query: "cambridge",
+		Mode:  SearchModeKeyword,
+		Sort:  "date_desc",
+		Limit: 20,
+	})
+	if err != nil {
+		t.Fatalf("keyword date Search: %v", err)
+	}
+	if len(results) != 1 || results[0].NotePath != "/boox/cambridge.note" {
+		t.Fatalf("keyword date sort results = %+v, want only lexical Cambridge hit", results)
+	}
+}
+
+func TestRetrieverDateSortUnknownDatesLast(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	knownTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	insertBooxNoteWithTime(t, db, "/boox/known.note", "Palma2", "Work", "alpha known", knownTime)
+	insertTestNote(t, db, "/orphan/unknown.note", 0, "Unknown", "alpha unknown")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	retriever := NewRetriever(db, search.New(db), NewStore(db, logger), nil, logger)
+
+	for _, sortMode := range []string{"date_desc", "date_asc"} {
+		results, err := retriever.Search(ctx, SearchRequest{Query: "alpha", Mode: SearchModeKeyword, Sort: sortMode, Limit: 20})
+		if err != nil {
+			t.Fatalf("%s Search: %v", sortMode, err)
+		}
+		if len(results) < 2 || results[len(results)-1].NotePath != "/orphan/unknown.note" {
+			t.Fatalf("%s results = %+v, want unknown date last", sortMode, results)
+		}
+	}
+}
+
+func TestRetrieverRemarkableDatesUseMetadataAndTitleDateOnly(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+	createRemarkableDocumentsTable(t, db)
+
+	insertTestNote(t, db, "remarkable://doc-1", -1, "20231017 Cambridge", "20231017 Cambridge\nFolder: Moffitt / Vendors\nPages: 1")
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO remarkable_documents(id, modified_client, parent_id, updated_at, deleted)
+		 VALUES (?, ?, ?, ?, 0)`,
+		"doc-1", "", "", time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC).UnixMilli())
+	if err != nil {
+		t.Fatalf("insert remarkable doc: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	retriever := NewRetriever(db, search.New(db), NewStore(db, logger), nil, logger)
+	results, err := retriever.Search(ctx, SearchRequest{Query: "Cambridge", Mode: SearchModeKeyword, Limit: 20})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want one rM hit", results)
+	}
+	wantCreated := time.Date(2023, 10, 17, 0, 0, 0, 0, time.UTC)
+	if !results[0].CreatedAt.Equal(wantCreated) {
+		t.Fatalf("CreatedAt = %v, want %v", results[0].CreatedAt, wantCreated)
+	}
+	if !results[0].ModifiedAt.IsZero() {
+		t.Fatalf("ModifiedAt = %v, want zero because updated_at is ingestion time", results[0].ModifiedAt)
+	}
+}
+
 // mockRetrieverEmbedder for testing — returns deterministic vectors
 type mockRetrieverEmbedder struct {
 	vectors map[string][]float32
@@ -558,6 +694,26 @@ func (m *mockRetrieverEmbedder) Embed(ctx context.Context, text string) ([]float
 }
 
 // Helper functions
+
+func createRemarkableDocumentsTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.ExecContext(context.Background(), `CREATE TABLE remarkable_documents (
+		id TEXT PRIMARY KEY,
+		version INTEGER NOT NULL DEFAULT 1,
+		modified_client TEXT NOT NULL DEFAULT '',
+		doc_type TEXT NOT NULL DEFAULT '',
+		visible_name TEXT NOT NULL DEFAULT '',
+		current_page INTEGER NOT NULL DEFAULT 0,
+		bookmarked INTEGER NOT NULL DEFAULT 0,
+		parent_id TEXT NOT NULL DEFAULT '',
+		payload_path TEXT NOT NULL DEFAULT '',
+		deleted INTEGER NOT NULL DEFAULT 0,
+		updated_at INTEGER NOT NULL
+	)`)
+	if err != nil {
+		t.Fatalf("create remarkable_documents: %v", err)
+	}
+}
 
 func insertTestNote(t *testing.T, db *sql.DB, path string, page int, titleText, bodyText string) {
 	ctx := context.Background()

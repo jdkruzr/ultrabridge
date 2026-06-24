@@ -439,6 +439,7 @@ type mockSearchService struct {
 	// want to assert the param plumbing. Zero value when nothing called
 	// Search or when the caller passed 0 (service-default).
 	lastLimit int
+	lastOpts  service.SearchOptions
 }
 
 func (m *mockSearchService) Search(ctx context.Context, query, folder string, sources []string, limit int) ([]service.SearchResult, error) {
@@ -450,6 +451,7 @@ func (m *mockSearchService) Search(ctx context.Context, query, folder string, so
 }
 func (m *mockSearchService) SearchAdvanced(ctx context.Context, query string, opts service.SearchOptions) ([]service.SearchResult, error) {
 	m.lastLimit = opts.Limit
+	m.lastOpts = opts
 	return m.results, nil
 }
 func (m *mockSearchService) Ask(ctx context.Context, question string, sessionID int) (<-chan service.ChatResponse, error) {

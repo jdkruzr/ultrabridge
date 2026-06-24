@@ -474,6 +474,11 @@ type SearchLocationFilter struct {
 	FullPath string
 }
 
+const (
+	SearchModeKeyword = "keyword"
+	SearchModeHybrid  = "hybrid"
+)
+
 // SearchOptions carries optional filters/sort for the richer search UI.
 type SearchOptions struct {
 	Folder       string // legacy exact folder filter
@@ -484,6 +489,7 @@ type SearchOptions struct {
 	ModifiedFrom time.Time
 	ModifiedTo   time.Time
 	Sort         string // relevance|date_asc|date_desc
+	Mode         string // keyword|hybrid; empty keeps legacy hybrid behavior
 	Limit        int
 }
 
