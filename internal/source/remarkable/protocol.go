@@ -95,6 +95,11 @@ func (p *protocol) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/page", p.withUserAuth(p.handleHWR))
 	mux.HandleFunc("POST /convert/v1/handwriting", p.withUserAuth(p.handleHWR))
 
+	mux.HandleFunc("GET /search/v1/settings", p.withUserAuth(p.handleSearchSettings))
+	mux.HandleFunc("GET /search/v1/delta", p.withUserAuth(p.handleSearchDelta))
+	mux.HandleFunc("GET /search/v1/{docId}/{pageId}", p.withUserAuth(p.handleSearchIndex))
+	mux.HandleFunc("POST /search/v1/error", p.withUserAuth(p.handleSearchError))
+
 	mux.HandleFunc("POST /api/v1/signed-urls/downloads", p.withUserAuth(p.handleSignedBlobDownload))
 	mux.HandleFunc("POST /api/v1/signed-urls/uploads", p.withUserAuth(p.handleSignedBlobUpload))
 	mux.HandleFunc("POST /api/v1/sync-complete", p.withUserAuth(p.handleSyncComplete))
