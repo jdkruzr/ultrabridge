@@ -86,6 +86,8 @@ func (p *protocol) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /token/json/2/device/delete", p.handleDeleteDevice)
 	mux.HandleFunc("POST /token/json/3/device/delete", p.handleDeleteDevice)
 	mux.HandleFunc("GET /service/json/1/{service}", p.handleLocateService)
+	mux.HandleFunc("GET /settings/v1/beta", p.handleBetaSettings)
+	mux.HandleFunc("POST /settings/v1/beta", p.handleBetaSettings)
 
 	mux.HandleFunc("PUT /document-storage/json/2/upload/request", p.withUserAuth(p.handleUploadRequest))
 	mux.HandleFunc("PUT /document-storage/json/2/upload/update-status", p.withUserAuth(p.handleUpdateStatus))
@@ -291,6 +293,19 @@ func (p *protocol) handleNullReport(w http.ResponseWriter, r *http.Request) {
 // 0 integrations").
 func (p *protocol) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"integrations": []any{}})
+}
+
+func (p *protocol) handleBetaSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && r.Body != nil {
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		_ = r.Body.Close()
+		if strings.TrimSpace(string(body)) != "" {
+			p.logger.Info("remarkable beta settings request", "body", string(body))
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enrolled": false, "available": true})
 }
 
 func (p *protocol) handleUploadRequest(w http.ResponseWriter, r *http.Request, claims tokenClaims) {

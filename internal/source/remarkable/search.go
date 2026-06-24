@@ -148,8 +148,11 @@ func (p *protocol) handleSearchIndex(w http.ResponseWriter, r *http.Request, _ t
 
 func (p *protocol) handleSearchError(w http.ResponseWriter, r *http.Request, _ tokenClaims) {
 	if r.Body != nil {
-		_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		_ = r.Body.Close()
+		if strings.TrimSpace(string(body)) != "" {
+			p.logger.Warn("remarkable search error report", "body", string(body))
+		}
 	}
 	w.WriteHeader(http.StatusAccepted)
 }

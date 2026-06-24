@@ -36,6 +36,47 @@ func TestNewSource_RequiresDataPath(t *testing.T) {
 	}
 }
 
+func TestProtocol_BetaSettingsProbeIsUnauthenticated(t *testing.T) {
+	db := testDB(t)
+	row := source.SourceRow{
+		Type:       "remarkable",
+		Name:       "RM",
+		ConfigJSON: `{"data_path":"` + t.TempDir() + `","pairing_code":"123456"}`,
+	}
+	src, err := NewSource(db, row, source.SharedDeps{})
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(src.Stop)
+
+	mux := http.NewServeMux()
+	src.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/settings/v1/beta", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET beta settings = %d body=%s", w.Code, w.Body.String())
+	}
+	var got map[string]bool
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode beta settings: %v", err)
+	}
+	if got["enrolled"] || !got["available"] {
+		t.Fatalf("beta settings = %+v", got)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/settings/v1/beta", strings.NewReader(`{"enrolled":true}`))
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST beta settings = %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestProtocol_MultiDeviceRootConverges(t *testing.T) {
 	db := testDB(t)
 	row := source.SourceRow{
