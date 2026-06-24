@@ -130,6 +130,12 @@ func TestStoreListSearchPagesFiltersAndMapsRemarkableOCR(t *testing.T) {
 	}
 }
 
+func TestSearchIndexVersionMatchesModernDeviceDB(t *testing.T) {
+	if searchIndexVersion != 4 {
+		t.Fatalf("searchIndexVersion = %d, want 4", searchIndexVersion)
+	}
+}
+
 func TestProtocolSearchEndpointsExposeRemarkableOnlyIndexes(t *testing.T) {
 	db, err := notedb.Open(context.Background(), filepath.Join(t.TempDir(), "ultrabridge.db"))
 	if err != nil {
