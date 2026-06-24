@@ -209,15 +209,38 @@ func (h *FileHandler) QueryByPath(w http.ResponseWriter, r *http.Request) {
 	vo := dto.FileQueryByPathLocalVO{BaseVO: envelope.OK(), EquipmentNo: req.EquipmentNo}
 
 	if h.Root != "" {
-		if abs, err := mapping.SafeResolve(h.Reg.Root(), req.Path); err == nil {
-			if _, statErr := os.Lstat(abs); statErr == nil {
-				if e, err := mapping.EntryFor(r.Context(), h.Root, abs, h.Reg); err == nil {
-					vo.EntriesVO = &e
-				}
+		if abs, ok := h.resolveQueryPath(req.Path); ok {
+			if e, err := mapping.EntryFor(r.Context(), h.Root, abs, h.Reg); err == nil {
+				vo.EntriesVO = &e
 			}
 		}
 	}
 	envelope.WriteJSON(w, vo)
+}
+
+func (h *FileHandler) resolveQueryPath(reqPath string) (string, bool) {
+	for _, p := range queryPathCandidates(reqPath) {
+		abs, err := mapping.SafeResolve(h.Reg.Root(), p)
+		if err != nil {
+			continue
+		}
+		if _, statErr := os.Lstat(abs); statErr == nil {
+			return abs, true
+		}
+	}
+	return "", false
+}
+
+func queryPathCandidates(reqPath string) []string {
+	out := []string{reqPath}
+	rel := strings.TrimPrefix(reqPath, "/")
+	if rest, ok := strings.CutPrefix(rel, "Note/"); ok {
+		out = append(out, "/NOTE/Note/"+rest)
+	}
+	if rest, ok := strings.CutPrefix(rel, "Document/"); ok {
+		out = append(out, "/DOCUMENT/Document/"+rest)
+	}
+	return out
 }
 
 // CapacityQuery serves /api/file/capacity/query (the variant the device hits):

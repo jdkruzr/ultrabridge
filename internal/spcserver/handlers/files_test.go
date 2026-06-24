@@ -284,6 +284,39 @@ func TestQueryByPathFoundAndDoubleSlash(t *testing.T) {
 	}
 }
 
+func TestQueryByPathResolvesDigestSourceAliases(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"NOTE/Note/Personal", "DOCUMENT/Document"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "NOTE/Note/Personal/dinner.note"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "DOCUMENT/Document/book.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newFileHandler(t, root)
+
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{"Note/Personal/dinner.note", "/NOTE/Note/Personal/dinner.note"},
+		{"/Document/book.pdf", "/DOCUMENT/Document/book.pdf"},
+	} {
+		out := decodeMap(t, h.QueryByPath, `{"path":"`+tc.path+`"}`)
+		e, ok := out["entriesVO"].(map[string]any)
+		if !ok {
+			t.Fatalf("entriesVO missing for alias %q: %v", tc.path, out["entriesVO"])
+		}
+		if e["path_display"] != tc.want {
+			t.Errorf("alias %q path_display = %v; want %s", tc.path, e["path_display"], tc.want)
+		}
+	}
+}
+
 // TestQueryByPathMissingAndEscape: a non-existent path and a traversal attempt
 // both return success with null entriesVO (never a 500).
 func TestQueryByPathMissingAndEscape(t *testing.T) {
