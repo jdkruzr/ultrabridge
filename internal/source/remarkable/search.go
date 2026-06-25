@@ -95,8 +95,8 @@ func (p *protocol) handleSearchDelta(w http.ResponseWriter, r *http.Request, _ t
 		changed = append(changed, searchPageChange{
 			DeltaID:    newSearchDeltaID(),
 			Generation: row.Generation,
-			DocumentID: row.DocumentID,
-			PageID:     row.PageID,
+			DocumentID: compactSearchID(row.DocumentID),
+			PageID:     compactSearchID(row.PageID),
 		})
 	}
 
@@ -197,15 +197,24 @@ func (s *store) listSearchPages(ctx context.Context, since int64, limit int) ([]
 func (s *store) getSearchPage(ctx context.Context, docID, pageID string) (searchPageRow, bool, error) {
 	doc, err := s.renderDocument(ctx, docID)
 	if errors.Is(err, errDocumentNotFound) {
-		return searchPageRow{}, false, nil
+		var ok bool
+		doc, ok, err = s.renderDocumentBySearchID(ctx, docID)
+		if err != nil {
+			return searchPageRow{}, false, err
+		}
+		if !ok {
+			return searchPageRow{}, false, nil
+		}
+		docID = doc.ID
 	}
 	if err != nil {
 		return searchPageRow{}, false, err
 	}
 	page := -1
 	for i, candidate := range doc.PageOrder {
-		if candidate == pageID {
+		if candidate == pageID || compactSearchID(candidate) == pageID {
 			page = i
+			pageID = candidate
 			break
 		}
 	}
@@ -233,6 +242,43 @@ func (s *store) getSearchPage(ctx context.Context, docID, pageID string) (search
 		return searchPageRow{}, false, nil
 	}
 	return row, true, nil
+}
+
+func (s *store) renderDocumentBySearchID(ctx context.Context, searchID string) (RenderDocument, bool, error) {
+	rootRec, err := s.getBlob(ctx, rootBlobID)
+	if errors.Is(err, errBlobNotFound) {
+		return RenderDocument{}, false, nil
+	}
+	if err != nil {
+		return RenderDocument{}, false, err
+	}
+	topHashRaw, err := osReadFile(rootRec.Path)
+	if err != nil {
+		return RenderDocument{}, false, err
+	}
+	topHash := strings.TrimSpace(string(topHashRaw))
+	if topHash == "" {
+		return RenderDocument{}, false, nil
+	}
+	topData, err := s.readBlob(ctx, topHash)
+	if err != nil {
+		return RenderDocument{}, false, nil
+	}
+	topEntries, err := parseIndex(topData)
+	if err != nil {
+		return RenderDocument{}, false, fmt.Errorf("parse top index: %w", err)
+	}
+	for _, entry := range topEntries {
+		if compactSearchID(entry.EntryName) != searchID {
+			continue
+		}
+		doc, err := s.renderDocument(ctx, entry.EntryName)
+		if errors.Is(err, errDocumentNotFound) {
+			return RenderDocument{}, false, nil
+		}
+		return doc, err == nil, err
+	}
+	return RenderDocument{}, false, nil
 }
 
 type searchRowScanner interface {
@@ -326,4 +372,17 @@ func newSearchDeltaID() string {
 		return fmt.Sprintf("delta-%d", len(b))
 	}
 	return hex.EncodeToString(b[:])
+}
+
+func compactSearchID(id string) string {
+	parts := strings.Split(id, "-")
+	if len(parts) != 5 || len(parts[0]) != 8 || len(parts[1]) != 4 || len(parts[2]) != 4 || len(parts[3]) != 4 || len(parts[4]) != 12 {
+		return id
+	}
+	for _, part := range parts {
+		if _, err := hex.DecodeString(part); err != nil {
+			return id
+		}
+	}
+	return strings.Join(parts, "")
 }

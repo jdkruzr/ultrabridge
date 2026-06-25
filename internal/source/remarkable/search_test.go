@@ -264,3 +264,60 @@ func TestProtocolSearchEndpointsExposeRemarkableOnlyIndexes(t *testing.T) {
 		t.Fatalf("search error = %d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestProtocolSearchEndpointsCompactUUIDsForPaperPro(t *testing.T) {
+	db, err := notedb.Open(context.Background(), filepath.Join(t.TempDir(), "ultrabridge.db"))
+	if err != nil {
+		t.Fatalf("open notedb: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	row := source.SourceRow{
+		Type:       "remarkable",
+		Name:       "RM",
+		ConfigJSON: `{"data_path":"` + t.TempDir() + `","pairing_code":"123456"}`,
+	}
+	src, err := NewSource(db, row, source.SharedDeps{})
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(src.Stop)
+
+	docID := "511007fc-5491-491a-baa8-d912b9014457"
+	pageID := "0e0ae8be-61b8-4cf0-839e-64ed92d12eea"
+	seedSearchNotebook(t, src.store, docID, []string{pageID})
+	insertSearchContent(t, src.store, 20, remarkablePath(docID), 0, "compact uuid search", 200)
+
+	mux := http.NewServeMux()
+	src.RegisterRoutes(mux)
+	userToken := pairUserToken(t, mux, "rm-device-search", "reMarkable Paper Pro")
+
+	req := httptest.NewRequest(http.MethodGet, "/search/v1/delta", nil)
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delta = %d body=%s", w.Code, w.Body.String())
+	}
+	var delta searchDeltaResponse
+	if err := json.NewDecoder(w.Body).Decode(&delta); err != nil {
+		t.Fatalf("decode delta: %v", err)
+	}
+	if len(delta.Changed) != 1 {
+		t.Fatalf("changed = %d, want 1", len(delta.Changed))
+	}
+	change := delta.Changed[0]
+	if change.DocumentID != compactSearchID(docID) || change.PageID != compactSearchID(pageID) {
+		t.Fatalf("change IDs = %+v, want compact IDs", change)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/search/v1/"+change.DocumentID+"/"+change.PageID, nil)
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("compact page index = %d body=%s", w.Code, w.Body.String())
+	}
+}
