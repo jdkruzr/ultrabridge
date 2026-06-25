@@ -106,7 +106,7 @@ func TestProtocol_DeviceTelemetryAndMDMProbesAreUnauthenticated(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/mdm/devices/v0/instruction?empty=true&managed=unknown", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusNoContent {
+	if w.Code != http.StatusNotFound {
 		t.Fatalf("GET MDM instruction = %d body=%s", w.Code, w.Body.String())
 	}
 }

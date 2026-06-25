@@ -292,7 +292,7 @@ func (p *protocol) handleNullReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *protocol) handleMDMInstruction(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNoContent)
+	http.NotFound(w, r)
 }
 
 // handleIntegrations returns an empty third-party integration list. UB has no
