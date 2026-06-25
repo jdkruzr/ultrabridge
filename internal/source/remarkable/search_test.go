@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -133,6 +134,33 @@ func TestStoreListSearchPagesFiltersAndMapsRemarkableOCR(t *testing.T) {
 func TestSearchIndexVersionMatchesModernDeviceDB(t *testing.T) {
 	if searchIndexVersion != 4 {
 		t.Fatalf("searchIndexVersion = %d, want 4", searchIndexVersion)
+	}
+}
+
+func TestDefaultSearchDeltaLimitCoversInitialBackfill(t *testing.T) {
+	st := newSearchTestDB(t)
+	ctx := context.Background()
+	pages := make([]string, 101)
+	for i := range pages {
+		pages[i] = fmt.Sprintf("page-%03d", i)
+	}
+	seedSearchNotebook(t, st, "doc-1", pages)
+	for i := range pages {
+		insertSearchContent(t, st, int64(i+1), remarkablePath("doc-1"), i, fmt.Sprintf("handwriting page %d", i), int64(100+i))
+	}
+
+	rows, hasMore, err := st.listSearchPages(ctx, 0, searchPageSize)
+	if err != nil {
+		t.Fatalf("listSearchPages: %v", err)
+	}
+	if hasMore {
+		t.Fatal("default device delta limit returned hasMore=true for 101-page initial backfill")
+	}
+	if len(rows) != len(pages) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(pages))
+	}
+	if rows[100].PageID != "page-100" {
+		t.Fatalf("last row page ID = %q, want page-100", rows[100].PageID)
 	}
 }
 
