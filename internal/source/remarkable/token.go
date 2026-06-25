@@ -130,12 +130,23 @@ func newUserJWT(jti, account string, dc tokenClaims, scopes string, ttl time.Dur
 // It parses unverified (see file comment); ok is false when the bearer is not a
 // JWT (e.g. a legacy opaque token), letting callers fall back to a direct lookup.
 func parseUserJTI(token string) (jti string, ok bool) {
-	var claims userTokenClaims
-	if _, _, err := jwt.NewParser().ParseUnverified(token, &claims); err != nil {
+	claims, ok := parseUserClaims(token)
+	if !ok {
 		return "", false
 	}
 	if claims.ID == "" {
 		return "", false
 	}
 	return claims.ID, true
+}
+
+func parseUserClaims(token string) (userTokenClaims, bool) {
+	var claims userTokenClaims
+	if _, _, err := jwt.NewParser().ParseUnverified(token, &claims); err != nil {
+		return userTokenClaims{}, false
+	}
+	if claims.ID == "" {
+		return userTokenClaims{}, false
+	}
+	return claims, true
 }

@@ -83,6 +83,7 @@ func (p *protocol) register(mux *http.ServeMux) {
 	// shared endpoint returns 200, which satisfies the device's liveness probe.
 	mux.HandleFunc("POST /token/json/2/device/new", p.handleNewDevice)
 	mux.HandleFunc("POST /token/json/2/user/new", p.handleNewUserToken)
+	mux.HandleFunc("POST /token/json/3/user/new", p.handleNewUserToken)
 	mux.HandleFunc("POST /token/json/2/device/delete", p.handleDeleteDevice)
 	mux.HandleFunc("POST /token/json/3/device/delete", p.handleDeleteDevice)
 	mux.HandleFunc("GET /service/json/1/{service}", p.handleLocateService)
@@ -713,8 +714,15 @@ func (p *protocol) userClaims(ctx context.Context, token string) (tokenClaims, e
 	// The device returns the user token as a JWT carrying the DB token id as
 	// its jti; validate that id against the store. Fall back to a direct lookup
 	// for legacy opaque tokens (and so a non-JWT bearer still fails cleanly).
-	if jti, ok := parseUserJTI(token); ok {
-		return p.store.loadToken(ctx, jti, "user")
+	if jwtClaims, ok := parseUserClaims(token); ok {
+		claims, err := p.store.loadToken(ctx, jwtClaims.ID, "user")
+		if err == nil {
+			return claims, nil
+		}
+		if errors.Is(err, errTokenNotFound) {
+			return p.store.recoverUserToken(ctx, jwtClaims)
+		}
+		return tokenClaims{}, err
 	}
 	return p.store.loadToken(ctx, token, "user")
 }

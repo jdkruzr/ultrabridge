@@ -77,6 +77,71 @@ func TestProtocol_BetaSettingsProbeIsUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestProtocol_UserTokenV3AliasAndCachedJWTRecovery(t *testing.T) {
+	db := testDB(t)
+	row := source.SourceRow{
+		Type:       "remarkable",
+		Name:       "RM",
+		ConfigJSON: `{"data_path":"` + t.TempDir() + `","pairing_code":"123456"}`,
+	}
+	src, err := NewSource(db, row, source.SharedDeps{})
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(src.Stop)
+
+	mux := http.NewServeMux()
+	src.RegisterRoutes(mux)
+
+	body, _ := json.Marshal(map[string]string{
+		"code":       "123456",
+		"deviceDesc": "reMarkable Paper Pro",
+		"deviceID":   "rm-device-a",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/token/json/2/device/new", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("device token = %d body=%s", w.Code, w.Body.String())
+	}
+	deviceToken := w.Body.String()
+
+	req = httptest.NewRequest(http.MethodPost, "/token/json/3/user/new", nil)
+	req.Header.Set("Authorization", "Bearer "+deviceToken)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("v3 user token = %d body=%s", w.Code, w.Body.String())
+	}
+	userToken := w.Body.String()
+	jti, ok := parseUserJTI(userToken)
+	if !ok {
+		t.Fatalf("user token did not parse as JWT")
+	}
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM remarkable_tokens WHERE token = ?`, jti); err != nil {
+		t.Fatalf("delete user token row: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/search/v1/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+userToken)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("search settings after token recovery = %d body=%s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM remarkable_tokens WHERE token = ? AND token_kind = 'user'`, jti).Scan(&count); err != nil {
+		t.Fatalf("count recovered token: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("recovered token count = %d, want 1", count)
+	}
+}
+
 func TestProtocol_MultiDeviceRootConverges(t *testing.T) {
 	db := testDB(t)
 	row := source.SourceRow{

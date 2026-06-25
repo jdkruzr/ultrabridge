@@ -229,6 +229,65 @@ func (s *store) loadToken(ctx context.Context, token, kind string) (tokenClaims,
 	return claims, nil
 }
 
+func (s *store) recoverUserToken(ctx context.Context, jwtClaims userTokenClaims) (tokenClaims, error) {
+	jti := strings.TrimSpace(jwtClaims.ID)
+	deviceID := strings.TrimSpace(jwtClaims.DeviceID)
+	if jti == "" || deviceID == "" || jwtClaims.ExpiresAt == nil {
+		return tokenClaims{}, errTokenNotFound
+	}
+	now := time.Now()
+	if !jwtClaims.ExpiresAt.After(now) {
+		return tokenClaims{}, errTokenNotFound
+	}
+	if jwtClaims.NotBefore != nil && jwtClaims.NotBefore.After(now.Add(time.Minute)) {
+		return tokenClaims{}, errTokenNotFound
+	}
+
+	var deviceDesc string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT device_desc
+		FROM remarkable_devices
+		WHERE device_id = ?`,
+		deviceID,
+	).Scan(&deviceDesc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tokenClaims{}, errTokenNotFound
+	}
+	if err != nil {
+		return tokenClaims{}, err
+	}
+
+	if desc := strings.TrimSpace(jwtClaims.DeviceDesc); desc != "" {
+		deviceDesc = desc
+	}
+	scopes := strings.TrimSpace(jwtClaims.Scopes)
+	if scopes == "" {
+		scopes = baseUserScopes
+	}
+	created := now.UnixMilli()
+	expires := jwtClaims.ExpiresAt.Time.UnixMilli()
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO remarkable_tokens(token, token_kind, device_id, device_desc, scopes, expires_at, created_at)
+		VALUES(?, 'user', ?, ?, ?, ?, ?)
+		ON CONFLICT(token) DO UPDATE SET
+			token_kind = 'user',
+			device_id = excluded.device_id,
+			device_desc = excluded.device_desc,
+			scopes = excluded.scopes,
+			expires_at = excluded.expires_at`,
+		jti, deviceID, deviceDesc, scopes, expires, created,
+	)
+	if err != nil {
+		return tokenClaims{}, err
+	}
+	return tokenClaims{
+		UserID:     "remarkable",
+		DeviceID:   deviceID,
+		DeviceDesc: deviceDesc,
+		Scopes:     scopes,
+	}, nil
+}
+
 func (s *store) issuePresigned(ctx context.Context, target presignedTarget, ttl time.Duration) (string, error) {
 	token, err := randomToken()
 	if err != nil {
