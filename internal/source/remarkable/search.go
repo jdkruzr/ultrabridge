@@ -34,11 +34,15 @@ type searchDeltaResponse struct {
 }
 
 type searchPageChange struct {
-	DeltaID    string `json:"deltaId"`
-	Generation int64  `json:"generation"`
-	DocumentID string `json:"documentId,omitempty"`
-	PageID     string `json:"pageId"`
-	Deleted    bool   `json:"deleted,omitempty"`
+	DeltaID    string          `json:"deltaId"`
+	Generation int64           `json:"generation"`
+	DocumentID searchLibraryID `json:"documentId"`
+	PageID     string          `json:"pageId"`
+	Deleted    bool            `json:"deleted,omitempty"`
+}
+
+type searchLibraryID struct {
+	EntryID string `json:"entryId"`
 }
 
 type searchIndexResponse struct {
@@ -95,8 +99,8 @@ func (p *protocol) handleSearchDelta(w http.ResponseWriter, r *http.Request, _ t
 		changed = append(changed, searchPageChange{
 			DeltaID:    newSearchDeltaID(),
 			Generation: row.Generation,
-			DocumentID: compactSearchID(row.DocumentID),
-			PageID:     compactSearchID(row.PageID),
+			DocumentID: searchLibraryID{EntryID: row.DocumentID},
+			PageID:     row.PageID,
 		})
 	}
 

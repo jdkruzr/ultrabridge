@@ -219,7 +219,7 @@ func TestProtocolSearchEndpointsExposeRemarkableOnlyIndexes(t *testing.T) {
 		t.Fatalf("delta = %+v", delta)
 	}
 	change := delta.Changed[0]
-	if change.DocumentID != "doc-1" || change.PageID != "page-a" || change.Generation == 0 || change.DeltaID == "" {
+	if change.DocumentID.EntryID != "doc-1" || change.PageID != "page-a" || change.Generation == 0 || change.DeltaID == "" {
 		t.Fatalf("change = %+v", change)
 	}
 
@@ -262,7 +262,7 @@ func TestProtocolSearchEndpointsExposeRemarkableOnlyIndexes(t *testing.T) {
 	}
 }
 
-func TestProtocolSearchEndpointsCompactUUIDsForPaperPro(t *testing.T) {
+func TestProtocolSearchEndpointsExposeLibraryIDsForPaperPro(t *testing.T) {
 	db, err := notedb.Open(context.Background(), filepath.Join(t.TempDir(), "ultrabridge.db"))
 	if err != nil {
 		t.Fatalf("open notedb: %v", err)
@@ -306,11 +306,11 @@ func TestProtocolSearchEndpointsCompactUUIDsForPaperPro(t *testing.T) {
 		t.Fatalf("changed = %d, want 1", len(delta.Changed))
 	}
 	change := delta.Changed[0]
-	if change.DocumentID != compactSearchID(docID) || change.PageID != compactSearchID(pageID) {
-		t.Fatalf("change IDs = %+v, want compact IDs", change)
+	if change.DocumentID.EntryID != docID || change.PageID != pageID {
+		t.Fatalf("change IDs = %+v, want canonical IDs", change)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/search/v1/"+change.DocumentID+"/"+change.PageID, nil)
+	req = httptest.NewRequest(http.MethodGet, "/search/v1/"+change.DocumentID.EntryID+"/"+change.PageID, nil)
 	req.Header.Set("Authorization", "Bearer "+userToken)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
