@@ -100,7 +100,7 @@ func (p *protocol) handleSearchDelta(w http.ResponseWriter, r *http.Request, _ t
 		})
 	}
 
-	generation := rows[len(rows)-1].Generation
+	generation := rows[0].Generation
 	w.Header().Set("ETag", strconv.FormatInt(generation, 10))
 	writeJSON(w, http.StatusOK, searchDeltaResponse{
 		Version:    searchIndexVersion,
@@ -165,7 +165,7 @@ func (s *store) listSearchPages(ctx context.Context, since int64, limit int) ([]
 		SELECT id, note_path, page, COALESCE(body_text, ''), indexed_at
 		FROM note_content
 		WHERE note_path LIKE ? AND page >= 0
-		ORDER BY indexed_at ASC, id ASC`, remarkablePathPrefix+"%")
+		ORDER BY indexed_at DESC, id DESC`, remarkablePathPrefix+"%")
 	if err != nil {
 		return nil, false, err
 	}

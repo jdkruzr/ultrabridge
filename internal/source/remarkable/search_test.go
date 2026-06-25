@@ -112,8 +112,8 @@ func TestStoreListSearchPagesFiltersAndMapsRemarkableOCR(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1: %+v", len(rows), rows)
 	}
-	if rows[0].DocumentID != "doc-1" || rows[0].PageID != "page-a" || rows[0].BodyText != "first handwriting page" {
-		t.Fatalf("first row = %+v, want doc-1/page-a", rows[0])
+	if rows[0].DocumentID != "doc-1" || rows[0].PageID != "page-b" || rows[0].BodyText != "second handwriting page" {
+		t.Fatalf("first row = %+v, want newest doc-1/page-b", rows[0])
 	}
 
 	rows, hasMore, err = st.listSearchPages(ctx, rows[0].Generation, 10)
@@ -123,11 +123,8 @@ func TestStoreListSearchPagesFiltersAndMapsRemarkableOCR(t *testing.T) {
 	if hasMore {
 		t.Fatal("hasMore = true, want false")
 	}
-	if len(rows) != 1 {
-		t.Fatalf("got %d rows, want 1: %+v", len(rows), rows)
-	}
-	if rows[0].DocumentID != "doc-1" || rows[0].PageID != "page-b" || rows[0].Generation != searchGeneration(40, 4) {
-		t.Fatalf("second row = %+v, want doc-1/page-b", rows[0])
+	if len(rows) != 0 {
+		t.Fatalf("got %d rows, want 0 after latest generation: %+v", len(rows), rows)
 	}
 }
 
@@ -159,8 +156,8 @@ func TestDefaultSearchDeltaLimitCoversInitialBackfill(t *testing.T) {
 	if len(rows) != len(pages) {
 		t.Fatalf("got %d rows, want %d", len(rows), len(pages))
 	}
-	if rows[100].PageID != "page-100" {
-		t.Fatalf("last row page ID = %q, want page-100", rows[100].PageID)
+	if rows[0].PageID != "page-100" || rows[100].PageID != "page-000" {
+		t.Fatalf("row order = first %q last %q, want newest-first", rows[0].PageID, rows[100].PageID)
 	}
 }
 
