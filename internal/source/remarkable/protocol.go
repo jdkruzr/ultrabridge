@@ -127,6 +127,8 @@ func (p *protocol) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v2/reports", p.handleNullReport)
 	mux.HandleFunc("POST /sync/reports/v1", p.handleNullReport)
 	mux.HandleFunc("POST /analytics/v2/events", p.handleNullReport)
+	mux.HandleFunc("POST /post", p.handleNullReport)
+	mux.HandleFunc("GET /mdm/devices/v0/instruction", p.handleMDMInstruction)
 	mux.HandleFunc("GET /integrations/v2/instances", p.handleIntegrations)
 
 	mux.HandleFunc("GET /notifications/ws/json/1", p.handleNotificationsWS)
@@ -287,6 +289,10 @@ func (p *protocol) handleLocateService(w http.ResponseWriter, r *http.Request) {
 func (p *protocol) handleNullReport(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	w.WriteHeader(http.StatusOK)
+}
+
+func (p *protocol) handleMDMInstruction(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleIntegrations returns an empty third-party integration list. UB has no

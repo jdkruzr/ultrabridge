@@ -77,6 +77,40 @@ func TestProtocol_BetaSettingsProbeIsUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestProtocol_DeviceTelemetryAndMDMProbesAreUnauthenticated(t *testing.T) {
+	db := testDB(t)
+	row := source.SourceRow{
+		Type:       "remarkable",
+		Name:       "RM",
+		ConfigJSON: `{"data_path":"` + t.TempDir() + `","pairing_code":"123456"}`,
+	}
+	src, err := NewSource(db, row, source.SharedDeps{})
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(src.Stop)
+
+	mux := http.NewServeMux()
+	src.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/post?format=minidump", strings.NewReader("dump"))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST minidump = %d body=%s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/mdm/devices/v0/instruction?empty=true&managed=unknown", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("GET MDM instruction = %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestProtocol_UserTokenV3AliasAndCachedJWTRecovery(t *testing.T) {
 	db := testDB(t)
 	row := source.SourceRow{
