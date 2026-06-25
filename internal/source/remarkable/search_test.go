@@ -131,9 +131,9 @@ func TestStoreListSearchPagesFiltersAndMapsRemarkableOCR(t *testing.T) {
 	}
 }
 
-func TestSearchIndexVersionMatchesModernDeviceDB(t *testing.T) {
-	if searchIndexVersion != 4 {
-		t.Fatalf("searchIndexVersion = %d, want 4", searchIndexVersion)
+func TestSearchIndexVersionMatchesFulltextSearchAPI(t *testing.T) {
+	if searchIndexVersion != 1 {
+		t.Fatalf("searchIndexVersion = %d, want 1", searchIndexVersion)
 	}
 }
 

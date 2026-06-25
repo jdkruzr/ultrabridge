@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	searchIndexVersion     = 4
+	searchIndexVersion     = 1
 	searchPageSize         = 5000
 	searchLanguage         = "en_US"
 	searchStrokeResolution = "WORD"
