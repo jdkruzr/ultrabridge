@@ -8,12 +8,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func TestUserScopesForConfigAddsHWRWhenConfigured(t *testing.T) {
-	if got := userScopesForConfig(Config{}); strings.Contains(got, "hwc") {
-		t.Fatalf("scopes without hwr config = %q, should not include hwc", got)
-	}
-	got := userScopesForConfig(Config{HWRApplicationKey: "app-key", HWRHMAC: "hmac-secret"})
-	for _, want := range []string{"intgr", "sync:tortoise", "hws", "hwcmail:-1", "hwc"} {
+func TestUserScopesForConfigFakesConnectBundle(t *testing.T) {
+	got := userScopesForConfig(Config{})
+	for _, want := range []string{"intgr", "screenshare", "docedit", "sync:tortoise", "hws", "hwcmail:-1", "hwc", "mail:-1"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("scopes = %q, missing %q", got, want)
 		}
@@ -28,7 +25,7 @@ func TestUserScopesForConfigAlwaysAdvertisesSearch(t *testing.T) {
 }
 
 func TestNewUserJWTCarriesSuppliedScopes(t *testing.T) {
-	scopes := baseUserScopes + " " + hwrUserScopes
+	scopes := baseUserScopes
 	tok, err := newUserJWT("jti-1", "tester", tokenClaims{DeviceID: "dev-1", DeviceDesc: "rm"}, scopes, time.Hour)
 	if err != nil {
 		t.Fatalf("newUserJWT: %v", err)

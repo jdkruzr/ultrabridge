@@ -684,8 +684,16 @@ func (p *protocol) notify(claims tokenClaims) {
 
 func (p *protocol) withUserAuth(next func(http.ResponseWriter, *http.Request, tokenClaims)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, err := p.userClaims(r.Context(), readBearerToken(r))
+		bearer := readBearerToken(r)
+		claims, err := p.userClaims(r.Context(), bearer)
 		if err != nil {
+			if strings.HasPrefix(r.URL.Path, "/search/") {
+				jti, ok := parseUserJTI(bearer)
+				if len(jti) > 12 {
+					jti = jti[:12] + "..."
+				}
+				p.logger.Warn("remarkable search auth failed", "path", r.URL.Path, "jwt", ok, "jti", jti, "error", err)
+			}
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}

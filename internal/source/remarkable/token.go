@@ -27,13 +27,12 @@ import (
 // (internal/app/claims.go), which this exact device/firmware already accepted.
 
 const (
-	// baseUserScopes grants modern sync (sync:tortoise = "sync15"/v3+, which UB
-	// implements) alongside the integration/screenshare/docedit scopes the
-	// device expects on a Connect account. hws advertises Connect handwriting
-	// search; without it the tablet gates the local search UI before it calls
-	// /search/v1/settings.
-	baseUserScopes = "intgr screenshare docedit hws sync:tortoise"
-	hwrUserScopes  = "hwcmail:-1 hwc"
+	// baseUserScopes grants the full Connect-ish scope bundle the device sees
+	// from rmfakecloud: modern sync, integrations/screenshare/doc editing,
+	// handwriting search, handwriting recognition, and mail-sharing scopes.
+	// The tablet appears to gate some feature probes client-side from this
+	// bundle before it ever calls the corresponding server endpoint.
+	baseUserScopes = "intgr screenshare docedit hws hwcmail:-1 hwc mail:-1 sync:tortoise"
 
 	// userTokenVersion mirrors rmfakecloud's tokenVersion.
 	userTokenVersion = 10
@@ -81,10 +80,7 @@ type userTokenClaims struct {
 // newUserJWT builds a signed user-token JWT carrying `jti` (UB's DB token id) as
 // its identifier. account is the display name/email shown on-device.
 func userScopesForConfig(cfg Config) string {
-	if strings.TrimSpace(cfg.HWRApplicationKey) == "" || strings.TrimSpace(cfg.HWRHMAC) == "" {
-		return baseUserScopes
-	}
-	return baseUserScopes + " " + hwrUserScopes
+	return baseUserScopes
 }
 
 func newUserJWT(jti, account string, dc tokenClaims, scopes string, ttl time.Duration) (string, error) {
