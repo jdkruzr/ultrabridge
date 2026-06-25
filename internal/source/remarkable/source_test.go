@@ -142,6 +142,55 @@ func TestProtocol_UserTokenV3AliasAndCachedJWTRecovery(t *testing.T) {
 	}
 }
 
+func TestProtocol_OpaqueCachedUserTokenRecovery(t *testing.T) {
+	db := testDB(t)
+	row := source.SourceRow{
+		Type:       "remarkable",
+		Name:       "RM",
+		ConfigJSON: `{"data_path":"` + t.TempDir() + `","pairing_code":"123456"}`,
+	}
+	src, err := NewSource(db, row, source.SharedDeps{})
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if err := src.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(src.Stop)
+
+	mux := http.NewServeMux()
+	src.RegisterRoutes(mux)
+
+	body, _ := json.Marshal(map[string]string{
+		"code":       "123456",
+		"deviceDesc": "reMarkable Paper Pro",
+		"deviceID":   "rm-device-a",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/token/json/2/device/new", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("device token = %d body=%s", w.Code, w.Body.String())
+	}
+
+	opaqueToken := "legacy-cached-user-token"
+	req = httptest.NewRequest(http.MethodGet, "/search/v1/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+opaqueToken)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("search settings after opaque recovery = %d body=%s", w.Code, w.Body.String())
+	}
+
+	var kind, deviceID, scopes string
+	if err := db.QueryRowContext(context.Background(), `SELECT token_kind, device_id, scopes FROM remarkable_tokens WHERE token = ?`, opaqueToken).Scan(&kind, &deviceID, &scopes); err != nil {
+		t.Fatalf("load recovered opaque token: %v", err)
+	}
+	if kind != "user" || deviceID != "rm-device-a" || scopes != baseUserScopes {
+		t.Fatalf("recovered token = kind %q device %q scopes %q", kind, deviceID, scopes)
+	}
+}
+
 func TestProtocol_MultiDeviceRootConverges(t *testing.T) {
 	db := testDB(t)
 	row := source.SourceRow{

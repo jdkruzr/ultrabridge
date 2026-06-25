@@ -724,7 +724,14 @@ func (p *protocol) userClaims(ctx context.Context, token string) (tokenClaims, e
 		}
 		return tokenClaims{}, err
 	}
-	return p.store.loadToken(ctx, token, "user")
+	claims, err := p.store.loadToken(ctx, token, "user")
+	if err == nil {
+		return claims, nil
+	}
+	if errors.Is(err, errTokenNotFound) {
+		return p.store.recoverOpaqueUserToken(ctx, token)
+	}
+	return tokenClaims{}, err
 }
 
 func readBearerToken(r *http.Request) string {

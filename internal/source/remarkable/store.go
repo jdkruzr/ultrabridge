@@ -288,6 +288,52 @@ func (s *store) recoverUserToken(ctx context.Context, jwtClaims userTokenClaims)
 	}, nil
 }
 
+func (s *store) recoverOpaqueUserToken(ctx context.Context, token string) (tokenClaims, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return tokenClaims{}, errTokenNotFound
+	}
+
+	var deviceID, deviceDesc string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT device_id, device_desc
+		FROM remarkable_devices
+		WHERE device_desc <> 'sim'
+		ORDER BY last_seen DESC, created_at DESC
+		LIMIT 1`,
+	).Scan(&deviceID, &deviceDesc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tokenClaims{}, errTokenNotFound
+	}
+	if err != nil {
+		return tokenClaims{}, err
+	}
+
+	now := time.Now()
+	expires := now.Add(userTokenTTL).UnixMilli()
+	created := now.UnixMilli()
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO remarkable_tokens(token, token_kind, device_id, device_desc, scopes, expires_at, created_at)
+		VALUES(?, 'user', ?, ?, ?, ?, ?)
+		ON CONFLICT(token) DO UPDATE SET
+			token_kind = 'user',
+			device_id = excluded.device_id,
+			device_desc = excluded.device_desc,
+			scopes = excluded.scopes,
+			expires_at = excluded.expires_at`,
+		token, deviceID, deviceDesc, baseUserScopes, expires, created,
+	)
+	if err != nil {
+		return tokenClaims{}, err
+	}
+	return tokenClaims{
+		UserID:     "remarkable",
+		DeviceID:   deviceID,
+		DeviceDesc: deviceDesc,
+		Scopes:     baseUserScopes,
+	}, nil
+}
+
 func (s *store) issuePresigned(ctx context.Context, target presignedTarget, ttl time.Duration) (string, error) {
 	token, err := randomToken()
 	if err != nil {
