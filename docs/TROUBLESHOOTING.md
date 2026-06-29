@@ -1,185 +1,186 @@
 # UltraBridge Troubleshooting
 
-Common issues and how to resolve them. If your problem isn't covered
-here, check `docker logs ultrabridge` — most failure modes log a
-specific reason, and **Verbose API Logging** (Settings > General)
-turns on per-request auth-failure detail.
+This page covers current user-facing deployments. Historical design and test plans may mention older MariaDB-backed SPC integration; current UltraBridge releases use SQLite and the built-in SPC server.
 
-## Auth and access
+## Auth And Access
 
-### Can't log in to the web UI
+### Web UI Login Fails
 
-1. Try `curl http://localhost:8443/health` — should return
-   `{"status":"ok"}`. If that fails, the container isn't running or
-   the port isn't exposed.
-2. If you previously ran the installer, check that the username /
-   password you entered match. Reset with the `seed-user`
-   subcommand (see README > Development > Admin subcommands).
-3. On a fresh install, `/setup` should be reachable without auth —
-   if it isn't, check that the settings DB was created under the
-   bind-mounted `/data` path.
+1. Check the health endpoint:
 
-### Claude.ai "Authorization Failed"
+   ```bash
+   curl http://localhost:8443/health
+   ```
 
-1. Ensure your UltraBridge instance is reachable via a public URL
-   (e.g. a tunnel or reverse proxy) — Claude.ai can't reach
-   `localhost`.
-2. Turn on **Verbose API Logging** in **Settings > General** so the
-   OAuth handshake's failure reason is surfaced.
-3. Check `docker logs ultrabridge` for `auth failure` lines.
-4. If you recently changed your password, disconnect the server in
-   Claude.ai and reconnect to trigger a fresh OAuth flow.
+2. On a fresh install, visit `/setup` and create the first user.
+3. If credentials are lost, seed a replacement user:
 
-### MCP tools not appearing in Claude
+   ```bash
+   docker run --rm -v ./ultrabridge-data:/data ultrabridge:latest \
+     seed-user myusername "new-password"
+   ```
 
-1. Confirm the MCP server is enabled in **Settings > General**.
-2. Verify the SSE endpoint is the one you registered (typically
-   `https://your-host/mcp`).
-3. Watch the **Logs** tab for `MCP tool call` entries while Claude
-   is connecting — if there's nothing, Claude isn't actually
-   reaching the server.
+4. Turn on **Settings -> System -> Verbose API Logging** to surface auth failure detail in the Logs tab and container logs.
+
+### Claude.ai Authorization Fails
+
+1. Claude.ai must be able to reach the public `/mcp` URL. `localhost` only works for clients running on the same machine.
+2. Confirm the reverse proxy forwards to the main app listener, normally `:8443`.
+3. Disconnect and reconnect the MCP server in Claude.ai after changing passwords or OAuth-related settings.
+4. Check the Logs tab for OAuth or MCP auth failures.
+
+### MCP Sidecar Cannot Authenticate
+
+1. Create a bearer token in **Settings -> Integrations -> MCP Tokens**.
+2. Put it in an untracked `.env`:
+
+   ```bash
+   UB_MCP_API_TOKEN=...
+   ```
+
+3. Start the sidecar profile:
+
+   ```bash
+   docker compose --profile mcp up -d --build ub-mcp
+   ```
 
 ## CalDAV
 
-### Client shows empty collection
+### Client Shows An Empty Collection
 
-1. `curl -u admin:password http://localhost:8443/caldav/tasks/` —
-   should return an XML `multistatus` response. If it returns
-   `401`, credentials are wrong. If it returns `404`, no tasks
-   exist yet.
-2. Verify your CalDAV client is pointing at the
-   `/.well-known/caldav` endpoint or directly at
-   `/caldav/tasks/` (trailing slash required by some clients).
-3. Check `docker logs ultrabridge` for PROPFIND errors.
+1. Use the discovery URL when possible:
 
-### Task created via CalDAV but not visible in UB web UI
+   ```text
+   https://your-host/.well-known/caldav
+   ```
 
-Soft-delete filtering excludes `is_deleted='Y'` rows from both the
-API and the web UI. A task marked completed on the device rather
-than deleted should still be visible with a "completed" badge; if
-it's not, check `docker logs` for sync errors.
+2. Some clients require the direct collection URL with a trailing slash:
 
-## Files
+   ```text
+   https://your-host/caldav/tasks/
+   ```
 
-### Supernote Files tab shows "No Supernote source configured"
+3. Confirm credentials match your UltraBridge user or bearer-token flow.
+4. If the collection exists but tasks are missing, check the Tasks tab and logs for soft-delete or sync errors.
 
-Add a Supernote source in **Settings > Sources** with the path to
-your `.note` files. The equivalent placeholder on the Boox Files
-tab points at the same Settings screen.
+### Attachments Do Not Appear In A Client
 
-### OCR jobs stuck in "in_progress"
+1. Verify the task has an attachment in UltraBridge or the MCP task output.
+2. Inspect the served CalDAV object and look for an `ATTACH` URI.
+3. Fetch the attachment URL directly while authenticated. It should return `200`, a content type, and a content length.
+4. Some CalDAV clients ignore task attachments even when the server presents valid `ATTACH` properties.
 
-The watchdog reclaims stuck jobs after 10 minutes. If jobs
-consistently get stuck, check that your OCR API URL and API key
-are correct in **Settings > OCR** and that the API is reachable
-from inside the container:
+## Sources
+
+### Source Does Not Appear In Files
+
+1. Confirm the source exists and is enabled in **Settings -> Devices**.
+2. Check that the container can read/write the configured path.
+3. Watch the Logs tab while pressing Scan, Reprocess, or the source-specific action.
+
+### Supernote Sync Does Not Start
+
+1. Enable **Settings -> Devices -> UB-as-SPC Device Sync Server -> Mode: server** and restart if prompted.
+2. Publish the SPC listener port, normally `8089`.
+3. Use a dedicated reverse-proxy hostname for the Supernote device. Do not share the web UI hostname.
+4. Preserve the `Host` header and WebSocket upgrade for `/socket.io/`.
+5. Confirm the SPC file root points at the full Supernote storage root, not only the `Note/` folder.
+
+### Boox Uploads Do Not Arrive
+
+1. Configure the Boox WebDAV URL with a trailing slash:
+
+   ```text
+   http://your-host:8443/webdav/
+   ```
+
+2. Confirm the Boox source path is mounted into the container.
+3. Uploaded files should land under the configured path, typically below an `onyx/` tree.
+4. Use the Boox maintenance actions in **Settings -> Devices** to scan disk, reconcile dates, or remove auto-named junk notebooks.
+
+### ForestNote Sync Is Not Moving Data
+
+1. Confirm a ForestNote source exists and is enabled.
+2. Confirm `/sync/v1` is reachable from the device.
+3. Check **Settings -> Devices** for registered ForestNote devices.
+4. Use the compaction and prune controls only after confirming stale devices are no longer active.
+
+### reMarkable Pairing Or Sync Fails
+
+1. Confirm the reMarkable source has a writable `data_path`.
+2. Check the reMarkable source/device panel in **Settings -> Devices**.
+3. Ensure your reverse proxy forwards the device-facing reMarkable API routes to the main app listener.
+4. If search fails on the tablet, check `/search/v1/error` traffic and UltraBridge logs before changing token or device state.
+
+## OCR, Search, And Chat
+
+### OCR Jobs Are Stuck
+
+1. Check **Settings -> AI & Processing** for OCR provider, URL, key, model, concurrency, and max-file size.
+2. Confirm the OCR endpoint is reachable from inside the container.
+3. Reprocess a single page or note first; broad backfills make failures noisier.
+4. For reMarkable, PDF/EPUB files are not automatically OCRed; notebook documents are the normal automatic path.
+
+### Search Misses Expected Handwriting
+
+1. Confirm the page has OCR text in its Files detail view.
+2. Confirm source-specific OCR is enabled or manually reprocess the note.
+3. For ForestNote, client OCR is indexed for search/RAG while server OCR/native text remains the render-triggering body.
+4. For reMarkable, native device HWR proxying is not the same as UltraBridge server-side searchable OCR.
+
+### RAG Falls Back To Keyword Search
+
+1. Confirm Ollama is reachable:
+
+   ```bash
+   curl http://your-ollama-host:11434/api/tags
+   ```
+
+2. Confirm the embedding model name in Settings exactly matches the pulled model, usually `nomic-embed-text:v1.5`.
+3. Run the embedding backfill from **Settings -> AI & Processing** after restoring Ollama.
+
+### Chat Fails Or Streams Forever
+
+1. Confirm the configured OpenAI-compatible chat endpoint is reachable:
+
+   ```bash
+   curl http://your-chat-host:8000/v1/models
+   ```
+
+2. Match the configured chat model to the model ID returned by the endpoint.
+3. If a local vLLM service exits under load, configure systemd restart behavior for that service and check GPU memory fragmentation settings.
+
+## Operations
+
+### Rebuild After Pulling Changes
 
 ```bash
-docker exec -it ultrabridge wget -O- http://your-ocr-host:8000/v1/models
+./rebuild.sh
 ```
 
-### Boox WebDAV sync fails
-
-1. Verify a Boox source exists and is enabled in **Settings > Sources**.
-2. Check the WebDAV URL on the device is
-   `http://<host>:<port>/webdav/` (trailing slash required for
-   some Boox firmware).
-3. Confirm credentials match your UltraBridge username/password.
-4. `docker logs ultrabridge | grep boox` to see what the server saw.
-
-### Boox notes not appearing in Files tab
-
-1. Verify a Boox source exists in **Settings > Sources** with a valid
-   notes path.
-2. Check the Docker volume mount includes the Boox notes path — the
-   container has to be able to see the files on disk.
-3. Uploaded files should appear at `{notes_path}/onyx/{model}/...`.
-   If they don't, the WebDAV server isn't receiving them.
-
-## Supernote Private Cloud integration
-
-### "database connection failed" at startup
-
-Expected in standalone mode (no SPC). The warning is non-fatal —
-UltraBridge continues with SQLite-only storage, and only SPC
-catalog sync is disabled. Supernote device-sync via SPC REST and
-Boox WebDAV both continue to work.
-
-If you do have SPC installed, check that `.dbenv` is readable and
-MariaDB is running:
+or:
 
 ```bash
-cat /mnt/supernote/.dbenv
-docker ps | grep mariadb
+docker compose up -d --build
 ```
 
-### "user resolution failed"
+### Logs
 
-- **"no users found"** — No users in the SPC database yet. Sync
-  your Supernote device against SPC at least once.
-- **"multiple users found"** — Set `UB_USER_ID` in
-  `.ultrabridge.env` to disambiguate.
+- Web UI: **Logs** tab.
+- Container:
 
-### Supernote device shows stale / wrong file sizes after OCR
+  ```bash
+  docker logs ultrabridge
+  ```
 
-Post-OCR catalog sync updates MariaDB's `f_user_file` and
-`f_capacity` tables so the device's listing matches the modified
-file. If those rows drift, trigger a re-scan from Settings or
-re-process a single file from the Files tab.
+- Optional file log defaults to `/data/ultrabridge.log` when configured.
 
-## RAG search / chat
+### Backups
 
-### "No Ollama connection" or RAG search falls back to FTS-only
+Back up the data directory that contains:
 
-1. Confirm Ollama is running: `curl http://your-ollama-host:11434/api/tags`.
-2. The embedding model name in **Settings > Embedding** must match
-   exactly what Ollama has pulled (`nomic-embed-text:v1.5`, not
-   `nomic-embed-text`).
-3. Embeddings are best-effort — if Ollama is down, OCR indexing
-   continues; vector search just degrades to FTS. Re-run the
-   backfill from Settings once Ollama is back.
+- `ultrabridge.db`
+- `ultrabridge-tasks.db`
+- Source file roots for Supernote, Boox, reMarkable, and any rendered/OCR cache paths you configured.
 
-### Chat streams forever / vLLM unreachable
-
-The Chat tab surfaces a red error banner if the OpenAI-compatible
-endpoint can't be reached. Verify:
-
-```bash
-curl http://your-vllm-host:8000/v1/models
-```
-
-Match the model ID returned there with **Settings > Chat > Chat
-Model**.
-
-### vLLM dies with CUDA OOM and doesn't auto-restart
-
-Symptom: vLLM serves fine for hours or days, then OCR jobs and chat
-both start failing with `connect: connection refused` to the vLLM
-host. `journalctl -u vllm.service` shows
-`torch.OutOfMemoryError: CUDA out of memory` deep inside the model
-forward pass (often `qwen3_vl.visual`), preceded by a sustained
-stream of normal `POST /v1/chat/completions` lines.
-
-This is usually allocator fragmentation under steady multimodal
-traffic, not a single oversized request. The OOM message will note
-hundreds of MiB "reserved but unallocated" alongside ~95% of the
-card allocated — the GPU has free memory but no contiguous slab
-large enough for the next image tensor.
-
-Two mitigations on the vLLM host's systemd unit:
-
-```ini
-[Service]
-Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
-Restart=always
-RestartSec=10
-```
-
-- `expandable_segments=True` lets the CUDA allocator grow existing
-  segments instead of refusing fragmented free space.
-- `Restart=always` (rather than `on-failure`) catches the case
-  where vLLM's API server gracefully shuts down after the engine
-  process dies. systemd sees `exit 0` and `on-failure` will not
-  restart the service.
-
-After editing: `sudo systemctl daemon-reload && sudo systemctl restart vllm.service`.
+Stop the container before copying SQLite databases if you need a simple crash-consistent filesystem backup.
