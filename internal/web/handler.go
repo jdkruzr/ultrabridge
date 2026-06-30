@@ -1075,12 +1075,13 @@ func (h *Handler) searchOptionsFromRequest(r *http.Request) (service.SearchOptio
 	}
 	opts := service.SearchOptions{
 		Folder:       strings.TrimSpace(q.Get("folder")),
+		DeviceModel:  strings.TrimSpace(firstNonEmpty(q.Get("device_model"), q.Get("device"))),
 		Sources:      sources,
 		Sort:         normalizeSearchSort(q.Get("sort")),
 		CreatedFrom:  parseSearchDateStart(q.Get("created_from")),
 		CreatedTo:    parseSearchDateEnd(q.Get("created_to")),
-		ModifiedFrom: parseSearchDateStart(q.Get("modified_from")),
-		ModifiedTo:   parseSearchDateEnd(q.Get("modified_to")),
+		ModifiedFrom: parseSearchDateStart(firstNonEmpty(q.Get("modified_from"), q.Get("date_from"), q.Get("from"))),
+		ModifiedTo:   parseSearchDateEnd(firstNonEmpty(q.Get("modified_to"), q.Get("date_to"), q.Get("to"))),
 		Mode:         normalizeSearchMode(q.Get("mode")),
 	}
 	if raw := q.Get("limit"); raw != "" {
@@ -1094,6 +1095,15 @@ func (h *Handler) searchOptionsFromRequest(r *http.Request) (service.SearchOptio
 		}
 	}
 	return opts, sources, submitted
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (h *Handler) enabledSearchSources() []string {

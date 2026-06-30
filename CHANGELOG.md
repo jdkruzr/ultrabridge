@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.0 - 2026-06-30
+
+### Changed
+
+- Rationalized the MCP tool surface with structured MCP output for note, ForestNote text-box, and task tools.
+- `search_notes` now supports first-class `source`/`sources`, `location`, `device_model`, created/modified date, sort, mode, and limit filters.
+- `/api/search` and `/api/v1/search` now pass `device_model` through to RAG search and return device metadata when available.
+- Deprecated MCP/API search aliases remain accepted: `device` maps to `device_model`, and `date_from`/`date_to` map to modified-date filters.
+- MCP search results now include source type, folder, device model, timestamps, detail URLs, and follow-up image hints.
+
+### Verified
+
+- `go test ./...`
+- `./rebuild.sh`
+
 ## v1.1.0 - 2026-06-30
 
 ### Changed

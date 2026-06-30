@@ -124,6 +124,7 @@ func (s *searchService) SearchAdvanced(ctx context.Context, query string, opts S
 	rr, err := s.retriever.Search(ctx, rag.SearchRequest{
 		Query:        query,
 		Folder:       opts.Folder,
+		Device:       opts.DeviceModel,
 		Sources:      opts.Sources,
 		Locations:    locations,
 		CreatedFrom:  opts.CreatedFrom,
@@ -152,6 +153,7 @@ func (s *searchService) SearchAdvanced(ctx context.Context, query string, opts S
 			Score:      float32(r.Score),
 			SourceType: r.SourceType,
 			Folder:     r.Folder,
+			Device:     r.Device,
 			CreatedAt:  r.CreatedAt,
 			ModifiedAt: r.ModifiedAt,
 		})

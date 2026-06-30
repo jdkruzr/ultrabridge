@@ -351,15 +351,35 @@ func formatMCPAttachment(a mcpAttachment) string {
 	return fmt.Sprintf("%s%s %s", name, meta, loc)
 }
 
+func firstMCPNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // MCP tool input types
 
 type searchNotesInput struct {
-	Query    string `json:"query"`
-	Folder   string `json:"folder,omitempty"`
+	Query        string   `json:"query"`
+	Source       string   `json:"source,omitempty"`
+	Sources      []string `json:"sources,omitempty"`
+	Folder       string   `json:"folder,omitempty"`
+	Location     string   `json:"location,omitempty"`
+	DeviceModel  string   `json:"device_model,omitempty"`
+	CreatedFrom  string   `json:"created_from,omitempty"`
+	CreatedTo    string   `json:"created_to,omitempty"`
+	ModifiedFrom string   `json:"modified_from,omitempty"`
+	ModifiedTo   string   `json:"modified_to,omitempty"`
+	Sort         string   `json:"sort,omitempty"`
+	Mode         string   `json:"mode,omitempty"`
+	Limit        int      `json:"limit,omitempty"`
+	// Deprecated aliases kept so older MCP clients keep working.
 	Device   string `json:"device,omitempty"`
 	DateFrom string `json:"date_from,omitempty"`
 	DateTo   string `json:"date_to,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
 }
 
 type getNotePagesInput struct {
@@ -380,11 +400,95 @@ type editTextBoxInput struct {
 	Text  string `json:"text"`
 }
 
+type searchNotesOutput struct {
+	Query   string            `json:"query"`
+	Count   int               `json:"count"`
+	Results []mcpSearchResult `json:"results"`
+}
+
+type mcpSearchResult struct {
+	Path          string    `json:"path"`
+	Page          int       `json:"page"`
+	Title         string    `json:"title,omitempty"`
+	Snippet       string    `json:"snippet"`
+	Score         float64   `json:"score"`
+	SourceType    string    `json:"source_type,omitempty"`
+	Folder        string    `json:"folder,omitempty"`
+	DeviceModel   string    `json:"device_model,omitempty"`
+	CreatedAt     time.Time `json:"created_at,omitempty"`
+	ModifiedAt    time.Time `json:"modified_at,omitempty"`
+	DetailURL     string    `json:"detail_url"`
+	ImageToolHint string    `json:"image_tool_hint"`
+}
+
+type notePagesOutput struct {
+	NotePath string        `json:"note_path"`
+	Count    int           `json:"count"`
+	Pages    []mcpNotePage `json:"pages"`
+}
+
+type mcpNotePage struct {
+	Page      int    `json:"page"`
+	BodyText  string `json:"body_text"`
+	TitleText string `json:"title_text,omitempty"`
+	Keywords  string `json:"keywords,omitempty"`
+	Source    string `json:"source,omitempty"`
+}
+
+type noteImageOutput struct {
+	NotePath    string `json:"note_path"`
+	Page        int    `json:"page"`
+	ContentType string `json:"content_type"`
+	Bytes       int    `json:"bytes"`
+}
+
+type textBoxesOutput struct {
+	NotebookID string       `json:"notebook_id"`
+	Count      int          `json:"count"`
+	Boxes      []mcpTextBox `json:"boxes"`
+}
+
+type mcpTextBox struct {
+	ID     string `json:"id"`
+	PageID string `json:"page_id"`
+	Text   string `json:"text"`
+	Z      int64  `json:"z"`
+}
+
+type editTextBoxOutput struct {
+	BoxID string `json:"box_id"`
+	OK    bool   `json:"ok"`
+}
+
+type taskListOutput struct {
+	Count int       `json:"count"`
+	Tasks []mcpTask `json:"tasks"`
+}
+
+type taskOutput struct {
+	Task mcpTask `json:"task"`
+}
+
+type taskMutationOutput struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type purgeCompletedOutput struct {
+	Deleted int64 `json:"deleted"`
+}
+
+type purgeDeletedOutput struct {
+	Deleted       int64 `json:"deleted"`
+	Skipped       int64 `json:"skipped"`
+	OlderThanDays int   `json:"older_than_days"`
+}
+
 func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 	// search_notes
 	mcp.AddTool[searchNotesInput, any](server, &mcp.Tool{
 		Name:        "search_notes",
-		Description: "Search handwritten notes by keyword query. Returns matching pages with text content, metadata, and links to the UltraBridge web UI. Supports filtering by folder, device, and date range.",
+		Description: "Search indexed handwritten notes by keyword query. Optional filters: source or sources (supernote, boox, forestnote, remarkable, digest), folder, location, device_model, created_from/created_to, modified_from/modified_to, sort (relevance/date_asc/date_desc), mode (hybrid/keyword), and limit. Deprecated aliases device and date_from/date_to are still accepted.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input searchNotesInput) (*mcp.CallToolResult, any, error) {
 		if client.verbose && client.logger != nil {
 			client.logger.Info("MCP tool call", "tool", "search_notes", "input", input)
@@ -396,14 +500,40 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		if input.Folder != "" {
 			params.Set("folder", input.Folder)
 		}
-		if input.Device != "" {
-			params.Set("device", input.Device)
+		for _, source := range input.Sources {
+			if source != "" {
+				params.Add("source", source)
+			}
 		}
-		if input.DateFrom != "" {
-			params.Set("from", input.DateFrom)
+		if input.Source != "" {
+			params.Add("source", input.Source)
 		}
-		if input.DateTo != "" {
-			params.Set("to", input.DateTo)
+		if input.Location != "" {
+			params.Add("location", input.Location)
+		}
+		deviceModel := firstMCPNonEmpty(input.DeviceModel, input.Device)
+		if deviceModel != "" {
+			params.Set("device_model", deviceModel)
+		}
+		if input.CreatedFrom != "" {
+			params.Set("created_from", input.CreatedFrom)
+		}
+		if input.CreatedTo != "" {
+			params.Set("created_to", input.CreatedTo)
+		}
+		modifiedFrom := firstMCPNonEmpty(input.ModifiedFrom, input.DateFrom)
+		if modifiedFrom != "" {
+			params.Set("modified_from", modifiedFrom)
+		}
+		modifiedTo := firstMCPNonEmpty(input.ModifiedTo, input.DateTo)
+		if modifiedTo != "" {
+			params.Set("modified_to", modifiedTo)
+		}
+		if input.Sort != "" {
+			params.Set("sort", input.Sort)
+		}
+		if input.Mode != "" {
+			params.Set("mode", input.Mode)
 		}
 		limit := input.Limit
 		if limit <= 0 {
@@ -421,26 +551,31 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
 		}
 
-		// API shape is service.SearchResult with snake_case: path/page/
-		// snippet/score. Decoder previously expected richer fields
-		// (note_path/body_text/etc.) the v1 API doesn't emit; every field
-		// silently got its zero value and MCP produced empty-body results.
-		var results []struct {
-			Path    string  `json:"path"`
-			Page    int     `json:"page"`
-			Snippet string  `json:"snippet"`
-			Score   float64 `json:"score"`
-		}
+		var results []mcpSearchResult
 		if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
 
 		var sb strings.Builder
-		for i, r := range results {
+		for i := range results {
+			r := &results[i]
+			r.DetailURL = fmt.Sprintf("%s/files?detail=%s", client.displayBaseURL(), url.QueryEscape(r.Path))
+			r.ImageToolHint = fmt.Sprintf(`get_note_image {"note_path": %q, "page": %d}`, r.Path, r.Page)
 			sb.WriteString(fmt.Sprintf("--- Result %d ---\n", i+1))
 			sb.WriteString(fmt.Sprintf("Note: %s (page %d)\n", r.Path, r.Page))
-			detailURL := fmt.Sprintf("%s/files?detail=%s", client.displayBaseURL(), url.QueryEscape(r.Path))
-			sb.WriteString(fmt.Sprintf("URL: %s\n", detailURL))
+			if r.Title != "" {
+				sb.WriteString(fmt.Sprintf("Title: %s\n", r.Title))
+			}
+			if r.SourceType != "" {
+				sb.WriteString(fmt.Sprintf("Source type: %s\n", r.SourceType))
+			}
+			if r.Folder != "" {
+				sb.WriteString(fmt.Sprintf("Folder: %s\n", r.Folder))
+			}
+			if r.DeviceModel != "" {
+				sb.WriteString(fmt.Sprintf("Device model: %s\n", r.DeviceModel))
+			}
+			sb.WriteString(fmt.Sprintf("URL: %s\n", r.DetailURL))
 			sb.WriteString(fmt.Sprintf("Text:\n%s\n\n", r.Snippet))
 		}
 		if len(results) == 0 {
@@ -451,11 +586,13 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			client.logger.Info("MCP tool result", "tool", "search_notes", "results", len(results))
 		}
 
+		out := searchNotesOutput{Query: input.Query, Count: len(results), Results: results}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.TextContent{Text: sb.String()},
 			},
-		}, nil, nil
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// get_note_pages
@@ -483,12 +620,7 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
 		}
 
-		var pages []struct {
-			Page      int    `json:"page"`
-			BodyText  string `json:"body_text"`
-			TitleText string `json:"title_text"`
-			Keywords  string `json:"keywords"`
-		}
+		var pages []mcpNotePage
 		if err := json.NewDecoder(resp.Body).Decode(&pages); err != nil {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
@@ -499,15 +631,20 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			if p.TitleText != "" {
 				sb.WriteString(fmt.Sprintf("Title: %s\n", p.TitleText))
 			}
+			if p.Source != "" {
+				sb.WriteString(fmt.Sprintf("Source: %s\n", p.Source))
+			}
 			sb.WriteString(p.BodyText)
 			sb.WriteString("\n\n")
 		}
 
+		out := notePagesOutput{NotePath: input.NotePath, Count: len(pages), Pages: pages}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.TextContent{Text: sb.String()},
 			},
-		}, nil, nil
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// get_note_image
@@ -547,14 +684,25 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			client.logger.Info("MCP tool result", "tool", "get_note_image", "bytes", len(imageData))
 		}
 
+		contentType := resp.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "image/jpeg"
+		}
+		out := noteImageOutput{
+			NotePath:    input.NotePath,
+			Page:        input.Page,
+			ContentType: contentType,
+			Bytes:       len(imageData),
+		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.ImageContent{
 					Data:     imageData,
-					MIMEType: "image/jpeg",
+					MIMEType: contentType,
 				},
 			},
-		}, nil, nil
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// list_text_boxes
@@ -581,12 +729,7 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			body, _ := io.ReadAll(resp.Body)
 			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
 		}
-		var boxes []struct {
-			ID     string `json:"id"`
-			PageID string `json:"page_id"`
-			Text   string `json:"text"`
-			Z      int64  `json:"z"`
-		}
+		var boxes []mcpTextBox
 		if err := json.NewDecoder(resp.Body).Decode(&boxes); err != nil {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
@@ -597,9 +740,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		if len(boxes) == 0 {
 			sb.WriteString("No text boxes in this notebook.\n")
 		}
+		out := textBoxesOutput{NotebookID: input.NotebookID, Count: len(boxes), Boxes: boxes}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: sb.String()}},
-		}, nil, nil
+			Content:           []mcp.Content{&mcp.TextContent{Text: sb.String()}},
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// edit_text_box
@@ -623,9 +768,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			body, _ := io.ReadAll(resp.Body)
 			return nil, nil, fmt.Errorf("edit failed (%d): %s", resp.StatusCode, string(body))
 		}
+		out := editTextBoxOutput{BoxID: input.BoxID, OK: true}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Text box %s updated.", input.BoxID)}},
-		}, nil, nil
+			Content:           []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Text box %s updated.", input.BoxID)}},
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// --- Task tools ---
@@ -691,9 +838,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
 		if len(tasks) == 0 {
+			out := taskListOutput{Count: 0, Tasks: []mcpTask{}}
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: "No tasks match the filter.\n"}},
-			}, nil, nil
+				Content:           []mcp.Content{&mcp.TextContent{Text: "No tasks match the filter.\n"}},
+				StructuredContent: out,
+			}, out, nil
 		}
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("%d task(s):\n\n", len(tasks)))
@@ -702,9 +851,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			sb.WriteString(formatMCPTask(t))
 			sb.WriteString("\n")
 		}
+		out := taskListOutput{Count: len(tasks), Tasks: tasks}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: sb.String()}},
-		}, nil, nil
+			Content:           []mcp.Content{&mcp.TextContent{Text: sb.String()}},
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// get_task
@@ -734,9 +885,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		if err := json.NewDecoder(resp.Body).Decode(&t); err != nil {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
+		out := taskOutput{Task: t}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: formatMCPTask(t)}},
-		}, nil, nil
+			Content:           []mcp.Content{&mcp.TextContent{Text: formatMCPTask(t)}},
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// create_task
@@ -790,9 +943,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
+		out := taskOutput{Task: created}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "Created:\n" + formatMCPTask(created)}},
-		}, nil, nil
+			Content:           []mcp.Content{&mcp.TextContent{Text: "Created:\n" + formatMCPTask(created)}},
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// update_task
@@ -866,9 +1021,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		if err := json.NewDecoder(resp.Body).Decode(&updated); err != nil {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
+		out := taskOutput{Task: updated}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "Updated:\n" + formatMCPTask(updated)}},
-		}, nil, nil
+			Content:           []mcp.Content{&mcp.TextContent{Text: "Updated:\n" + formatMCPTask(updated)}},
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// complete_task
@@ -894,9 +1051,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			raw, _ := io.ReadAll(resp.Body)
 			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(raw))
 		}
+		out := taskMutationOutput{ID: input.ID, Status: "completed"}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Task %s marked completed.\n", input.ID)}},
-		}, nil, nil
+			Content:           []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Task %s marked completed.\n", input.ID)}},
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// delete_task
@@ -922,9 +1081,11 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 			raw, _ := io.ReadAll(resp.Body)
 			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(raw))
 		}
+		out := taskMutationOutput{ID: input.ID, Status: "deleted"}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Task %s deleted.\n", input.ID)}},
-		}, nil, nil
+			Content:           []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Task %s deleted.\n", input.ID)}},
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// purge_completed_tasks
@@ -950,11 +1111,13 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return nil, nil, fmt.Errorf("decode response: %w", err)
 		}
+		out := purgeCompletedOutput{Deleted: body.Deleted}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{
 				Text: fmt.Sprintf("Soft-deleted %d completed task(s).\n", body.Deleted),
 			}},
-		}, nil, nil
+			StructuredContent: out,
+		}, out, nil
 	})
 
 	// purge_deleted_tasks — the *only* path that actually frees rows from
@@ -995,11 +1158,13 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		if windowDays == 0 {
 			windowDays = 30
 		}
+		out := purgeDeletedOutput{Deleted: body.Deleted, Skipped: body.Skipped, OlderThanDays: windowDays}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{
 				Text: fmt.Sprintf("Hard-purged %d task(s); %d skipped (newer than %d days).\n",
 					body.Deleted, body.Skipped, windowDays),
 			}},
-		}, nil, nil
+			StructuredContent: out,
+		}, out, nil
 	})
 }

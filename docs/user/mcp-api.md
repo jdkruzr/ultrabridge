@@ -21,6 +21,12 @@ Create tokens in **Settings -> Integrations -> MCP Tokens**.
 - `get_note_image`
 
 These tools read indexed note text and rendered page images through UltraBridge's API.
+`search_notes` accepts `query` plus optional `source` or `sources`
+(`supernote`, `boox`, `forestnote`, `remarkable`, `digest`), `folder`,
+`location`, `device_model`, `created_from`, `created_to`, `modified_from`,
+`modified_to`, `sort`, `mode`, and `limit`. Deprecated aliases `device` and
+`date_from`/`date_to` are still accepted for older clients. Note tools return
+structured MCP results with a concise text fallback.
 
 ## ForestNote Text Box Tools
 
@@ -41,6 +47,8 @@ These tools discover and edit synced ForestNote text boxes. Server-authored edit
 - `purge_deleted_tasks`
 
 Task tools include ForestNote provenance, categories, priority, URLs, details, and attachment summaries when present.
+They also return structured MCP results with the same task fields exposed by
+the JSON API.
 
 ## JSON API
 

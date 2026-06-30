@@ -84,6 +84,7 @@ func TestSearchService_RequestPlumbingAndResultMapping(t *testing.T) {
 		BodyText:   body,
 		Score:      0.75,
 		SourceType: rag.SourceBoox,
+		Device:     "Palma2",
 	}}}
 	svc := &searchService{
 		retriever: r,
@@ -104,7 +105,7 @@ func TestSearchService_RequestPlumbingAndResultMapping(t *testing.T) {
 		t.Fatalf("results len = %d, want 1", len(got))
 	}
 	res := got[0]
-	if res.Path != "/notes/work/alpha.note" || res.Page != 3 || res.Title != "Alpha" || res.SourceType != rag.SourceBoox || res.Score != float32(0.75) {
+	if res.Path != "/notes/work/alpha.note" || res.Page != 3 || res.Title != "Alpha" || res.SourceType != rag.SourceBoox || res.Device != "Palma2" || res.Score != float32(0.75) {
 		t.Fatalf("result mapping mismatch: %+v", res)
 	}
 	if !strings.Contains(res.Snippet, "needle") || !strings.HasPrefix(res.Snippet, "…") {
@@ -150,6 +151,7 @@ func TestSearchService_AdvancedOptionsPlumbToRetriever(t *testing.T) {
 	}
 
 	_, err := svc.SearchAdvanced(context.Background(), "alpha", SearchOptions{
+		DeviceModel: "Palma2",
 		Sources:     []string{rag.SourceForestNote},
 		Locations:   []SearchLocationFilter{{Source: rag.SourceForestNote, ID: "folder-1", FullPath: "Work"}},
 		CreatedFrom: createdFrom,
@@ -163,6 +165,9 @@ func TestSearchService_AdvancedOptionsPlumbToRetriever(t *testing.T) {
 	}
 	if r.lastReq.Sort != "date_desc" || r.lastReq.Limit != 12 {
 		t.Fatalf("sort/limit not plumbed: %+v", r.lastReq)
+	}
+	if r.lastReq.Device != "Palma2" {
+		t.Fatalf("device model not plumbed: %+v", r.lastReq)
 	}
 	if r.lastReq.Mode != rag.SearchModeKeyword {
 		t.Fatalf("mode not plumbed: %+v", r.lastReq)

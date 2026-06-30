@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -69,6 +70,108 @@ func TestFormatMCPTask_NoAttachmentNoLine(t *testing.T) {
 	out := formatMCPTask(mcpTask{ID: "t2", Title: "x", Status: "needsAction"})
 	if strings.Contains(out, "Attachment:") {
 		t.Errorf("unexpected Attachment line for an attachment-less task:\n%s", out)
+	}
+}
+
+func TestMCPSearchNotesForwardsRationalFiltersAndReturnsStructuredOutput(t *testing.T) {
+	var gotQuery url.Values
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/search" && r.Method == "GET" {
+			gotQuery = r.URL.Query()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]map[string]any{{
+				"path":         "forestnote://NB1/PG1",
+				"page":         0,
+				"title":        "Planning",
+				"snippet":      "alpha project notes",
+				"score":        0.77,
+				"source_type":  "forestnote",
+				"folder":       "Work",
+				"device_model": "Viwoods",
+				"created_at":   "2026-06-01T00:00:00Z",
+				"modified_at":  "2026-06-02T00:00:00Z",
+			}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close()
+
+	client := newMCPAPIClient(mockServer.URL, "https://ub.example", "", nil, false)
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	registerMCPTools(server, client)
+
+	res, err := callMCPTool(t, server, "search_notes", searchNotesInput{
+		Query:       "alpha",
+		Sources:     []string{"forestnote", "boox"},
+		Folder:      "Work",
+		Location:    "source:forestnote:folder:abc",
+		DeviceModel: "Viwoods",
+		CreatedFrom: "2026-06-01",
+		ModifiedTo:  "2026-06-30",
+		Sort:        "date_desc",
+		Mode:        "keyword",
+		Limit:       5,
+	})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if gotQuery.Get("q") != "alpha" || gotQuery.Get("folder") != "Work" ||
+		gotQuery.Get("location") != "source:forestnote:folder:abc" ||
+		gotQuery.Get("device_model") != "Viwoods" ||
+		gotQuery.Get("created_from") != "2026-06-01" ||
+		gotQuery.Get("modified_to") != "2026-06-30" ||
+		gotQuery.Get("sort") != "date_desc" ||
+		gotQuery.Get("mode") != "keyword" ||
+		gotQuery.Get("limit") != "5" {
+		t.Fatalf("forwarded query = %v", gotQuery)
+	}
+	if sources := gotQuery["source"]; len(sources) != 2 || sources[0] != "forestnote" || sources[1] != "boox" {
+		t.Fatalf("source params = %v, want [forestnote boox]", sources)
+	}
+
+	var out searchNotesOutput
+	raw, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode structured content: %v", err)
+	}
+	if out.Count != 1 || out.Results[0].SourceType != "forestnote" || out.Results[0].DetailURL != "https://ub.example/files?detail=forestnote%3A%2F%2FNB1%2FPG1" {
+		t.Fatalf("structured output = %+v", out)
+	}
+	tc := res.Content[0].(*mcp.TextContent)
+	if !strings.Contains(tc.Text, "Source type: forestnote") || !strings.Contains(tc.Text, "Device model: Viwoods") {
+		t.Fatalf("text fallback missing metadata:\n%s", tc.Text)
+	}
+}
+
+func TestMCPSearchNotesAcceptsDeprecatedAliases(t *testing.T) {
+	var gotQuery url.Values
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer mockServer.Close()
+
+	client := newMCPAPIClient(mockServer.URL, "", "", nil, false)
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	registerMCPTools(server, client)
+
+	if _, err := callMCPTool(t, server, "search_notes", searchNotesInput{
+		Query:    "alpha",
+		Device:   "Palma2",
+		DateFrom: "2026-01-01",
+		DateTo:   "2026-02-01",
+	}); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if gotQuery.Get("device_model") != "Palma2" ||
+		gotQuery.Get("modified_from") != "2026-01-01" ||
+		gotQuery.Get("modified_to") != "2026-02-01" {
+		t.Fatalf("deprecated aliases forwarded as %v", gotQuery)
 	}
 }
 
@@ -165,3 +268,48 @@ func TestMCPEditTextBoxAPIError(t *testing.T) {
 		t.Error("expected error surfaced from a non-200 API response")
 	}
 }
+
+func TestMCPListTasksReturnsStructuredOutput(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/tasks" && r.Method == "GET" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]mcpTask{{
+				ID:         "t1",
+				Title:      "follow up",
+				Status:     "needs_action",
+				Priority:   stringPtr("1"),
+				Categories: []string{"urgent"},
+				ForestNote: &mcpTaskForestNote{NotebookID: "NB1", NotebookName: "Planning", Source: "lasso"},
+			}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close()
+
+	client := newMCPAPIClient(mockServer.URL, "", "", nil, false)
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	registerMCPTools(server, client)
+
+	res, err := callMCPTool(t, server, "list_tasks", listTasksInput{Priority: "1", Category: "urgent"})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	var out taskListOutput
+	raw, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode structured content: %v", err)
+	}
+	if out.Count != 1 || out.Tasks[0].ID != "t1" || out.Tasks[0].ForestNote.NotebookID != "NB1" {
+		t.Fatalf("structured output = %+v", out)
+	}
+	tc := res.Content[0].(*mcp.TextContent)
+	if !strings.Contains(tc.Text, "From ForestNote notebook: Planning") {
+		t.Fatalf("text fallback missing provenance:\n%s", tc.Text)
+	}
+}
+
+func stringPtr(s string) *string { return &s }

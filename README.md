@@ -132,7 +132,7 @@ docker compose up -d --build
 
 ## Release Notes
 
-The current release train is documented in [CHANGELOG.md](CHANGELOG.md). This documentation set is prepared for `v1.1.0`.
+The current release train is documented in [CHANGELOG.md](CHANGELOG.md). This documentation set is prepared for `v1.2.0`.
 
 ## License
 

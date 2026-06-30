@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sysop/ultrabridge/internal/logging"
 	"github.com/sysop/ultrabridge/internal/service"
@@ -75,6 +76,57 @@ func TestAPISearch_ModeParamThreadsThrough(t *testing.T) {
 	}
 	if svc.lastOpts.Mode != service.SearchModeKeyword {
 		t.Fatalf("API mode = %q, want keyword", svc.lastOpts.Mode)
+	}
+}
+
+func TestAPISearch_FilterParamsThreadThrough(t *testing.T) {
+	svc := &mockSearchService{embeddingPipelineConfigured: true}
+	handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
+
+	req := httptest.NewRequest("GET", "/api/search?q=test&source=boox&source=forestnote&folder=Work&device_model=Palma2&created_from=2026-06-01&modified_to=2026-06-30&sort=date_desc", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := svc.lastOpts.Sources; len(got) != 2 || got[0] != "boox" || got[1] != "forestnote" {
+		t.Fatalf("sources = %v, want [boox forestnote]", got)
+	}
+	if svc.lastOpts.Folder != "Work" {
+		t.Fatalf("folder = %q, want Work", svc.lastOpts.Folder)
+	}
+	if svc.lastOpts.DeviceModel != "Palma2" {
+		t.Fatalf("device model = %q, want Palma2", svc.lastOpts.DeviceModel)
+	}
+	if svc.lastOpts.CreatedFrom.IsZero() || svc.lastOpts.CreatedFrom.Format(time.DateOnly) != "2026-06-01" {
+		t.Fatalf("created_from = %s, want 2026-06-01", svc.lastOpts.CreatedFrom)
+	}
+	if svc.lastOpts.ModifiedTo.IsZero() || svc.lastOpts.ModifiedTo.Format(time.DateOnly) != "2026-06-30" {
+		t.Fatalf("modified_to = %s, want 2026-06-30", svc.lastOpts.ModifiedTo)
+	}
+	if svc.lastOpts.Sort != "date_desc" {
+		t.Fatalf("sort = %q, want date_desc", svc.lastOpts.Sort)
+	}
+}
+
+func TestAPISearch_DeprecatedAliasesThreadThrough(t *testing.T) {
+	svc := &mockSearchService{embeddingPipelineConfigured: true}
+	handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
+
+	req := httptest.NewRequest("GET", "/api/search?q=test&device=Palma2&date_from=2026-01-01&date_to=2026-01-31", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if svc.lastOpts.DeviceModel != "Palma2" {
+		t.Fatalf("device alias = %q, want Palma2", svc.lastOpts.DeviceModel)
+	}
+	if svc.lastOpts.ModifiedFrom.IsZero() || svc.lastOpts.ModifiedFrom.Format(time.DateOnly) != "2026-01-01" {
+		t.Fatalf("date_from alias = %s, want 2026-01-01", svc.lastOpts.ModifiedFrom)
+	}
+	if svc.lastOpts.ModifiedTo.IsZero() || svc.lastOpts.ModifiedTo.Format(time.DateOnly) != "2026-01-31" {
+		t.Fatalf("date_to alias = %s, want 2026-01-31", svc.lastOpts.ModifiedTo)
 	}
 }
 

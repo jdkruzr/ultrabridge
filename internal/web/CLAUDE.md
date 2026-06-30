@@ -171,7 +171,7 @@ In addition to previously documented methods, `BooxStore` now includes:
 
 ### Search & Notes API (requires retriever)
 
-- `GET /api/search?q=...&folder=...&source=...&limit=...` -- hybrid search via `SearchService.Search`. `source` is repeated (`supernote|boox|forestnote|digest`; none = all). `limit` is optional: absent/0 → service default (20), positive integer above the ceiling → clamped to 100, non-integer or negative → treated as 0 (intentionally lenient — keeps the surface friendly to MCP callers that occasionally send the param stringly). Returns `400` only when `q` is empty.
+- `GET /api/search?q=...&folder=...&source=...&location=...&device_model=...&created_from=...&modified_to=...&limit=...` -- hybrid search via `SearchService.SearchAdvanced`. `source` is repeated (`supernote|boox|forestnote|remarkable|digest`; none = all). `device` is a deprecated alias for `device_model`; `date_from`/`date_to` and `from`/`to` are deprecated aliases for modified-date bounds. `limit` is optional: absent/0 → service default (20), positive integer above the ceiling → clamped to 100, non-integer or negative → treated as 0 (intentionally lenient — keeps the surface friendly to MCP callers that occasionally send the param stringly). Returns `400` only when `q` is empty.
 - `GET /api/notes/pages?path=...` -- fetch indexed content for a note (all pages)
 - `GET /api/notes/pages/image?path=...&page=...` -- render JPEG image for a page
 

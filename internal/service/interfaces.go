@@ -471,6 +471,7 @@ type SearchResult struct {
 	Score      float32   `json:"score"`
 	SourceType string    `json:"source_type"` // supernote|boox|forestnote|remarkable|digest
 	Folder     string    `json:"folder,omitempty"`
+	Device     string    `json:"device_model,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitempty"`
 	ModifiedAt time.Time `json:"modified_at,omitempty"`
 }
@@ -500,6 +501,7 @@ const (
 // SearchOptions carries optional filters/sort for the richer search UI.
 type SearchOptions struct {
 	Folder       string // legacy exact folder filter
+	DeviceModel  string // physical/source-native device model when available
 	Sources      []string
 	Locations    []SearchLocationFilter
 	CreatedFrom  time.Time

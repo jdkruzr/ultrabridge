@@ -205,6 +205,7 @@ All other configuration (auth, OCR, sources, logging, RAG, chat) is configured v
 - Built into `cmd/ultrabridge`; mounted at `/mcp` behind the main auth/OAuth flow
 - Tools: `search_notes`, `get_note_pages`, `get_note_image`, `list_text_boxes`, `edit_text_box`, and task CRUD/housekeeping tools
 - Tool handlers proxy through UltraBridge JSON APIs using an internal bearer token
+- Tool results include MCP `structuredContent` plus a short text fallback; `search_notes` supports source, location, folder, device_model, created/modified date, sort, mode, and limit filters, with deprecated `device` and `date_from`/`date_to` aliases still accepted
 - Result deep-links use `boox_external_base_url` when configured, falling back to the local listener URL
 
 ### MCP Token Management (internal/mcpauth)

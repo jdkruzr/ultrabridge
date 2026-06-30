@@ -294,11 +294,11 @@ iteratively and reasons across results.
 **MCP Tools exposed by UltraBridge:**
 
 ```
-search_notes(query, folder?, device?, date_range?)
-  -> returns matching pages: text, metadata (date, device, folder, title, page)
+search_notes(query, source?/sources?, folder?, location?, device_model?, created_from?, created_to?, modified_from?, modified_to?, sort?, mode?, limit?)
+  -> returns matching pages with structured metadata (source type, folder, device model when available, title, page, dates, links)
 
 get_note_pages(note_path)
-  -> returns all pages of a specific note with full OCR text
+  -> returns all pages of a specific note with full OCR text and page metadata
 
 get_note_image(note_path, page)
   -> returns rendered JPEG of the handwritten page
