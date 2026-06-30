@@ -1332,18 +1332,12 @@ func (h *Handler) settingsData(r *http.Request) map[string]interface{} {
 	if nt := r.URL.Query().Get("new_token"); nt != "" {
 		data["NewMCPToken"] = nt
 	}
-	if mcpCfg, ok := cfg.(*appconfig.Config); ok && mcpCfg != nil && mcpCfg.MCPPort > 0 {
-		host := r.Host
-		if colon := strings.LastIndex(host, ":"); colon >= 0 && !strings.Contains(host[colon:], "]") {
-			host = host[:colon]
-		}
+	if cfg != nil {
 		scheme := "http"
 		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 			scheme = "https"
 		}
-		data["MCPEnabled"] = true
-		data["MCPHTTPURL"] = fmt.Sprintf("%s://%s:%d/sse", scheme, host, mcpCfg.MCPPort)
-		data["MCPStdioCommand"] = "docker exec -i ub-mcp ub-mcp"
+		data["MCPHTTPURL"] = fmt.Sprintf("%s://%s/mcp", scheme, r.Host)
 	}
 	return data
 }

@@ -7,17 +7,7 @@ WORKDIR /build
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 go build -o /ultrabridge ./cmd/ultrabridge/ && \
-    CGO_ENABLED=0 go build -o /ub-mcp ./cmd/ub-mcp/
-
-FROM alpine:3.20 AS ub-mcp
-
-RUN apk add --no-cache ca-certificates tzdata
-COPY --from=builder /ub-mcp /usr/local/bin/ub-mcp
-
-EXPOSE 8081
-ENTRYPOINT ["ub-mcp"]
-CMD ["--http", ":8081"]
+    CGO_ENABLED=0 go build -o /ultrabridge ./cmd/ultrabridge/
 
 FROM alpine:3.20 AS ultrabridge
 

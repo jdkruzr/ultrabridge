@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.1.0 - 2026-06-30
+
+### Changed
+
+- MCP is now a first-class built-in UltraBridge endpoint at `/mcp`.
+- Removed the separate `ub-mcp` sidecar, stdio transport, sidecar Docker target, sidecar Compose service, and `mcp_port` configuration.
+- Updated Settings -> Integrations to show the built-in `/mcp` endpoint and MCP token management only.
+- `install.sh` and `rebuild.sh` now build and manage only the main UltraBridge container.
+
+### Added
+
+- Built-in `/mcp` now exposes ForestNote text box tools:
+  - `list_text_boxes`
+  - `edit_text_box`
+
+### Verified
+
+- `go test ./...`
+- `go build ./cmd/ultrabridge/`
+- `bash -n install.sh`
+- `bash -n rebuild.sh`
+- `docker compose -f docker-compose.yml config --quiet`
+
 ## v1.0.0 - 2026-06-29
 
 UltraBridge's first major release. This release turns the project from a Supernote/Boox helper into a multi-source sync, search, task, and MCP hub.
@@ -12,7 +35,7 @@ UltraBridge's first major release. This release turns the project from a Superno
 - **CalDAV attachments:** tasks can expose signed attachment URLs, including ForestNote-rendered task context and generic CalDAV attachment flows. MCP task output now surfaces attachment summaries.
 - **Settings and source model overhaul:** Settings are grouped into Devices, AI & Processing, Integrations, and System. Source rows expose sync-model descriptors and per-source device slots.
 - **Search/RAG/chat improvements:** search is keyword-first, source-aware, and wired to richer ForestNote and reMarkable content. Embedding chunking, retrieval behavior, and local chat integration received substantial test coverage and fixes.
-- **MCP/API polish:** expanded task APIs and MCP tools for filtering, task details, provenance, URLs, attachments, purge operations, and safer bearer-token sidecar usage.
+- **MCP/API polish:** expanded task APIs and MCP tools for filtering, task details, provenance, URLs, attachments, purge operations, and safer bearer-token usage.
 
 ### Device Sources
 
@@ -26,7 +49,7 @@ UltraBridge's first major release. This release turns the project from a Superno
 
 - Added signed task attachment serving and CalDAV `ATTACH` presentation.
 - Added ForestNote task provenance, native links, rendered attachment support, and task purge/trash parity.
-- Added task attachment visibility to the in-process `/mcp` server and the standalone `ub-mcp` tool surface.
+- Added task attachment visibility to MCP task output.
 - Expanded task list filtering by ForestNote metadata, category, priority, deleted state, and combined filters.
 - Added audit-friendly task mutation behavior across API and MCP surfaces.
 
@@ -51,7 +74,7 @@ UltraBridge's first major release. This release turns the project from a Superno
 - Added Apache 2.0 `LICENSE` and `NOTICE`.
 - Vendored the private Rhizome Go dependency in-tree so Docker builds do not need private credentials.
 - Added DB read/write connection pooling to avoid indexing starving reads.
-- Updated Docker/Compose defaults for built-in SPC, reMarkable mounts, log files, and optional MCP sidecar bearer-token auth.
+- Updated Docker/Compose defaults for built-in SPC, reMarkable mounts, log files, and MCP bearer-token auth.
 - Added extensive docs for SPC protocol behavior, ForestNote sync, reMarkable cutover, sync vectors, and source/settings IA.
 
 ### Tests

@@ -344,14 +344,14 @@ understand the arc of what happened across 6 months of scattered meeting notes."
 
 The MCP server would be a lightweight addition to UltraBridge:
 
-- New `internal/mcp/` package implementing the MCP protocol (JSON-RPC over stdio or SSE)
+- Built-in MCP endpoint at `/mcp`
 - Tools call into existing infrastructure:
   - `search_notes` -> hybrid FTS5 + vector retrieval (same as chat tab)
   - `get_note_pages` -> `search.GetContent()` (already exists)
   - `get_note_image` -> `/files/boox/render` endpoint (already exists, just needs
     to return bytes instead of serving HTTP)
 - Registered in Claude Desktop / claude.ai via MCP config
-- Runs as a sidecar process or exposed as HTTP SSE endpoint
+- Runs inside the main UltraBridge process
 
 No new database work — the MCP tools are a thin interface over retrieval
 and rendering capabilities that already exist.

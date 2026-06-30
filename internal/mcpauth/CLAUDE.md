@@ -12,7 +12,7 @@ Bearer token management for MCP server authentication. Stores SHA-256 hashed tok
 
 ## Dependencies
 - **Uses**: `database/sql`, `crypto/sha256`, `crypto/rand`, `encoding/base64`
-- **Used by**: `cmd/ub-mcp` (token validation in auth middleware), `cmd/ultrabridge` (migration at startup), `internal/web` (create/revoke UI)
+- **Used by**: `cmd/ultrabridge` (migration at startup and `/mcp` auth), `internal/web` (create/revoke UI)
 - **Boundary**: Stateless functions operating on shared DB. No internal state, no goroutines.
 
 ## Key Decisions

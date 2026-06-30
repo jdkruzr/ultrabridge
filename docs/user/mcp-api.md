@@ -12,23 +12,6 @@ https://your-public-host/mcp
 
 Use this for Claude.ai web or other MCP clients that support HTTP/SSE. Claude.ai must be able to reach the URL publicly.
 
-## Standalone `ub-mcp`
-
-The standalone sidecar is useful for Claude Desktop, local agents, or deployments that prefer a separate MCP process.
-
-Build:
-
-```bash
-go build ./cmd/ub-mcp/
-```
-
-Bearer-token environment:
-
-```bash
-UB_MCP_API_URL=http://localhost:8443
-UB_MCP_API_TOKEN=...
-```
-
 Create tokens in **Settings -> Integrations -> MCP Tokens**.
 
 ## Note Tools
@@ -38,6 +21,13 @@ Create tokens in **Settings -> Integrations -> MCP Tokens**.
 - `get_note_image`
 
 These tools read indexed note text and rendered page images through UltraBridge's API.
+
+## ForestNote Text Box Tools
+
+- `list_text_boxes`
+- `edit_text_box`
+
+These tools discover and edit synced ForestNote text boxes. Server-authored edits relay back to devices on their next sync.
 
 ## Task Tools
 

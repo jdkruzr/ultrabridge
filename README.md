@@ -34,7 +34,7 @@ The installer builds UltraBridge, writes a Docker Compose configuration, starts 
 docker compose up -d --build
 ```
 
-The checked-in compose file publishes the main app on `8443`, the Supernote SPC listener on `8089`, and the optional `ub-mcp` sidecar on `8081` when the `mcp` profile is enabled.
+The checked-in compose file publishes the main app on `8443` and the Supernote SPC listener on `8089`. MCP is served by the main app at `/mcp`.
 
 ### Local Development
 
@@ -98,7 +98,6 @@ Bootstrap environment variables are still supported for automation and overrides
 | `UB_DB_PATH` | `/data/ultrabridge.db` | Notes, settings, source state, and search data. |
 | `UB_TASK_DB_PATH` | `/data/ultrabridge-tasks.db` | CalDAV/task database. |
 | `UB_LISTEN_ADDR` | `:8443` | Main app listener. |
-| `UB_MCP_PORT` | `8081` | Host port used by the optional `ub-mcp` sidecar. |
 | `UB_SPC_MODE` | `client` | Set to `server`, or use Settings, to enable the Supernote SPC listener. |
 | `UB_SPC_LISTEN_ADDR` | `:8089` | Supernote SPC listener address. |
 | `UB_SYNC_ENABLED` | `false` | Legacy bootstrap gate for ForestNote sync; current installs should use a ForestNote source. |
@@ -109,7 +108,6 @@ Secrets such as API keys, MCP bearer tokens, task attachment signing keys, and S
 
 ```bash
 go build ./cmd/ultrabridge/
-go build ./cmd/ub-mcp/
 go test ./...
 ```
 
@@ -134,7 +132,7 @@ docker compose up -d --build
 
 ## Release Notes
 
-The current release train is documented in [CHANGELOG.md](CHANGELOG.md). This documentation set is prepared for `v1.0.0`.
+The current release train is documented in [CHANGELOG.md](CHANGELOG.md). This documentation set is prepared for `v1.1.0`.
 
 ## License
 

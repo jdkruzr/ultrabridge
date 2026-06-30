@@ -5,59 +5,22 @@
   <div class="card" id="mcp">
     <h2>MCP</h2>
     <p class="text-small" style="margin-bottom: 1rem;">
-      The <code>ub-mcp</code> server exposes note-search tools to AI agents.
+      The built-in <code>/mcp</code> endpoint exposes UltraBridge tools to AI agents.
     </p>
 
-    {{if .Config}}
-    <h3 style="margin-bottom: 1rem;">Server</h3>
-    <div class="form-group">
-      <label for="config-mcp-port">ub-mcp container port</label>
-      <p class="device-info" style="margin-bottom: 0.5rem;">
-        Host port the sibling <code>ub-mcp</code> container is exposed on. Used to render
-        copy-pasteable client configs in the Connection section below. Set to 0 to hide that section.
-      </p>
-      <input id="config-mcp-port" type="number" min="0" max="65535" value="{{.Config.MCPPort}}">
-    </div>
-    <div class="toolbar">
-      <button type="button" onclick="saveMCPConfig()">Save MCP Server</button>
-      <span id="mcp-config-status" class="text-small"></span>
-    </div>
-    {{end}}
-
-    {{if .MCPEnabled}}
-    <hr>
     <h3 style="margin-bottom: 1rem;" id="mcp-connection">Connection</h3>
     <p class="text-small" style="margin-bottom: 1rem;">
-      Two transports are available. Create a bearer token in the Tokens section below and
-      paste it into your client config.
+      Create a bearer token in the Tokens section below and paste it into your client config.
     </p>
 
     <div class="form-group">
-      <label>HTTP SSE URL</label>
+      <label>Endpoint URL</label>
       <code style="display:block; background:var(--surface-color); padding:0.75rem; border:1px solid var(--border-color); border-radius:4px; word-break:break-all; user-select:all;">{{.MCPHTTPURL}}</code>
       <p class="text-small">Use this for network-accessible clients. Send the bearer token in an <code>Authorization: Bearer &lt;token&gt;</code> header.</p>
     </div>
 
     <div class="form-group">
-      <label>Stdio command</label>
-      <code style="display:block; background:var(--surface-color); padding:0.75rem; border:1px solid var(--border-color); border-radius:4px; word-break:break-all; user-select:all;">{{.MCPStdioCommand}}</code>
-      <p class="text-small">The MCP client spawns this per session. Requires <code>docker</code> on the client host, or an <code>ssh</code> wrapper for remote clients.</p>
-    </div>
-
-    <div class="form-group">
-      <label>Claude Desktop / Gemini CLI (stdio)</label>
-      <pre style="background:var(--surface-color); padding:0.75rem; border:1px solid var(--border-color); border-radius:4px; overflow-x:auto; user-select:all;"><code>{
-  "mcpServers": {
-    "ultrabridge": {
-      "command": "docker",
-      "args": ["exec", "-i", "ub-mcp", "ub-mcp"]
-    }
-  }
-}</code></pre>
-    </div>
-
-    <div class="form-group">
-      <label>HTTP SSE client (with bearer token)</label>
+      <label>MCP client (with bearer token)</label>
       <pre style="background:var(--surface-color); padding:0.75rem; border:1px solid var(--border-color); border-radius:4px; overflow-x:auto; user-select:all;"><code>{
   "mcpServers": {
     "ultrabridge": {
@@ -67,7 +30,6 @@
   }
 }</code></pre>
     </div>
-    {{end}}
 
     <hr>
     <h3 style="margin-bottom: 1rem;" id="mcp-tokens">Tokens</h3>

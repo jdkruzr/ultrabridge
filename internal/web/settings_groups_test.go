@@ -122,25 +122,25 @@ func TestSettingsGroupMembership(t *testing.T) {
 	}
 }
 
-// TestSettingsMCPConsolidation asserts MCP is one card with Server /
-// Connection / Tokens subsections. sync-model-and-settings-ia.AC5.2.
+// TestSettingsMCPConsolidation asserts MCP is one card with Connection /
+// Tokens subsections. The MCP server is built into /mcp; there is no sidecar
+// port or stdio command to configure.
 func TestSettingsMCPConsolidation(t *testing.T) {
 	h, _ := newSettingsGroupsHandler(t)
-
-	// MCPPort > 0 makes the Connection subsection render.
-	putConfigJSON(t, h, `{"mcp_port": 8081}`)
 
 	body := getGroupFragment(t, h, "integrations")
 	if n := strings.Count(body, "<h2>MCP</h2>"); n != 1 {
 		t.Errorf("MCP <h2> count = %d, want exactly 1", n)
 	}
-	for _, sub := range []string{">Server</h3>", ">Connection</h3>", ">Tokens</h3>"} {
+	for _, sub := range []string{">Connection</h3>", ">Tokens</h3>", "/mcp"} {
 		if !strings.Contains(body, sub) {
 			t.Errorf("MCP card missing subsection marker %q", sub)
 		}
 	}
-	if !strings.Contains(body, "config-mcp-port") {
-		t.Error("MCP card missing the Server port field")
+	for _, removed := range []string{"config-mcp-port", "ub-mcp", "Stdio command"} {
+		if strings.Contains(body, removed) {
+			t.Errorf("MCP card still contains removed sidecar text %q", removed)
+		}
 	}
 }
 
@@ -202,12 +202,11 @@ func TestSettingsSaveRoundTrips(t *testing.T) {
 	// Partial PUT /api/config bodies update only their own field (the merge
 	// the split JS savers rely on).
 	putConfigJSON(t, h, `{"username": "alice"}`)
-	putConfigJSON(t, h, `{"mcp_port": 9999}`)
 	putConfigJSON(t, h, `{"ocr_model": "qwen3-vl"}`)
 	cfg = loadConfig(t, cfgService)
-	if cfg.Username != "alice" || cfg.MCPPort != 9999 || cfg.OCRModel != "qwen3-vl" {
-		t.Errorf("partial PUTs did not land: username=%q mcp_port=%d ocr_model=%q",
-			cfg.Username, cfg.MCPPort, cfg.OCRModel)
+	if cfg.Username != "alice" || cfg.OCRModel != "qwen3-vl" {
+		t.Errorf("partial PUTs did not land: username=%q ocr_model=%q",
+			cfg.Username, cfg.OCRModel)
 	}
 	if !cfg.EmbedEnabled || cfg.CalDAVCollectionName != "My Tasks" {
 		t.Error("partial PUT clobbered fields outside its body")

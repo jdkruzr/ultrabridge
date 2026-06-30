@@ -5,12 +5,6 @@ import (
 	"testing"
 )
 
-// These tests mirror cmd/ub-mcp/native_deeplink_test.go beat-for-beat so
-// the two MCP surfaces' deep-link decoders stay in sync — the parity is
-// the contract documented in cmd/ub-mcp/CLAUDE.md's "two surfaces" note.
-// If a future change to one decoder's behavior doesn't show up here, the
-// surfaces have silently drifted.
-
 func TestDecodeMCPNativeDeepLink_Success(t *testing.T) {
 	payload := `{"appName":"note","fileId":"x","filePath":"/storage/Note/Vocabulary.note","page":3,"pageId":"defabc"}`
 	encoded := base64.StdEncoding.EncodeToString([]byte(payload))

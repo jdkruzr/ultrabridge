@@ -29,20 +29,12 @@ This page covers current user-facing deployments. Historical design and test pla
 3. Disconnect and reconnect the MCP server in Claude.ai after changing passwords or OAuth-related settings.
 4. Check the Logs tab for OAuth or MCP auth failures.
 
-### MCP Sidecar Cannot Authenticate
+### MCP Bearer Token Fails
 
 1. Create a bearer token in **Settings -> Integrations -> MCP Tokens**.
-2. Put it in an untracked `.env`:
-
-   ```bash
-   UB_MCP_API_TOKEN=...
-   ```
-
-3. Start the sidecar profile:
-
-   ```bash
-   docker compose --profile mcp up -d --build ub-mcp
-   ```
+2. Configure the MCP client to send `Authorization: Bearer <token>` to the main `/mcp` endpoint.
+3. Confirm the reverse proxy forwards the `Authorization` header to UltraBridge.
+4. Revoke and recreate the token if the token may have been copied with whitespace or shell quoting.
 
 ## CalDAV
 

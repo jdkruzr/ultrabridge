@@ -43,12 +43,6 @@ const (
 	// Server
 	KeyWebEnabled = "web_enabled"
 
-	// MCP
-	// KeyMCPPort is the host-exposed port of the sibling ub-mcp container.
-	// Used by the Settings UI to render copy-pasteable client configs
-	// (HTTP SSE URL, stdio docker exec command). 0 hides the helper card.
-	KeyMCPPort = "mcp_port"
-
 	// SPC server (UB-as-SPC refactor). Mode defaults to "client" = no listener,
 	// so UB behaves exactly as today unless explicitly switched to "server".
 	KeySPCMode       = "spc_mode"
@@ -149,7 +143,6 @@ var envVarForKey = map[string]string{
 	KeyLogVerboseAPI:        "UB_LOG_VERBOSE_API",
 	KeyCalDAVCollectionName: "UB_CALDAV_COLLECTION_NAME",
 	KeyDueTimeMode:          "UB_DUE_TIME_MODE",
-	KeyMCPPort:              "UB_MCP_PORT",
 	KeySPCMode:              "UB_SPC_MODE",
 	KeySPCListenAddr:        "UB_SPC_LISTEN_ADDR",
 	KeySPCTLSCert:           "UB_SPC_TLS_CERT",
@@ -183,7 +176,6 @@ var defaultValues = map[string]string{
 	KeyCalDAVCollectionName: "Tasks",
 	KeyDueTimeMode:          "preserve",
 	KeyWebEnabled:           "true",
-	KeyMCPPort:              "8081",
 	KeySPCMode:              "client",
 	KeySPCListenAddr:        ":8089",
 	// Constant.SECRET (com/ratta/constants/Constant.java:46) — the SPC JWT

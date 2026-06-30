@@ -87,47 +87,6 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.WebEnabled != true {
 		t.Errorf("expected WebEnabled=true (default), got false")
 	}
-	if cfg.MCPPort != 8081 {
-		t.Errorf("expected MCPPort=8081 (default), got %d", cfg.MCPPort)
-	}
-}
-
-// TestMCPPortRoundtrip verifies MCPPort survives Save → Load via the
-// settings DB and that env var override + default still apply.
-func TestMCPPortRoundtrip(t *testing.T) {
-	db := openTestDB(t)
-	ctx := context.Background()
-
-	cfg, err := Load(ctx, db)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if cfg.MCPPort != 8081 {
-		t.Fatalf("expected default MCPPort=8081, got %d", cfg.MCPPort)
-	}
-
-	cfg.MCPPort = 9091
-	if _, err := Save(ctx, db, cfg); err != nil {
-		t.Fatalf("Save failed: %v", err)
-	}
-
-	reloaded, err := Load(ctx, db)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if reloaded.MCPPort != 9091 {
-		t.Errorf("expected MCPPort=9091 after roundtrip, got %d", reloaded.MCPPort)
-	}
-
-	// Env var should override the persisted DB value.
-	t.Setenv("UB_MCP_PORT", "12345")
-	envOverlay, err := Load(ctx, db)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-	if envOverlay.MCPPort != 12345 {
-		t.Errorf("expected env override MCPPort=12345, got %d", envOverlay.MCPPort)
-	}
 }
 
 func TestSPCQuotaBytesParsesInt64WithDefault(t *testing.T) {

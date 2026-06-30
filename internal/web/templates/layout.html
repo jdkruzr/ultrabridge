@@ -1188,13 +1188,6 @@
           putConfig(config, document.getElementById('ocr-config-status'));
         }
 
-        function saveMCPConfig() {
-          putConfig(
-            { mcp_port: parseInt(document.getElementById('config-mcp-port').value) || 0 },
-            document.getElementById('mcp-config-status')
-          );
-        }
-
         // Sources API functions
         function toggleSourceEnabled(sourceId, enabled) {
           var statusEl = document.getElementById('sources-status');

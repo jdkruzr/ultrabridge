@@ -104,9 +104,7 @@ type listTasksInput struct {
 	Status    string `json:"status,omitempty"`
 	DueBefore string `json:"due_before,omitempty"`
 	DueAfter  string `json:"due_after,omitempty"`
-	// ForestNote provenance + metadata filters; see the standalone
-	// cmd/ub-mcp/tasks.go for the full filter semantics. These are mirror
-	// fields to keep the two MCP surfaces aligned.
+	// ForestNote provenance + metadata filters.
 	NotebookID     string `json:"notebook_id,omitempty"`
 	NotebookName   string `json:"notebook_name,omitempty"`
 	Source         string `json:"source,omitempty"`
@@ -156,7 +154,7 @@ type purgeCompletedTasksInput struct{}
 
 // purgeDeletedTasksInput controls the age cutoff for the hard-purge. Zero
 // means "use the server default" (30 days). Negative values are rejected
-// server-side. Mirrors PurgeDeletedTasksInput in cmd/ub-mcp/tasks.go.
+// server-side.
 type purgeDeletedTasksInput struct {
 	OlderThanDays int `json:"older_than_days,omitempty"`
 }
@@ -171,9 +169,8 @@ type mcpTaskLink struct {
 }
 
 // mcpNativeDeepLink mirrors the Supernote/Viwoods native deep-link blob
-// stuffed into the URL field on device-created tasks. See the standalone
-// ub-mcp/tasks.go for the full rationale; both surfaces decode it for the
-// same reason (avoid dumping base64 walls into LLM context).
+// stuffed into the URL field on device-created tasks. Decoding lets the MCP
+// formatter show a friendly source label instead of a base64 wall.
 type mcpNativeDeepLink struct {
 	AppName  string `json:"appName"`
 	FileID   string `json:"fileId"`
@@ -183,10 +180,8 @@ type mcpNativeDeepLink struct {
 	Filename string `json:"-"`
 }
 
-// decodeMCPNativeDeepLink is the in-process MCP twin of decodeNativeDeepLink
-// in cmd/ub-mcp/tasks.go. Kept separate to preserve the package boundary
-// between the two MCP surfaces (no shared internal package for this) — the
-// duplication is documented in cmd/ub-mcp/CLAUDE.md's "two surfaces" note.
+// decodeMCPNativeDeepLink tries to parse a task URL as a base64-encoded native
+// deep-link blob. Returns false on plain URLs and malformed payloads.
 func decodeMCPNativeDeepLink(raw string) (mcpNativeDeepLink, bool) {
 	// `eyJ` is the base64 of `{"<letter>`; every native deep-link payload
 	// has an ASCII-letter first key (`appName`, `fileId`, etc.) so its
@@ -328,8 +323,7 @@ func formatMCPTask(t mcpTask) string {
 
 // formatMCPAttachment renders one attachment as a compact single-line summary —
 // filename (or "(unnamed)"), optional MIME type + byte size, then the fetch URL
-// (or an inline/no-URL note). Mirrors the standalone ub-mcp sidecar's
-// formatAttachment so both MCP surfaces read identically.
+// (or an inline/no-URL note).
 func formatMCPAttachment(a mcpAttachment) string {
 	name := a.Filename
 	if name == "" {
@@ -375,6 +369,15 @@ type getNotePagesInput struct {
 type getNoteImageInput struct {
 	NotePath string `json:"note_path"`
 	Page     int    `json:"page"`
+}
+
+type listTextBoxesInput struct {
+	NotebookID string `json:"notebook_id"`
+}
+
+type editTextBoxInput struct {
+	BoxID string `json:"box_id"`
+	Text  string `json:"text"`
 }
 
 func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
@@ -551,6 +554,77 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 					MIMEType: "image/jpeg",
 				},
 			},
+		}, nil, nil
+	})
+
+	// list_text_boxes
+	mcp.AddTool[listTextBoxesInput, any](server, &mcp.Tool{
+		Name:        "list_text_boxes",
+		Description: "List the editable text boxes in a ForestNote notebook. Returns each box's id (needed by edit_text_box), the page it lives on, and its current text. The notebook_id is the first path segment of a forestnote://{notebook_id}/{page_id} note path.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input listTextBoxesInput) (*mcp.CallToolResult, any, error) {
+		if client.verbose && client.logger != nil {
+			client.logger.Info("MCP tool call", "tool", "list_text_boxes", "input", input)
+		}
+		if input.NotebookID == "" {
+			return nil, nil, fmt.Errorf("notebook_id is required")
+		}
+		params := url.Values{"notebook": {input.NotebookID}}
+		resp, err := client.get(ctx, "/api/forestnote/text-boxes?"+params.Encode())
+		if err != nil {
+			return nil, nil, fmt.Errorf("API request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 404 {
+			return nil, nil, fmt.Errorf("no ForestNote source, or notebook not found: %s", input.NotebookID)
+		}
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
+		}
+		var boxes []struct {
+			ID     string `json:"id"`
+			PageID string `json:"page_id"`
+			Text   string `json:"text"`
+			Z      int64  `json:"z"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&boxes); err != nil {
+			return nil, nil, fmt.Errorf("decode response: %w", err)
+		}
+		var sb strings.Builder
+		for _, b := range boxes {
+			sb.WriteString(fmt.Sprintf("- id: %s (page %s)\n  text: %s\n", b.ID, b.PageID, b.Text))
+		}
+		if len(boxes) == 0 {
+			sb.WriteString("No text boxes in this notebook.\n")
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: sb.String()}},
+		}, nil, nil
+	})
+
+	// edit_text_box
+	mcp.AddTool[editTextBoxInput, any](server, &mcp.Tool{
+		Name:        "edit_text_box",
+		Description: "Replace the text of a ForestNote text box (identified by box_id from list_text_boxes). The edit syncs to the user's devices on their next sync and is re-indexed for search. Last-writer-wins: a newer edit on the device can override this.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input editTextBoxInput) (*mcp.CallToolResult, any, error) {
+		if client.verbose && client.logger != nil {
+			client.logger.Info("MCP tool call", "tool", "edit_text_box", "input", input)
+		}
+		if input.BoxID == "" {
+			return nil, nil, fmt.Errorf("box_id is required")
+		}
+		resp, err := client.postJSON(ctx, "/api/forestnote/text-boxes/edit",
+			map[string]string{"id": input.BoxID, "text": input.Text})
+		if err != nil {
+			return nil, nil, fmt.Errorf("API request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, nil, fmt.Errorf("edit failed (%d): %s", resp.StatusCode, string(body))
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Text box %s updated.", input.BoxID)}},
 		}, nil, nil
 	})
 
@@ -884,9 +958,7 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 	})
 
 	// purge_deleted_tasks — the *only* path that actually frees rows from
-	// the task store. Every other "delete" tombstones. Mirrors the same
-	// tool on the standalone cmd/ub-mcp binary so both MCP surfaces expose
-	// the same capability.
+	// the task store. Every other "delete" tombstones.
 	mcp.AddTool[purgeDeletedTasksInput, any](server, &mcp.Tool{
 		Name: "purge_deleted_tasks",
 		Description: "PERMANENTLY remove soft-deleted tasks older than older_than_days (default 30, must be > 0). " +

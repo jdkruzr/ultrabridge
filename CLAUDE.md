@@ -22,7 +22,6 @@ Instead: `git -C /path`, `go -C /path build`, or absolute paths.
 
 ### Core Components
 - `cmd/ultrabridge/` -- entry point, wires all components
-- `cmd/ub-mcp/` -- MCP server binary: exposes search_notes, get_note_pages, get_note_image tools via stdio or HTTP SSE (see domain CLAUDE.md)
 
 ### Configuration & Data Management
 - `internal/appconfig/` -- SQLite-backed application config with two-stage loading (bootstrap env vars + settings table), restart detection (see domain CLAUDE.md)
@@ -75,7 +74,6 @@ Use `-C` flag to target the repo root without `cd`:
 
 ```bash
 go build -C /home/jtd/ultrabridge ./cmd/ultrabridge/
-go build -C /home/jtd/ultrabridge ./cmd/ub-mcp/
 go test -C /home/jtd/ultrabridge ./...
 go vet -C /home/jtd/ultrabridge ./...
 ```
@@ -99,13 +97,12 @@ docker build -t ultrabridge:dev /home/jtd/ultrabridge
 - `google.golang.org/protobuf` -- Boox .note protobuf parsing
 - `golang.org/x/net/webdav` -- WebDAV protocol handler (Boox uploads)
 - `modernc.org/sqlite` -- pure-Go SQLite (no CGO)
-- `github.com/modelcontextprotocol/go-sdk/mcp` -- MCP server (stdio + HTTP SSE transport)
+- `github.com/modelcontextprotocol/go-sdk/mcp` -- built-in MCP server at `/mcp`
 
 ## Subcommands
 
 - `ultrabridge hash-password "pw"` -- generate bcrypt hash for UB_PASSWORD_HASH
 - `ultrabridge seed-user <username> <password>` -- pre-provision credentials in settings DB (headless/Docker setup, skips setup wizard)
-- `ub-mcp` -- MCP server for AI agents (stdio by default, `--http :8081` for HTTP SSE)
 
 ## Configuration Architecture
 
@@ -204,12 +201,11 @@ All other configuration (auth, OCR, sources, logging, RAG, chat) is configured v
 - Session persistence: chat sessions and messages stored in SQLite (chat_sessions, chat_messages tables in notedb)
 - Config: chat_enabled, chat_api_url, chat_model in settings table (defaults: http://localhost:8000, Qwen/Qwen3-8B)
 
-### MCP Server (cmd/ub-mcp)
-- Separate binary that calls UltraBridge JSON API endpoints via HTTP
-- Auth chain: DB-backed bearer token (SHA-256 validated against notedb) -> static bearer token (UB_MCP_AUTH_TOKEN) -> Basic Auth fallback
-- Tools: `search_notes` (hybrid search), `get_note_pages` (page content), `get_note_image` (JPEG rendering)
-- Transport: stdio (default) or HTTP SSE (`--http :8081`)
-- Config: UB_MCP_API_URL (default http://localhost:8443), UB_MCP_API_USER, UB_MCP_API_PASS, UB_DB_PATH (shared notedb for token validation)
+### MCP Server (`/mcp`)
+- Built into `cmd/ultrabridge`; mounted at `/mcp` behind the main auth/OAuth flow
+- Tools: `search_notes`, `get_note_pages`, `get_note_image`, `list_text_boxes`, `edit_text_box`, and task CRUD/housekeeping tools
+- Tool handlers proxy through UltraBridge JSON APIs using an internal bearer token
+- Result deep-links use `boox_external_base_url` when configured, falling back to the local listener URL
 
 ### MCP Token Management (internal/mcpauth)
 - Bearer tokens for MCP clients stored as SHA-256 hashes in `mcp_tokens` table (shared notedb)

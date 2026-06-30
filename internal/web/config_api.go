@@ -36,7 +36,6 @@ type RedactedConfig struct {
 	CalDAVCollectionName string `json:"caldav_collection_name"`
 	DueTimeMode          string `json:"due_time_mode"`
 	WebEnabled           bool   `json:"web_enabled"`
-	MCPPort              int    `json:"mcp_port"`
 }
 
 // redactConfig returns a copy of cfg with secrets replaced with "[set]" or "[not set]".
@@ -70,7 +69,6 @@ func redactConfig(cfg *appconfig.Config) *RedactedConfig {
 		CalDAVCollectionName: cfg.CalDAVCollectionName,
 		DueTimeMode:          cfg.DueTimeMode,
 		WebEnabled:           cfg.WebEnabled,
-		MCPPort:              cfg.MCPPort,
 	}
 }
 
@@ -110,7 +108,6 @@ type IncomingConfig struct {
 	CalDAVCollectionName string `json:"caldav_collection_name"`
 	DueTimeMode          string `json:"due_time_mode"`
 	WebEnabled           bool   `json:"web_enabled"`
-	MCPPort              int    `json:"mcp_port"`
 }
 
 // handleGetConfig handles GET /api/config — returns current config with secrets redacted.
@@ -224,9 +221,6 @@ func (h *Handler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawMap["web_enabled"]; ok {
 		cfg.WebEnabled = incoming.WebEnabled
-	}
-	if _, ok := rawMap["mcp_port"]; ok {
-		cfg.MCPPort = incoming.MCPPort
 	}
 
 	if pw, ok := rawMap["password"]; ok {

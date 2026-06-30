@@ -18,7 +18,7 @@ UltraBridge does not require an external Supernote Private Cloud stack or MariaD
 ./install.sh
 ```
 
-The installer builds images, writes Compose configuration, starts the containers, and seeds the first web user. After it finishes, open the displayed web URL and finish configuration in Settings.
+The installer builds the image, writes Compose configuration, starts the container, and seeds the first web user. After it finishes, open the displayed web URL and finish configuration in Settings.
 
 ## Docker Compose
 
@@ -32,7 +32,6 @@ The default compose file publishes:
 | --- | --- |
 | `8443` | Web UI, JSON API, CalDAV, Boox WebDAV, MCP SSE, ForestNote sync, and reMarkable routes. |
 | `8089` | Supernote SPC device listener when SPC server mode is enabled. |
-| `8081` | Optional `ub-mcp` sidecar profile. |
 
 ## Local Development
 
@@ -43,12 +42,6 @@ UB_DB_PATH=/tmp/ub-notes.db \
 UB_TASK_DB_PATH=/tmp/ub-tasks.db \
 UB_LISTEN_ADDR=:8443 \
 /tmp/ultrabridge
-```
-
-Build the standalone MCP sidecar with:
-
-```bash
-go build ./cmd/ub-mcp/
 ```
 
 ## First Boot

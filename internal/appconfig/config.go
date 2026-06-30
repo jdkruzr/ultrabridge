@@ -70,9 +70,6 @@ type Config struct {
 	// Server
 	WebEnabled bool
 
-	// MCP
-	MCPPort int // 0 hides the Settings "MCP Connection" helper card
-
 	// SPC server (UB-as-SPC refactor)
 	SPCMode       string // "client" (default, no listener) | "server"
 	SPCListenAddr string
@@ -165,7 +162,6 @@ func loadConfigFromDB(ctx context.Context, db *sql.DB, applyEnv bool) (*Config, 
 		CalDAVCollectionName: dbVals[KeyCalDAVCollectionName],
 		DueTimeMode:          dbVals[KeyDueTimeMode],
 		WebEnabled:           parseBool(dbVals[KeyWebEnabled]),
-		MCPPort:              parseIntWithDefault(dbVals[KeyMCPPort], 8081),
 		SPCMode:              dbVals[KeySPCMode],
 		SPCListenAddr:        dbVals[KeySPCListenAddr],
 		SPCTLSCert:           dbVals[KeySPCTLSCert],
@@ -294,7 +290,6 @@ func configToMap(cfg *Config) map[string]string {
 		KeyCalDAVCollectionName: cfg.CalDAVCollectionName,
 		KeyDueTimeMode:          cfg.DueTimeMode,
 		KeyWebEnabled:           boolToString(cfg.WebEnabled),
-		KeyMCPPort:              strconv.Itoa(cfg.MCPPort),
 		KeySPCMode:              cfg.SPCMode,
 		KeySPCListenAddr:        cfg.SPCListenAddr,
 		KeySPCTLSCert:           cfg.SPCTLSCert,
