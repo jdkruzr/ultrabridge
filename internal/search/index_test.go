@@ -151,6 +151,25 @@ func TestSearchQuotedInputIsEscaped(t *testing.T) {
 	}
 }
 
+func TestSearchMultiWordQueryMatchesSeparatedTerms(t *testing.T) {
+	idx := openTestIndex(t)
+	ctx := context.Background()
+	if err := idx.Index(ctx, NoteDocument{Path: "/archive.note", BodyText: "Ask about S3/Glacier as archive. (Froster)"}); err != nil {
+		t.Fatalf("Index archive: %v", err)
+	}
+	if err := idx.Index(ctx, NoteDocument{Path: "/glacier-only.note", BodyText: "Glacier storage only"}); err != nil {
+		t.Fatalf("Index glacier-only: %v", err)
+	}
+
+	results, err := idx.Search(ctx, SearchQuery{Text: "Froster Glacier"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Path != "/archive.note" {
+		t.Fatalf("multi-word separated-term results = %+v, want archive note", results)
+	}
+}
+
 // Rename repoints FTS entries to the new path; the old path stops matching and
 // the new path matches.
 func TestSearch_Rename(t *testing.T) {

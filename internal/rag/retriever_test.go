@@ -3,6 +3,7 @@ package rag
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -550,7 +551,7 @@ func TestRetrieverKeywordModeExcludesVectorOnlyCandidates(t *testing.T) {
 	defer db.Close()
 
 	insertTestNote(t, db, "/notes/cambridge.note", 0, "Cambridge", "cambridge project notes")
-	insertTestNote(t, db, "/notes/unrelated.note", 0, "Unrelated", "web development guide")
+	insertTestNote(t, db, "/notes/unrelated.note", 0, "Unrelated", "web development guide with enough text to survive vector-only hybrid tail filtering")
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	embedStore := NewStore(db, logger)
@@ -587,6 +588,112 @@ func TestRetrieverKeywordModeExcludesVectorOnlyCandidates(t *testing.T) {
 	}
 	if !gotHybrid["/notes/unrelated.note"] {
 		t.Fatalf("hybrid mode should include vector-only result: %+v", hybrid)
+	}
+}
+
+func TestRetrieverSourceFilterSearchesPastInitialKeywordPage(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	for i := 0; i < 120; i++ {
+		insertTestNote(t, db, fmt.Sprintf("/generic/storage-%03d.note", i), 0, "Generic", "storage storage storage storage")
+	}
+	insertTestNote(t, db, "forestnote://nb/storage-page", 0, "", "Historically there are challenges with storage in HPC but Hammerspace can help")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	retriever := NewRetriever(db, search.New(db), NewStore(db, logger), nil, logger)
+
+	results, err := retriever.Search(ctx, SearchRequest{
+		Query:   "storage",
+		Sources: []string{SourceForestNote},
+		Mode:    SearchModeKeyword,
+		Limit:   20,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].NotePath != "forestnote://nb/storage-page" {
+		t.Fatalf("forestnote source-filtered storage results = %+v, want forestnote page beyond initial keyword page", results)
+	}
+}
+
+func TestRetrieverHybridRanksLexicalPhraseHitsBeforeVectorOnlyHits(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	insertTestNote(t, db, "/notes/froster-a.note", 0, "Trip A", "Froster Glacier route planning")
+	insertTestNote(t, db, "/notes/froster-b.note", 0, "Trip B", "Ask about S3/Glacier as archive. (Froster)")
+	for i := 0; i < 5; i++ {
+		insertTestNote(t, db, fmt.Sprintf("/notes/vector-only-%d.note", i), 0, "Unrelated", "Tiny")
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	embedStore := NewStore(db, logger)
+	mockEmbedder := &mockRetrieverEmbedder{
+		vectors: map[string][]float32{
+			"Froster Glacier": {1, 0, 0},
+		},
+	}
+	for i := 0; i < 5; i++ {
+		embedStore.Save(ctx, fmt.Sprintf("/notes/vector-only-%d.note", i), 0, 0, []float32{1, 0, 0}, "test-model")
+	}
+	retriever := NewRetriever(db, search.New(db), embedStore, mockEmbedder, logger)
+
+	results, err := retriever.Search(ctx, SearchRequest{
+		Query: "Froster Glacier",
+		Mode:  SearchModeHybrid,
+		Limit: 3,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("results = %+v, want at least two lexical phrase hits", results)
+	}
+	for i := 0; i < 2; i++ {
+		if results[i].NotePath != "/notes/froster-a.note" && results[i].NotePath != "/notes/froster-b.note" {
+			t.Fatalf("result %d = %+v, want lexical Froster Glacier hit before vector-only hits; all results: %+v", i, results[i], results)
+		}
+	}
+	if len(results) != 2 {
+		t.Fatalf("results = %+v, want only substantial lexical hits; short vector-only pages should not pad tail", results)
+	}
+}
+
+func TestRetrieverHybridKeepsSubstantialVectorOnlyCandidates(t *testing.T) {
+	ctx := context.Background()
+	db, _ := notedb.Open(ctx, ":memory:")
+	defer db.Close()
+
+	insertTestNote(t, db, "/notes/froster.note", 0, "Trip", "Froster Glacier route planning")
+	insertTestNote(t, db, "/notes/deep-learning.note", 0, "Deep Learning", "Deep learning and neural networks in practice")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	embedStore := NewStore(db, logger)
+	mockEmbedder := &mockRetrieverEmbedder{
+		vectors: map[string][]float32{
+			"Froster Glacier": {1, 0, 0},
+		},
+	}
+	embedStore.Save(ctx, "/notes/deep-learning.note", 0, 0, []float32{1, 0, 0}, "test-model")
+	retriever := NewRetriever(db, search.New(db), embedStore, mockEmbedder, logger)
+
+	results, err := retriever.Search(ctx, SearchRequest{
+		Query: "Froster Glacier",
+		Mode:  SearchModeHybrid,
+		Limit: 3,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range results {
+		got[r.NotePath] = true
+	}
+	if !got["/notes/froster.note"] || !got["/notes/deep-learning.note"] {
+		t.Fatalf("results = %+v, want lexical hit plus substantial vector-only hit", results)
 	}
 }
 

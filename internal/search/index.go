@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // SearchIndex indexes and queries note page content.
@@ -89,7 +90,7 @@ func (s *Store) Search(ctx context.Context, q SearchQuery) ([]SearchResult, erro
 		FROM note_fts
 		JOIN note_content nc ON nc.id = note_fts.rowid
 		WHERE note_fts MATCH ?`
-	args := []interface{}{escapeFTS5(q.Text)}
+	args := []interface{}{buildFTS5Query(q.Text)}
 
 	if q.Folder != "" {
 		// Filter by folder path segment — matches "/{folder}/" anywhere in the path.
@@ -228,9 +229,43 @@ func (s *Store) GetContentByPrefix(ctx context.Context, likePattern string) (map
 	return out, rows.Err()
 }
 
-// escapeFTS5 wraps the user query in double quotes and escapes internal quotes,
+// buildFTS5Query keeps exact-phrase behavior while letting natural multi-word
+// queries match when the terms appear separately, e.g. "Froster Glacier" should
+// match "S3/Glacier ... (Froster)" instead of falling through to vector-only
+// hybrid results.
+func buildFTS5Query(input string) string {
+	trimmed := strings.TrimSpace(input)
+	trimmed = strings.Trim(trimmed, `"`)
+	phrase := escapeFTS5Phrase(trimmed)
+	terms := fts5Terms(trimmed)
+	if len(terms) <= 1 {
+		return phrase
+	}
+	parts := make([]string, 0, len(terms))
+	seen := map[string]bool{}
+	for _, term := range terms {
+		key := strings.ToLower(term)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		parts = append(parts, escapeFTS5Phrase(term))
+	}
+	if len(parts) <= 1 {
+		return phrase
+	}
+	return phrase + " OR (" + strings.Join(parts, " AND ") + ")"
+}
+
+func fts5Terms(input string) []string {
+	return strings.FieldsFunc(input, func(r rune) bool {
+		return !(unicode.IsLetter(r) || unicode.IsDigit(r))
+	})
+}
+
+// escapeFTS5Phrase wraps text in double quotes and escapes internal quotes,
 // preventing FTS5 syntax injection while preserving phrase matching.
-func escapeFTS5(input string) string {
+func escapeFTS5Phrase(input string) string {
 	escaped := strings.ReplaceAll(input, `"`, `""`)
 	return `"` + escaped + `"`
 }

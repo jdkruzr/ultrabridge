@@ -33,6 +33,14 @@ const (
 	SearchModeHybrid  = "hybrid"
 )
 
+const (
+	filteredCandidateMin = 500
+	dateSortCandidateMin = 1000
+	ftsRRFWeight         = 2.0
+	vectorRRFWeight      = 1.0
+	vectorOnlyMinRunes   = 40
+)
+
 var titleDatePattern = regexp.MustCompile(`(?:^|[^0-9])([12][0-9]{3})-?([01][0-9])-?([0-3][0-9])(?:[^0-9]|$)`)
 
 // SearchRequest is the input for hybrid search.
@@ -116,21 +124,29 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 	// Post-merge filters (source/folder/device/date) prune after fusion, so
 	// over-fetch from each leg to keep a full page when a filter is active.
 	overfetch := 2
-	if len(req.Sources) > 0 || req.Device != "" || len(req.Locations) > 0 ||
+	hasPostMergeFilter := len(req.Sources) > 0 || req.Device != "" || len(req.Locations) > 0 ||
 		!req.DateFrom.IsZero() || !req.DateTo.IsZero() ||
 		!req.CreatedFrom.IsZero() || !req.CreatedTo.IsZero() ||
-		!req.ModifiedFrom.IsZero() || !req.ModifiedTo.IsZero() || req.Sort != "" {
+		!req.ModifiedFrom.IsZero() || !req.ModifiedTo.IsZero()
+	if hasPostMergeFilter || req.Sort != "" {
 		overfetch = 4
 	}
 	if req.Sort == "date_asc" || req.Sort == "date_desc" {
 		overfetch = 10
+	}
+	candidateLimit := limit * overfetch
+	if hasPostMergeFilter && candidateLimit < filteredCandidateMin {
+		candidateLimit = filteredCandidateMin
+	}
+	if (req.Sort == "date_asc" || req.Sort == "date_desc") && candidateLimit < dateSortCandidateMin {
+		candidateLimit = dateSortCandidateMin
 	}
 
 	// 1. FTS5 keyword search (always available)
 	ftsResults, err := r.searchIndex.Search(ctx, search.SearchQuery{
 		Text:   req.Query,
 		Folder: req.Folder,
-		Limit:  limit * overfetch, // fetch extra for fusion + post-merge filtering
+		Limit:  candidateLimit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fts search: %w", err)
@@ -164,7 +180,6 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 				// chunk per (path,page) — a page embeds as multiple chunks, but
 				// fusion ranks at page granularity, so counting every chunk would
 				// over-weight long (many-chunk) pages.
-				topN := limit * overfetch
 				seenPage := map[string]bool{}
 				for _, c := range candidates {
 					key := c.rec.NotePath + "\x00" + strconv.Itoa(c.rec.Page)
@@ -177,7 +192,7 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 						page:     c.rec.Page,
 						rank:     len(vecRanked) + 1,
 					})
-					if len(vecRanked) >= topN {
+					if len(vecRanked) >= candidateLimit {
 						break
 					}
 				}
@@ -193,15 +208,17 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 	rrfScores := map[docKey]float64{}
 
 	// FTS5 ranks
+	ftsKeys := map[docKey]bool{}
 	for rank, r := range ftsResults {
 		key := docKey{r.Path, r.Page}
-		rrfScores[key] += 1.0 / float64(60+rank+1)
+		ftsKeys[key] = true
+		rrfScores[key] += ftsRRFWeight / float64(60+rank+1)
 	}
 
 	// Vector ranks
 	for _, r := range vecRanked {
 		key := docKey{r.notePath, r.page}
-		rrfScores[key] += 1.0 / float64(60+r.rank)
+		rrfScores[key] += vectorRRFWeight / float64(60+r.rank)
 	}
 
 	// Sort by RRF score descending
@@ -214,6 +231,12 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 		merged = append(merged, rrfEntry{k, s})
 	}
 	sort.Slice(merged, func(i, j int) bool {
+		if merged[i].score == merged[j].score {
+			if merged[i].key.notePath == merged[j].key.notePath {
+				return merged[i].key.page < merged[j].key.page
+			}
+			return merged[i].key.notePath < merged[j].key.notePath
+		}
 		return merged[i].score > merged[j].score
 	})
 
@@ -229,6 +252,9 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 		result, err := r.enrichResult(ctx, entry.key.notePath, entry.key.page, entry.score)
 		if err != nil {
 			r.logger.Warn("enrich result failed", "path", entry.key.notePath, "page", entry.key.page, "err", err)
+			continue
+		}
+		if len(ftsResults) > 0 && !ftsKeys[entry.key] && resultTextRunes(result) < vectorOnlyMinRunes {
 			continue
 		}
 		// Apply post-merge filters (source type, folder, device, date range)
@@ -285,6 +311,10 @@ func (r *Retriever) Search(ctx context.Context, req SearchRequest) ([]SearchResu
 	}
 
 	return results, nil
+}
+
+func resultTextRunes(result *SearchResult) int {
+	return len([]rune(strings.TrimSpace(result.TitleText + " " + result.BodyText)))
 }
 
 func matchesLocation(filters []LocationFilter, result *SearchResult) bool {
