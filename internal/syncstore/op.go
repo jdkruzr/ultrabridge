@@ -77,23 +77,28 @@ func SchemaHash() string { return schemaHashCurrent }
 const schemaHashV1 = "9b807dc88cd0465d171892bb17e65ad94190eda058594e207caad3368eb1f2fe"
 
 // schemaHashV2 is the FROZEN prior schema hash (folder/notebook/page/stroke/text_box,
-// before the page_text_* tables). Like schemaHashV1 it is hardcoded, not derived: once
-// knownCols gains the page_text_* tables, SchemaHash() yields v3, but a not-yet-updated
-// v2 client must keep syncing during the rollout grace window. Keep this literal forever.
+// before the page_text_* tables). Hardcoded, not derived. Its grace window CLOSED with the
+// v4 (notebook.aspect_long_axis) rollout — kept as a literal for the historical record, but
+// no longer admitted by AcceptsSchemaHash.
 const schemaHashV2 = "bc1953e2b85e766a572329e7023b4582b768094b4d27e28a632e21bedb776874"
 
+// schemaHashV3 is the FROZEN prior schema hash (folder/notebook/page/page_text_from_client/
+// page_text_from_server/stroke/text_box, before notebook.aspect_long_axis). Hardcoded, not
+// derived: once the registry gains aspect_long_axis SchemaHash() yields v4, but a not-yet-updated
+// v3 client must keep syncing during the rollout grace window. Keep this literal forever.
+const schemaHashV3 = "724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe"
+
 // AcceptsSchemaHash reports whether the server will sync with a client advertising
-// hash h. It accepts the current schema (SchemaHash, now v3) AND the frozen prior
-// schema (schemaHashV2), so a not-yet-updated v2 client keeps syncing while the
-// matching client release rolls out — instead of a hard cutover that 409s every old
-// client the instant the server adds the page_text_* tables. A v2 client never sends
-// page_text_* ops and silently ignores the ones it is relayed, so admitting it is safe;
-// once all clients update, drop schemaHashV2 from this set. v1 (pre-text_box) is retired:
-// its grace window closed with the text_box rollout, so a v1 client must already be on v2.
-// Generalizes to every future schema bump: add the new hash, keep the prior one for one
-// release, then retire it.
+// hash h. It accepts the current schema (SchemaHash, now v4 — folder/notebook[+aspect_long_axis]/
+// page/page_text_*/stroke/text_box) AND the frozen prior schema (schemaHashV3), so a not-yet-updated
+// v3 client keeps syncing while the matching client release rolls out — instead of a hard cutover
+// that 409s every old client the instant the server adds aspect_long_axis. A v3 client never sends
+// the new column and silently ignores it on relayed rows, so admitting it is safe; once all clients
+// update, drop schemaHashV3 from this set. v2/v1 are retired (their grace windows closed at the
+// page_text_* and text_box rollouts). Generalizes to every future schema bump: add the new hash,
+// keep the prior one for one release, then retire it.
 func AcceptsSchemaHash(h string) bool {
-	return h == SchemaHash() || h == schemaHashV2
+	return h == SchemaHash() || h == schemaHashV3
 }
 
 const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ" // Crockford base32, uppercase (§2.1)

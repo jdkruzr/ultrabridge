@@ -31,6 +31,9 @@ func ForestNote() Registry {
 				ts("created_at", false),
 				ts("deleted_at", true),
 				{Name: "folder_id", Type: Text, Nullable: true},
+				// Per-notebook page aspect (v4): virtual long-axis captured from the creating
+				// device. Synced so a note keeps its native shape across devices. NULL = legacy.
+				{Name: "aspect_long_axis", Type: Int, Nullable: true},
 			},
 		},
 		{

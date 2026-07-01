@@ -126,7 +126,7 @@ func TestReprocessNotebook_EnqueuesLivePages(t *testing.T) {
 			Cols: map[string]any{"page_id": page, "color": float64(4278190080), "pen_width_min": float64(2), "pen_width_max": float64(6), "points": pts, "z": float64(0), "created_at": float64(1000), "deleted_at": nil}}
 	}
 	if _, err := s.Store().ApplyBatch(context.Background(), site, []syncstore.Op{
-		{Table: "notebook", PK: nb, SiteID: site, OpSeq: 1, WallTS: 1000, Cols: map[string]any{"name": "NB", "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil, "folder_id": nil}},
+		{Table: "notebook", PK: nb, SiteID: site, OpSeq: 1, WallTS: 1000, Cols: map[string]any{"name": "NB", "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil, "folder_id": nil, "aspect_long_axis": nil}},
 		mkPage(2, 1010, pgA), mkPage(3, 1020, pgB),
 		mkStroke(4, 1030, stA, pgA), mkStroke(5, 1040, stB, pgB),
 	}); err != nil {

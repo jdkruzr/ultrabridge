@@ -58,7 +58,7 @@ func seedPageWithStroke(t *testing.T, s *syncstore.Store) {
 	t.Helper()
 	ops := []syncstore.Op{
 		{Table: "notebook", PK: nb1, SiteID: siteA, OpSeq: 1, WallTS: 1000,
-			Cols: map[string]any{"name": "NB", "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil, "folder_id": nil}},
+			Cols: map[string]any{"name": "NB", "sort_order": float64(0), "created_at": float64(1000), "deleted_at": nil, "folder_id": nil, "aspect_long_axis": nil}},
 		{Table: "page", PK: pg1, SiteID: siteA, OpSeq: 2, WallTS: 1010,
 			Cols: map[string]any{"notebook_id": nb1, "sort_order": float64(0), "created_at": float64(1010), "deleted_at": nil, "template": nil, "template_pitch_mm": nil}},
 		{Table: "stroke", PK: st1, SiteID: siteA, OpSeq: 3, WallTS: 1020,

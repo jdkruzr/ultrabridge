@@ -67,18 +67,19 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			lww_site_id      TEXT    NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_fn_folder_parent ON fn_folder(parent_folder_id)`,
-		// New-DB column sets include folder_id (notebook) and template/
+		// New-DB column sets include folder_id + aspect_long_axis (notebook) and template/
 		// template_pitch_mm (page); existing DBs get them via ensureColumn below.
 		`CREATE TABLE IF NOT EXISTS fn_notebook (
-			id          TEXT PRIMARY KEY,
-			name        TEXT,
-			sort_order  INTEGER,
-			created_at  INTEGER,
-			deleted_at  INTEGER,
-			folder_id   TEXT,
-			lww_wall_ts INTEGER NOT NULL,
-			lww_op_seq  INTEGER NOT NULL,
-			lww_site_id TEXT    NOT NULL
+			id               TEXT PRIMARY KEY,
+			name             TEXT,
+			sort_order       INTEGER,
+			created_at       INTEGER,
+			deleted_at       INTEGER,
+			folder_id        TEXT,
+			aspect_long_axis INTEGER,
+			lww_wall_ts      INTEGER NOT NULL,
+			lww_op_seq       INTEGER NOT NULL,
+			lww_site_id      TEXT    NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS fn_page (
 			id                TEXT PRIMARY KEY,
@@ -187,6 +188,9 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	type addCol struct{ table, col, decl string }
 	for _, a := range []addCol{
 		{"fn_notebook", "folder_id", "TEXT"},
+		// v4 schema bump: per-notebook page aspect (virtual long-axis, captured from the
+		// creating device). NULL = legacy notebook with no stored aspect.
+		{"fn_notebook", "aspect_long_axis", "INTEGER"},
 		{"fn_page", "template", "TEXT"},
 		{"fn_page", "template_pitch_mm", "INTEGER"},
 		// Phase 8 cutover: the durable op_ts HLC on the authoring-site row.
