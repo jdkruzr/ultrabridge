@@ -7,18 +7,17 @@ import (
 )
 
 // These guards prove the RhizomeSync library registry reproduces ForestNote's live production schema
-// (schemaHashV3, declared in op_test.go) byte-for-byte before any of UB's hand-coded sync core is
-// swapped to the library in Phase E. They fail loudly if the library declaration and UB's
-// knownCols/tableOrder ever disagree.
+// (schemaHashV4, declared in op_test.go) byte-for-byte. They fail loudly if the library declaration
+// and UB's knownCols/tableOrder ever disagree.
 
 func TestRhizomeRegistryReproducesUBSchema(t *testing.T) {
-	if got := SchemaHash(); got != schemaHashV3 {
-		t.Fatalf("UB SchemaHash() = %s, want v3 %s", got, schemaHashV3)
+	if got := SchemaHash(); got != schemaHashV4 {
+		t.Fatalf("UB SchemaHash() = %s, want v4 %s", got, schemaHashV4)
 	}
 
 	reg := registry.ForestNote()
-	if got := reg.SchemaHash(); got != schemaHashV3 {
-		t.Fatalf("registry.ForestNote().SchemaHash() = %s, want v3 %s", got, schemaHashV3)
+	if got := reg.SchemaHash(); got != schemaHashV4 {
+		t.Fatalf("registry.ForestNote().SchemaHash() = %s, want v4 %s", got, schemaHashV4)
 	}
 	if lib, ub := reg.Canonical(), canonicalSchema(); lib != ub {
 		t.Fatalf("canonical schema mismatch:\n lib = %q\n  ub = %q", lib, ub)

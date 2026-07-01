@@ -428,13 +428,18 @@ func upsertNotebook(ctx context.Context, tx *sql.Tx, n Op) error {
 	if err != nil {
 		return err
 	}
+	aspect, err := colNullInt(n, "aspect_long_axis") // null = legacy notebook (3:4 default)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO fn_notebook (id, name, sort_order, created_at, deleted_at, folder_id, lww_wall_ts, lww_op_seq, lww_site_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO fn_notebook (id, name, sort_order, created_at, deleted_at, folder_id, aspect_long_axis, lww_wall_ts, lww_op_seq, lww_site_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET name=excluded.name, sort_order=excluded.sort_order,
 		   created_at=excluded.created_at, deleted_at=excluded.deleted_at, folder_id=excluded.folder_id,
+		   aspect_long_axis=excluded.aspect_long_axis,
 		   lww_wall_ts=excluded.lww_wall_ts, lww_op_seq=excluded.lww_op_seq, lww_site_id=excluded.lww_site_id`,
-		n.PK, name, sort, created, del, folderID, n.WallTS, n.OpSeq, n.SiteID)
+		n.PK, name, sort, created, del, folderID, aspect, n.WallTS, n.OpSeq, n.SiteID)
 	return err
 }
 

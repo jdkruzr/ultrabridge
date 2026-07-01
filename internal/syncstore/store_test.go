@@ -37,7 +37,7 @@ func newTestStore(t *testing.T) *Store {
 func notebookOp(site string, opSeq, wall int64, name string, deletedAt any) Op {
 	return Op{
 		Table: "notebook", PK: nb1, SiteID: site, OpSeq: opSeq, WallTS: wall,
-		Cols: map[string]any{"name": name, "sort_order": float64(0), "created_at": float64(1000), "deleted_at": deletedAt, "folder_id": nil},
+		Cols: map[string]any{"name": name, "sort_order": float64(0), "created_at": float64(1000), "deleted_at": deletedAt, "folder_id": nil, "aspect_long_axis": nil},
 	}
 }
 

@@ -235,11 +235,11 @@ func (s *Store) SoftDeleteNotebook(ctx context.Context, notebookID string) ([]st
 
 	// Notebook full row → tombstone op. A missing row means nothing to delete.
 	var nbName sql.NullString
-	var nbSort, nbCreated sql.NullInt64
+	var nbSort, nbCreated, nbAspect sql.NullInt64
 	var nbFolder sql.NullString
 	switch err := s.db.QueryRowContext(ctx,
-		`SELECT name, sort_order, created_at, folder_id FROM fn_notebook WHERE id = ?`, notebookID).
-		Scan(&nbName, &nbSort, &nbCreated, &nbFolder); err {
+		`SELECT name, sort_order, created_at, folder_id, aspect_long_axis FROM fn_notebook WHERE id = ?`, notebookID).
+		Scan(&nbName, &nbSort, &nbCreated, &nbFolder, &nbAspect); err {
 	case nil:
 	case sql.ErrNoRows:
 		return nil, nil
@@ -249,11 +249,12 @@ func (s *Store) SoftDeleteNotebook(ctx context.Context, notebookID string) ([]st
 	ops := []Op{{
 		Table: "notebook", PK: notebookID,
 		Cols: map[string]any{
-			"name":       nbName.String, // NOT NULL in practice; "" if ever null
-			"sort_order": wireNum(nbSort),
-			"created_at": wireNum(nbCreated),
-			"deleted_at": float64(now),
-			"folder_id":  wireNullStr(nbFolder),
+			"name":             nbName.String, // NOT NULL in practice; "" if ever null
+			"sort_order":       wireNum(nbSort),
+			"created_at":       wireNum(nbCreated),
+			"deleted_at":       float64(now),
+			"folder_id":        wireNullStr(nbFolder),
+			"aspect_long_axis": wireNullNum(nbAspect),
 		},
 	}}
 

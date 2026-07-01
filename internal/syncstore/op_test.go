@@ -5,29 +5,32 @@ import (
 	"time"
 )
 
-// schemaHashV3 is the published CURRENT schema hash (docs/sync/forestnote-sync-protocol.md
-// §6) — folder/notebook/page/page_text_from_client/page_text_from_server/stroke/text_box.
-// If this assertion fails, either knownCols changed (a wire-breaking schema change that
-// needs a coordinated bump + a new vN constant) or the spec doc is stale. The frozen prior
-// values (schemaHashV2, schemaHashV1) live in op.go.
-const schemaHashV3 = "724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe"
+// schemaHashV4 is the published CURRENT schema hash (docs/sync/forestnote-sync-protocol.md
+// §6) — folder/notebook[+aspect_long_axis]/page/page_text_from_client/page_text_from_server/
+// stroke/text_box. If this assertion fails, either knownCols changed (a wire-breaking schema
+// change that needs a coordinated bump + a new vN constant) or the spec doc is stale. The frozen
+// prior values (schemaHashV3, schemaHashV2, schemaHashV1) live in op.go.
+const schemaHashV4 = "74e6b5d790c919290d0e1fca3462800a5dc4abb288042dda2b48d4eb0482bbf2"
 
 func TestSchemaHashMatchesSpec(t *testing.T) {
-	if got := SchemaHash(); got != schemaHashV3 {
+	if got := SchemaHash(); got != schemaHashV4 {
 		t.Errorf("schema hash drift:\n got: %s\nwant: %s\ncanonical: %s",
-			got, schemaHashV3, canonicalSchema())
+			got, schemaHashV4, canonicalSchema())
 	}
 }
 
 // AcceptsSchemaHash is the rollout grace window: it must admit BOTH the current schema
-// (v3) and the frozen prior schema (v2), and reject anything else — including the retired
-// v1 (pre-text_box), whose grace window closed with the text_box rollout.
+// (v4) and the frozen prior schema (v3), and reject anything else — including the retired
+// v2 (pre-aspect_long_axis... actually pre-page_text_*) and v1, whose grace windows closed.
 func TestAcceptsSchemaHash_GraceWindow(t *testing.T) {
 	if !AcceptsSchemaHash(SchemaHash()) {
-		t.Error("current schema hash (v3) must be accepted")
+		t.Error("current schema hash (v4) must be accepted")
 	}
-	if !AcceptsSchemaHash(schemaHashV2) {
-		t.Error("frozen v2 schema hash must still be accepted during the grace window")
+	if !AcceptsSchemaHash(schemaHashV3) {
+		t.Error("frozen v3 schema hash must still be accepted during the grace window")
+	}
+	if AcceptsSchemaHash(schemaHashV2) {
+		t.Error("retired v2 schema hash must no longer be accepted")
 	}
 	if AcceptsSchemaHash(schemaHashV1) {
 		t.Error("retired v1 schema hash must no longer be accepted")

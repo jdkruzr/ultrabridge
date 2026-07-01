@@ -181,7 +181,7 @@ row and the merge therefore consider only the known column set. (Conformance vec
 // Request
 {
   "protocol_version": 1,
-  "schema_hash": "724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe",
+  "schema_hash": "74e6b5d790c919290d0e1fca3462800a5dc4abb288042dda2b48d4eb0482bbf2",
   "site_id": "<ULID>",
   "device_name": "<string>",  // OPTIONAL, informational. Human-readable device label (e.g.
                               //   "Viwoods AiPaper") for the server's device-management UI.
@@ -366,16 +366,21 @@ deterministically (no implementation-order dependence):
 - Within each table, column names sorted **ascending ASCII** (alphabetical).
 - Format: `table:col,col,...` per table, tables joined by `;`, no spaces, no trailing newline.
 
-The **v3** canonical string (current — adds `page_text_from_client` + `page_text_from_server`) is:
+The **v4** canonical string (current — adds `notebook.aspect_long_axis` for per-notebook page
+aspect ratio) is:
 
 ```
-folder:created_at,deleted_at,name,parent_folder_id,sort_order;notebook:created_at,deleted_at,folder_id,name,sort_order;page:created_at,deleted_at,notebook_id,sort_order,template,template_pitch_mm;page_text_from_client:created_at,deleted_at,model,ocr_at,text;page_text_from_server:created_at,deleted_at,model,ocr_at,text;stroke:color,created_at,deleted_at,page_id,pen_width_max,pen_width_min,points,z;text_box:border_width,color,created_at,deleted_at,font_name,font_size,height,page_id,text,weight,width,x,y,z
+folder:created_at,deleted_at,name,parent_folder_id,sort_order;notebook:aspect_long_axis,created_at,deleted_at,folder_id,name,sort_order;page:created_at,deleted_at,notebook_id,sort_order,template,template_pitch_mm;page_text_from_client:created_at,deleted_at,model,ocr_at,text;page_text_from_server:created_at,deleted_at,model,ocr_at,text;stroke:color,created_at,deleted_at,page_id,pen_width_max,pen_width_min,points,z;text_box:border_width,color,created_at,deleted_at,font_name,font_size,height,page_id,text,weight,width,x,y,z
 ```
 
 ```
-schema_hash (v3) = sha256(utf8(canonical string))
-                 = 724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe
+schema_hash (v4) = sha256(utf8(canonical string))
+                 = 74e6b5d790c919290d0e1fca3462800a5dc4abb288042dda2b48d4eb0482bbf2
 ```
+
+The prior **v3** string (no `notebook.aspect_long_axis` — `notebook:created_at,deleted_at,folder_id,name,sort_order`) hashed to
+`724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe`; it stays in the server's
+`AcceptsSchemaHash` grace window for one release so not-yet-updated v3 clients keep syncing.
 
 The prior **v2** string (no `page_text_*`) hashed to
 `bc1953e2b85e766a572329e7023b4582b768094b4d27e28a632e21bedb776874`; the **v1** string (no

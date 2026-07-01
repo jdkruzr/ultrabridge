@@ -38,7 +38,7 @@ func nbInFolder(seq, wall int64, pk, name, folder string, deletedAt any) Op {
 		Table: "notebook", PK: pk, SiteID: siteA, OpSeq: seq, WallTS: wall,
 		Cols: map[string]any{
 			"name": name, "sort_order": float64(0), "created_at": float64(1000),
-			"deleted_at": deletedAt, "folder_id": f,
+			"deleted_at": deletedAt, "folder_id": f, "aspect_long_axis": nil,
 		},
 	}
 }
