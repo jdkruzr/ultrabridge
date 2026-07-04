@@ -86,6 +86,8 @@ func TestMCPSearchNotesForwardsRationalFiltersAndReturnsStructuredOutput(t *test
 				"snippet":      "alpha project notes",
 				"score":        0.77,
 				"source_type":  "forestnote",
+				"detail_path":  "/files/forestnote?notebook=NB1&page=PG1",
+				"native_url":   "forestnote://notebook/NB1/page/PG1",
 				"folder":       "Work",
 				"device_model": "Viwoods",
 				"created_at":   "2026-06-01T00:00:00Z",
@@ -138,11 +140,15 @@ func TestMCPSearchNotesForwardsRationalFiltersAndReturnsStructuredOutput(t *test
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("decode structured content: %v", err)
 	}
-	if out.Count != 1 || out.Results[0].SourceType != "forestnote" || out.Results[0].DetailURL != "https://ub.example/files?detail=forestnote%3A%2F%2FNB1%2FPG1" {
+	if out.Count != 1 || out.Results[0].SourceType != "forestnote" ||
+		out.Results[0].DetailURL != "https://ub.example/files/forestnote?notebook=NB1&page=PG1" ||
+		out.Results[0].NativeURL != "forestnote://notebook/NB1/page/PG1" {
 		t.Fatalf("structured output = %+v", out)
 	}
 	tc := res.Content[0].(*mcp.TextContent)
-	if !strings.Contains(tc.Text, "Source type: forestnote") || !strings.Contains(tc.Text, "Device model: Viwoods") {
+	if !strings.Contains(tc.Text, "Source type: forestnote") ||
+		!strings.Contains(tc.Text, "Device model: Viwoods") ||
+		!strings.Contains(tc.Text, "Native URL: forestnote://notebook/NB1/page/PG1") {
 		t.Fatalf("text fallback missing metadata:\n%s", tc.Text)
 	}
 }

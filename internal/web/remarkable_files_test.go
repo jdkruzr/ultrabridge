@@ -106,9 +106,21 @@ func TestSearchPage_RemarkableFacetAndBadge(t *testing.T) {
 		t.Fatalf("GET /search = %d", w.Code)
 	}
 	body := w.Body.String()
-	for _, want := range []string{`value="remarkable" checked`, "badge-rm", "Project Plan"} {
+	for _, want := range []string{`value="remarkable" checked`, "badge-rm", "Project Plan", `/files/remarkable?document=doc-1`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("search body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestHandleFiles_LegacyRemarkableDetailRedirect(t *testing.T) {
+	h := newTestHandler()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/files?detail=remarkable://doc-1", nil))
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("GET /files legacy detail = %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/files/remarkable?document=doc-1" {
+		t.Fatalf("Location = %q", loc)
 	}
 }

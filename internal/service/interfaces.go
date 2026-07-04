@@ -470,6 +470,8 @@ type SearchResult struct {
 	Snippet    string    `json:"snippet"`
 	Score      float32   `json:"score"`
 	SourceType string    `json:"source_type"` // supernote|boox|forestnote|remarkable|digest
+	DetailPath string    `json:"detail_path,omitempty"`
+	NativeURL  string    `json:"native_url,omitempty"`
 	Folder     string    `json:"folder,omitempty"`
 	Device     string    `json:"device_model,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitempty"`

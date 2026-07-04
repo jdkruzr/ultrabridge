@@ -145,6 +145,7 @@ func (s *searchService) SearchAdvanced(ctx context.Context, query string, opts S
 		if page < 0 {
 			page = 0
 		}
+		ref := ReferenceForPath(r.NotePath, r.SourceType, page)
 		results = append(results, SearchResult{
 			Path:       r.NotePath,
 			Page:       page,
@@ -152,6 +153,8 @@ func (s *searchService) SearchAdvanced(ctx context.Context, query string, opts S
 			Snippet:    makeSnippet(r.BodyText, query, 240),
 			Score:      float32(r.Score),
 			SourceType: r.SourceType,
+			DetailPath: ref.DetailPath,
+			NativeURL:  ref.NativeURL,
 			Folder:     r.Folder,
 			Device:     r.Device,
 			CreatedAt:  r.CreatedAt,

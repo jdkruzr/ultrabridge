@@ -110,6 +110,10 @@ const (
 	// Key name is the historical one — predates the search_notes use —
 	// renaming would require a config migration; not worth it for now.
 	KeyBooxExternalBaseURL = "boox_external_base_url"
+	// KeyExternalBaseURL names the same deployment-wide setting with
+	// source-neutral wording. It aliases the historical stored key so callers can
+	// move to the clearer name without a settings migration.
+	KeyExternalBaseURL = KeyBooxExternalBaseURL
 )
 
 // envVarForKey maps each setting key to its UB_ env var name.

@@ -110,6 +110,38 @@ func TestForestNoteTab_EmptyStateWhenNoSource(t *testing.T) {
 	}
 }
 
+func TestSearchPage_ForestNoteResultLinksToNotebookPage(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	notes := &mockNoteService{forestNoteEnabled: true}
+	search := &mockSearchService{results: []service.SearchResult{{
+		Path: "forestnote://NB1/PG1", Page: 0, Title: "Journal", Snippet: "alpha", SourceType: "forestnote",
+	}}}
+	h := NewHandler(&mockTaskService{}, notes, search, &mockConfigService{}, nil, "", "", logger, logging.NewLogBroadcaster())
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/search?q=alpha&source=forestnote", nil))
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"badge-fn", "Journal", "/files/forestnote?notebook=NB1&amp;page=PG1"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("search body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestHandleFiles_LegacyForestNoteDetailRedirect(t *testing.T) {
+	w := httptest.NewRecorder()
+	fnTestHandler(&mockNoteService{}).ServeHTTP(w, httptest.NewRequest("GET", "/files?detail=forestnote://NB1/PG1", nil))
+	if w.Code != 303 {
+		t.Fatalf("GET /files legacy detail = %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/files/forestnote?notebook=NB1&page=PG1" {
+		t.Fatalf("Location = %q", loc)
+	}
+}
+
 func TestForestNoteDelete_HXEmptyAndTracks(t *testing.T) {
 	notes := &mockNoteService{forestNoteEnabled: true}
 	w := httptest.NewRecorder()

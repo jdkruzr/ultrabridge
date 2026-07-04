@@ -108,6 +108,9 @@ func TestSearchService_RequestPlumbingAndResultMapping(t *testing.T) {
 	if res.Path != "/notes/work/alpha.note" || res.Page != 3 || res.Title != "Alpha" || res.SourceType != rag.SourceBoox || res.Device != "Palma2" || res.Score != float32(0.75) {
 		t.Fatalf("result mapping mismatch: %+v", res)
 	}
+	if res.DetailPath != "/files/boox?detail=%2Fnotes%2Fwork%2Falpha.note" || res.NativeURL != "" {
+		t.Fatalf("reference mapping mismatch: %+v", res)
+	}
 	if !strings.Contains(res.Snippet, "needle") || !strings.HasPrefix(res.Snippet, "…") {
 		t.Fatalf("snippet = %q; want centered truncation containing query", res.Snippet)
 	}
@@ -138,6 +141,35 @@ func TestSearchService_MetadataPageSentinelIsNotExposed(t *testing.T) {
 	}
 	if got[0].Title != "Alpha Plan" || got[0].Path != "remarkable://doc-1" {
 		t.Fatalf("result = %+v", got[0])
+	}
+	if got[0].DetailPath != "/files/remarkable?document=doc-1" || got[0].NativeURL != "" {
+		t.Fatalf("reference fields = %+v", got[0])
+	}
+}
+
+func TestSearchService_ForestNoteReferenceFields(t *testing.T) {
+	r := &fakeRetriever{results: []rag.SearchResult{{
+		NotePath:   "forestnote://NB1/PG1",
+		Page:       0,
+		TitleText:  "Planning",
+		BodyText:   "alpha forestnote page",
+		SourceType: rag.SourceForestNote,
+	}}}
+	svc := &searchService{
+		retriever: r,
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	got, err := svc.Search(context.Background(), "alpha", "", []string{rag.SourceForestNote}, 5)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("results len = %d, want 1", len(got))
+	}
+	if got[0].DetailPath != "/files/forestnote?notebook=NB1&page=PG1" ||
+		got[0].NativeURL != "forestnote://notebook/NB1/page/PG1" {
+		t.Fatalf("reference fields = %+v", got[0])
 	}
 }
 

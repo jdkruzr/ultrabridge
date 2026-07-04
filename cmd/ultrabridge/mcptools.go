@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sysop/ultrabridge/internal/service"
 )
 
 // mcpAPIClient calls UltraBridge's own JSON API endpoints using a
@@ -55,6 +56,16 @@ func (c *mcpAPIClient) displayBaseURL() string {
 		return strings.TrimRight(c.publicBaseURL, "/")
 	}
 	return c.baseURL
+}
+
+func (c *mcpAPIClient) displayURL(path string) string {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return c.displayBaseURL() + path
 }
 
 func (c *mcpAPIClient) get(ctx context.Context, path string) (*http.Response, error) {
@@ -413,6 +424,8 @@ type mcpSearchResult struct {
 	Snippet       string    `json:"snippet"`
 	Score         float64   `json:"score"`
 	SourceType    string    `json:"source_type,omitempty"`
+	DetailPath    string    `json:"detail_path,omitempty"`
+	NativeURL     string    `json:"native_url,omitempty"`
 	Folder        string    `json:"folder,omitempty"`
 	DeviceModel   string    `json:"device_model,omitempty"`
 	CreatedAt     time.Time `json:"created_at,omitempty"`
@@ -559,7 +572,14 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		var sb strings.Builder
 		for i := range results {
 			r := &results[i]
-			r.DetailURL = fmt.Sprintf("%s/files?detail=%s", client.displayBaseURL(), url.QueryEscape(r.Path))
+			detailPath := r.DetailPath
+			if detailPath == "" {
+				detailPath = service.ReferenceForPath(r.Path, r.SourceType, r.Page).DetailPath
+			}
+			if detailPath == "" {
+				detailPath = "/files?detail=" + url.QueryEscape(r.Path)
+			}
+			r.DetailURL = client.displayURL(detailPath)
 			r.ImageToolHint = fmt.Sprintf(`get_note_image {"note_path": %q, "page": %d}`, r.Path, r.Page)
 			sb.WriteString(fmt.Sprintf("--- Result %d ---\n", i+1))
 			sb.WriteString(fmt.Sprintf("Note: %s (page %d)\n", r.Path, r.Page))
@@ -576,6 +596,9 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 				sb.WriteString(fmt.Sprintf("Device model: %s\n", r.DeviceModel))
 			}
 			sb.WriteString(fmt.Sprintf("URL: %s\n", r.DetailURL))
+			if r.NativeURL != "" {
+				sb.WriteString(fmt.Sprintf("Native URL: %s\n", r.NativeURL))
+			}
 			sb.WriteString(fmt.Sprintf("Text:\n%s\n\n", r.Snippet))
 		}
 		if len(results) == 0 {

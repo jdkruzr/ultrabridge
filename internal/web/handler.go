@@ -189,6 +189,12 @@ func NewHandler(
 		"makeFNRowCtx": func(e service.ForestNoteEntry, folderID string) fnRowCtx {
 			return fnRowCtx{Entry: e, FolderID: folderID}
 		},
+		"searchDetailPath": func(r service.SearchResult) string {
+			if r.DetailPath != "" {
+				return r.DetailPath
+			}
+			return service.ReferenceForPath(r.Path, r.SourceType, r.Page).DetailPath
+		},
 		"noteSource": func(path string) string {
 			if h.booxNotesPath != "" && strings.HasPrefix(path, h.booxNotesPath) {
 				return "Boox"
@@ -504,6 +510,12 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 // placeholder so the user sees "configure a source in Settings" rather than
 // a 404.
 func (h *Handler) handleFiles(w http.ResponseWriter, r *http.Request) {
+	if detail := r.URL.Query().Get("detail"); detail != "" {
+		if ref := service.ReferenceForPath(detail, "", 0); ref.DetailPath != "" {
+			http.Redirect(w, r, ref.DetailPath, http.StatusSeeOther)
+			return
+		}
+	}
 	query := ""
 	if r.URL.RawQuery != "" {
 		query = "?" + r.URL.RawQuery

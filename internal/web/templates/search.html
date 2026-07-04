@@ -93,12 +93,10 @@
                     {{end}}
                   </td>
                   <td>
-                    {{if or (eq .SourceType "digest") (eq .SourceType "forestnote") (eq .SourceType "remarkable")}}
-                      {{/* Opaque-path sources: show the title (or path) as plain text. */}}
+                    {{$durl := searchDetailPath .}}
+                    {{if or (eq .SourceType "digest") (not $durl)}}
                       {{if .Title}}{{.Title}}{{else}}{{.Path}}{{end}}
                     {{else}}
-                      {{$durl := printf "/files/supernote?detail=%s" (.Path | urlquery)}}
-                      {{if eq .SourceType "boox"}}{{$durl = printf "/files/boox?detail=%s" (.Path | urlquery)}}{{end}}
                       <a href="{{$durl}}" hx-get="{{$durl}}" hx-target="#main-content" hx-push-url="true" style="color: var(--brand-color); text-decoration: none;">{{if .Title}}{{.Title}}{{else}}{{.Path}}{{end}}</a>
                     {{end}}
                   </td>
