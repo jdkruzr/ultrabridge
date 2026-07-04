@@ -109,6 +109,21 @@ func TestAPISearch_FilterParamsThreadThrough(t *testing.T) {
 	}
 }
 
+func TestAPISearch_DefaultsToMostRecentSort(t *testing.T) {
+	svc := &mockSearchService{embeddingPipelineConfigured: true}
+	handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())
+
+	req := httptest.NewRequest("GET", "/api/search?q=test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if svc.lastOpts.Sort != "date_desc" {
+		t.Fatalf("sort = %q, want date_desc", svc.lastOpts.Sort)
+	}
+}
+
 func TestAPISearch_DeprecatedAliasesThreadThrough(t *testing.T) {
 	svc := &mockSearchService{embeddingPipelineConfigured: true}
 	handler := NewHandler(nil, nil, svc, nil, nil, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)), logging.NewLogBroadcaster())

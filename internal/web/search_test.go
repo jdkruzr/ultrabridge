@@ -127,6 +127,9 @@ func TestSearchPage_DefaultsEnabledSourcesChecked(t *testing.T) {
 			t.Fatalf("search page missing checked source %q in:\n%s", want, body)
 		}
 	}
+	if !strings.Contains(body, `<option value="date_desc" selected>Most recent</option>`) {
+		t.Fatalf("search page should default to most recent sort:\n%s", body)
+	}
 }
 
 func TestSearchPage_AllUncheckedSubmissionShowsValidation(t *testing.T) {

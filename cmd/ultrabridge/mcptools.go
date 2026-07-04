@@ -501,7 +501,7 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 	// search_notes
 	mcp.AddTool[searchNotesInput, any](server, &mcp.Tool{
 		Name:        "search_notes",
-		Description: "Search indexed handwritten notes by keyword query. Optional filters: source or sources (supernote, boox, forestnote, remarkable, digest), folder, location, device_model, created_from/created_to, modified_from/modified_to, sort (relevance/date_asc/date_desc), mode (hybrid/keyword), and limit. Deprecated aliases device and date_from/date_to are still accepted.",
+		Description: "Search indexed handwritten notes by keyword query. Optional filters: source or sources (supernote, boox, forestnote, remarkable, digest), folder, location, device_model, created_from/created_to, modified_from/modified_to, sort (date_desc default, relevance/date_asc/date_desc), mode (hybrid/keyword), and limit. Deprecated aliases device and date_from/date_to are still accepted.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input searchNotesInput) (*mcp.CallToolResult, any, error) {
 		if client.verbose && client.logger != nil {
 			client.logger.Info("MCP tool call", "tool", "search_notes", "input", input)

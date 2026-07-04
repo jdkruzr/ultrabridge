@@ -1142,10 +1142,10 @@ func (h *Handler) enabledSearchSources() []string {
 
 func normalizeSearchSort(raw string) string {
 	switch raw {
-	case "date_asc", "date_desc":
+	case "relevance", "date_asc", "date_desc":
 		return raw
 	default:
-		return "relevance"
+		return "date_desc"
 	}
 }
 
