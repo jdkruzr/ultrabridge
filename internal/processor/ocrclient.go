@@ -133,13 +133,19 @@ func (c *OCRClient) recognizeAnthropic(ctx context.Context, jpegData []byte, pro
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ocrclient post: %w", err)
+		// Dial failures, connection resets, and client-side timeouts: the
+		// model never saw the request, so this is always worth a retry.
+		return "", Transient(fmt.Errorf("ocrclient post: %w", err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("ocrclient API error %d: %s", resp.StatusCode, b)
+		err := fmt.Errorf("ocrclient API error %d: %s", resp.StatusCode, b)
+		if transientHTTPStatus(resp.StatusCode) {
+			return "", Transient(err)
+		}
+		return "", err
 	}
 
 	var vResp anthropicResponse
@@ -239,13 +245,19 @@ func (c *OCRClient) recognizeOpenAI(ctx context.Context, jpegData []byte, prompt
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ocrclient post: %w", err)
+		// Dial failures, connection resets, and client-side timeouts: the
+		// model never saw the request, so this is always worth a retry.
+		return "", Transient(fmt.Errorf("ocrclient post: %w", err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("ocrclient API error %d: %s", resp.StatusCode, b)
+		err := fmt.Errorf("ocrclient API error %d: %s", resp.StatusCode, b)
+		if transientHTTPStatus(resp.StatusCode) {
+			return "", Transient(err)
+		}
+		return "", err
 	}
 
 	var vResp openAIResponse

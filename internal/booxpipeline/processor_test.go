@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -393,41 +394,69 @@ func TestProcessor_OCRFailure(t *testing.T) {
 	indexer := &mockIndexer{}
 	deleter := &mockContentDeleter{}
 
-	// Create OCR server that returns error
-	ocrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"internal server error"}`))
-	}))
-	defer ocrServer.Close()
+	// An OCR failure is recorded with a message either way, but the terminal
+	// state now depends on whether the failure was a verdict. A 5xx means the
+	// backend never rendered one (this is job 2412's "model failed to load"),
+	// so the job is requeued with backoff rather than stranded in `failed`; a
+	// 4xx is a verdict and stays terminal.
+	run := func(t *testing.T, status int, body string) (string, sql.NullInt64, string) {
+		t.Helper()
+		ocrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			w.Write([]byte(body))
+		}))
+		defer ocrServer.Close()
 
-	ocrClient := processor.NewOCRClient(ocrServer.URL, "test-key", "test-model", "anthropic")
+		ocrClient := processor.NewOCRClient(ocrServer.URL, "test-key", "test-model", "anthropic")
+		proc, db := openTestProcessor(t, indexer, deleter, ocrClient)
+		defer db.Close()
+		defer proc.Stop()
+		if err := proc.Start(context.Background()); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		if err := proc.Enqueue(context.Background(), notePath); err != nil {
+			t.Fatalf("Enqueue: %v", err)
+		}
 
-	proc, db := openTestProcessor(t, indexer, deleter, ocrClient)
-	defer db.Close()
-	defer proc.Stop()
-	if err := proc.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
+		// Poll for the worker to have processed and settled the job.
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			var st, lastErr string
+			var requeueAfter sql.NullInt64
+			err := db.QueryRowContext(context.Background(),
+				`SELECT status, requeue_after, last_error FROM boox_jobs WHERE note_path = ?`,
+				notePath).Scan(&st, &requeueAfter, &lastErr)
+			if err == nil && lastErr != "" {
+				return st, requeueAfter, lastErr
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatal("job never recorded a failure")
+		return "", sql.NullInt64{}, ""
 	}
 
-	if err := proc.Enqueue(context.Background(), notePath); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
+	t.Run("5xx requeues with backoff", func(t *testing.T) {
+		st, requeueAfter, lastErr := run(t, http.StatusInternalServerError, `{"error":"internal server error"}`)
+		if st != "pending" {
+			t.Errorf("status = %q, want pending — a 5xx must not strand the note in failed", st)
+		}
+		if !requeueAfter.Valid || requeueAfter.Int64 <= time.Now().Unix() {
+			t.Errorf("requeue_after = %v, want a future timestamp", requeueAfter)
+		}
+		if lastErr == "" {
+			t.Error("last_error is empty, want the reason visible while the job waits")
+		}
+	})
 
-	// Wait for job to fail (OCR error should cause failure, may take a few seconds)
-	if !waitForJobStatus(t, db, notePath, "failed", 10*time.Second) {
-		t.Fatalf("job did not fail as expected")
-	}
-
-	// Verify job has an error message
-	var lastError string
-	err := db.QueryRowContext(context.Background(),
-		"SELECT last_error FROM boox_jobs WHERE note_path = ?", notePath).Scan(&lastError)
-	if err != nil {
-		t.Fatalf("query last_error: %v", err)
-	}
-	if lastError == "" {
-		t.Errorf("last_error is empty, want error message")
-	}
+	t.Run("4xx fails terminally", func(t *testing.T) {
+		st, _, lastErr := run(t, http.StatusBadRequest, `{"error":"unsupported image"}`)
+		if st != "failed" {
+			t.Errorf("status = %q, want failed — a 4xx is a verdict and will not change on retry", st)
+		}
+		if lastErr == "" {
+			t.Error("last_error is empty, want error message")
+		}
+	})
 }
 
 // boox-notes-pipeline.AC4.6: TestProcessor_CorruptNote verifies corrupt files are handled gracefully
@@ -1009,4 +1038,134 @@ func TestProcessorStartStopCycle(t *testing.T) {
 		t.Fatalf("redundant Start: %v", err)
 	}
 	proc.Stop()
+}
+
+func TestRetryDelay_BackoffAndSaturation(t *testing.T) {
+	for _, tc := range []struct {
+		attempts int
+		want     time.Duration
+	}{
+		{0, retryBackoffBase}, // defensive: treated as the first attempt
+		{1, 1 * time.Minute},
+		{2, 2 * time.Minute},
+		{3, 4 * time.Minute},
+		{4, 8 * time.Minute},
+		{6, retryBackoffMax},  // 32m would exceed the cap
+		{99, retryBackoffMax}, // must saturate, not shift into overflow
+	} {
+		if got := retryDelay(tc.attempts); got != tc.want {
+			t.Errorf("retryDelay(%d) = %v, want %v", tc.attempts, got, tc.want)
+		}
+	}
+}
+
+// TestProcessJob_TransientFailureRequeues covers the gap that left Boox jobs
+// 2391 and 2412 stuck in `failed` since June and July: FailJob was terminal,
+// so a momentary OCR-backend outage stranded a note until a human pressed
+// Retry Failed. A transient failure must go back to pending with a delay, and
+// only become terminal once the attempt cap is reached.
+func TestProcessJob_TransientFailureRequeues(t *testing.T) {
+	proc, db := openTestProcessor(t, &mockIndexer{}, &mockContentDeleter{}, nil)
+	defer db.Close()
+	ctx := context.Background()
+
+	notePath := filepath.Join(proc.notesPath, "flaky.note")
+	if err := os.WriteFile(notePath, []byte("not a real zip"), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+	if err := proc.store.EnqueueJob(ctx, notePath); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	statusOf := func(t *testing.T, id int64) (string, int, sql.NullInt64) {
+		t.Helper()
+		var status string
+		var attempts int
+		var requeueAfter sql.NullInt64
+		if err := db.QueryRowContext(ctx,
+			`SELECT status, attempts, requeue_after FROM boox_jobs WHERE id = ?`, id).
+			Scan(&status, &attempts, &requeueAfter); err != nil {
+			t.Fatalf("read job: %v", err)
+		}
+		return status, attempts, requeueAfter
+	}
+
+	// Drive processJob directly with a transient failure, once per attempt.
+	// Each iteration claims (attempts++) then fails transiently.
+	var jobID int64
+	for attempt := 1; attempt < maxJobAttempts; attempt++ {
+		job, err := proc.store.ClaimNextJob(ctx)
+		if err != nil {
+			t.Fatalf("claim %d: %v", attempt, err)
+		}
+		if job == nil {
+			t.Fatalf("attempt %d: no claimable job — a requeue delay leaked into the test", attempt)
+		}
+		jobID = job.ID
+
+		before := time.Now()
+		proc.handleJobError(ctx, job, processor.Transient(errors.New("connection refused")))
+
+		status, attempts, requeueAfter := statusOf(t, jobID)
+		if status != "pending" {
+			t.Fatalf("attempt %d: status = %q, want pending (transient failures must requeue)", attempt, status)
+		}
+		if attempts != attempt {
+			t.Fatalf("attempt %d: attempts = %d", attempt, attempts)
+		}
+		if !requeueAfter.Valid || requeueAfter.Int64 < before.Unix() {
+			t.Fatalf("attempt %d: requeue_after = %v, want a future timestamp", attempt, requeueAfter)
+		}
+		// The delay is real: the job must not be immediately re-claimable.
+		if j, err := proc.store.ClaimNextJob(ctx); err != nil || j != nil {
+			t.Fatalf("attempt %d: job claimable despite requeue_after (j=%v err=%v)", attempt, j, err)
+		}
+		// Clear the delay so the next loop iteration can claim it.
+		if _, err := db.ExecContext(ctx,
+			`UPDATE boox_jobs SET requeue_after = NULL WHERE id = ?`, jobID); err != nil {
+			t.Fatalf("clear delay: %v", err)
+		}
+	}
+
+	// The claim that reaches the cap fails terminally instead of looping.
+	job, err := proc.store.ClaimNextJob(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("final claim: job=%v err=%v", job, err)
+	}
+	proc.handleJobError(ctx, job, processor.Transient(errors.New("connection refused")))
+	if status, attempts, _ := statusOf(t, jobID); status != "failed" || attempts != maxJobAttempts {
+		t.Fatalf("at cap: status=%q attempts=%d, want failed/%d", status, attempts, maxJobAttempts)
+	}
+}
+
+// TestProcessJob_PermanentFailureDoesNotRetry pins the other half: a parse
+// error (the empty-notebook case behind jobs 1504 and 1571) is a real verdict
+// and must fail on the first attempt rather than churning through the backoff.
+func TestProcessJob_PermanentFailureDoesNotRetry(t *testing.T) {
+	proc, db := openTestProcessor(t, &mockIndexer{}, &mockContentDeleter{}, nil)
+	defer db.Close()
+	ctx := context.Background()
+
+	notePath := filepath.Join(proc.notesPath, "empty.note")
+	if err := os.WriteFile(notePath, []byte("not a real zip"), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+	if err := proc.store.EnqueueJob(ctx, notePath); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	job, err := proc.store.ClaimNextJob(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: job=%v err=%v", job, err)
+	}
+
+	proc.handleJobError(ctx, job, errors.New("parse note: booxnote: read virtual page: entry not found"))
+
+	var status string
+	if err := db.QueryRowContext(ctx,
+		`SELECT status FROM boox_jobs WHERE id = ?`, job.ID).Scan(&status); err != nil {
+		t.Fatalf("read job: %v", err)
+	}
+	if status != "failed" {
+		t.Errorf("status = %q, want failed on the first attempt", status)
+	}
 }

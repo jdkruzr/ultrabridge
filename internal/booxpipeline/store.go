@@ -214,6 +214,29 @@ func (s *Store) CompleteJob(ctx context.Context, jobID int64, ocrSource, apiMode
 	return nil
 }
 
+// RequeueJob returns a job to the pending queue, invisible to ClaimNextJob
+// until notBefore. Used for transient failures (OCR backend down, 5xx,
+// timeout) so a momentary outage doesn't strand a note in `failed` until
+// someone notices and presses Retry Failed.
+//
+// last_error is kept so the reason for the delay stays visible while the job
+// waits, and started_at is left alone — the watchdog only inspects
+// in_progress rows, and the value is useful history in the Details panel.
+func (s *Store) RequeueJob(ctx context.Context, jobID int64, errMsg string, notBefore time.Time) error {
+	if len(errMsg) > 1000 {
+		errMsg = errMsg[:1000]
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE boox_jobs SET status = 'pending', last_error = ?, requeue_after = ?
+		WHERE id = ?`,
+		errMsg, notBefore.Unix(), jobID,
+	)
+	if err != nil {
+		return fmt.Errorf("requeue job: %w", err)
+	}
+	return nil
+}
+
 // FailJob marks a job as failed with an error message.
 func (s *Store) FailJob(ctx context.Context, jobID int64, errMsg string) error {
 	now := time.Now().Unix()
