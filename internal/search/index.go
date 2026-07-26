@@ -49,6 +49,15 @@ func (s *Store) IndexPage(ctx context.Context, path string, pageIdx int, source,
 	})
 }
 
+// Index upserts one page's searchable content.
+//
+// NB: indexed_at is stored in SECONDS, unlike most timestamp columns in this
+// codebase (tasks, boox_notes, the sync tables) which are millisecond UTC.
+// Nothing reads it as a wall-clock time — it backs `ORDER BY indexed_at DESC`
+// and the opaque generation token in the reMarkable search cursor — so the
+// unit is internally consistent and deliberately left alone. Callers that
+// hand the value to a millisecond consumer must convert; see the unit-boundary
+// note in internal/source/forestnote/backfill.go.
 func (s *Store) Index(ctx context.Context, doc NoteDocument) error {
 	now := time.Now().Unix()
 	_, err := s.db.ExecContext(ctx, `

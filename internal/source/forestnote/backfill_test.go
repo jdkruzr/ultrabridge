@@ -73,12 +73,25 @@ func TestBackfillPageText_NoDeadlockUnderSingleConn(t *testing.T) {
 	}
 
 	var text string
+	var ocrAt, createdAt int64
 	if err := db.QueryRowContext(ctx,
-		`SELECT text FROM fn_page_text_from_server WHERE id = ?`, pg).Scan(&text); err != nil {
+		`SELECT text, ocr_at, created_at FROM fn_page_text_from_server WHERE id = ?`, pg).
+		Scan(&text, &ocrAt, &createdAt); err != nil {
 		t.Fatalf("read materialized row: %v", err)
 	}
 	if text != "hello world" {
 		t.Errorf("materialized text = %q, want %q", text, "hello world")
+	}
+	// Unit boundary: the seeded indexed_at is SECONDS (search.Store.Index
+	// stamps time.Now().Unix()), but the sync layer is milliseconds — the live
+	// syncbridge path and the tombstone path both pass UnixMilli into
+	// AuthorPageText. Passing the raw value through relayed an ocr_at ~1000x
+	// too small (reading as Jan 1970) to every device pulling a backfilled page.
+	if want := int64(1234 * 1000); ocrAt != want {
+		t.Errorf("ocr_at = %d, want %d (seconds converted to millis)", ocrAt, want)
+	}
+	if createdAt != int64(1234*1000) {
+		t.Errorf("created_at = %d, want %d", createdAt, 1234*1000)
 	}
 
 	// Idempotent: a second run authors nothing (row already present).

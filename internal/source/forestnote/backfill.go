@@ -90,7 +90,13 @@ func backfillPageText(ctx context.Context, db *sql.DB, store *syncstore.Store, l
 		if body == "" || have[pageID] || !live[pageID] || !syncstore.IsULID(pageID) {
 			continue
 		}
-		todo = append(todo, pending{pageID: pageID, body: body, model: model, ocrAt: indexedAt})
+		// Unit boundary: note_content.indexed_at is SECONDS (search.Store.Index
+		// stamps time.Now().Unix()), but the sync layer is milliseconds
+		// throughout — the live path (syncbridge) and the tombstone path both
+		// pass UnixMilli into AuthorPageText. Passing the raw value through
+		// would relay an ocr_at/created_at ~1000x too small (reading as Jan
+		// 1970) to every device that pulls a backfilled page.
+		todo = append(todo, pending{pageID: pageID, body: body, model: model, ocrAt: indexedAt * 1000})
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
