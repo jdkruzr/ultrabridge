@@ -20,6 +20,22 @@ const (
 	ocrStatusFailed     = "failed"
 )
 
+const (
+	// ocrStuckAfter is how long a claimed job may sit in_progress before the
+	// watchdog assumes the worker that claimed it is never coming back.
+	// Deliberately generous against a single page's vision-API round trip: a
+	// premature reclaim only costs duplicate work (indexing is an upsert),
+	// but too tight a bound would churn against a slow OCR backend.
+	ocrStuckAfter = 15 * time.Minute
+	// ocrWatchdogInterval is how often the sweep for stuck jobs runs.
+	ocrWatchdogInterval = time.Minute
+	// ocrMaxAttempts caps reclaim retries. Without it, a page that reliably
+	// wedges the worker would cycle pending -> in_progress -> reclaimed
+	// forever; past this many claims the job lands in `failed` where it is
+	// visible instead of churning.
+	ocrMaxAttempts = 5
+)
+
 // OCRQueueStatus is the reMarkable render-to-fulltext queue snapshot surfaced
 // through /files/status.
 type OCRQueueStatus struct {
@@ -49,6 +65,7 @@ type ocrProcessor struct {
 	cancel context.CancelFunc
 	wake   chan struct{}
 	done   chan struct{}
+	wdDone chan struct{}
 }
 
 func newOCRProcessor(st *store, deps ocrDeps, logger *slog.Logger) *ocrProcessor {
@@ -67,7 +84,6 @@ func newOCRProcessor(st *store, deps ocrDeps, logger *slog.Logger) *ocrProcessor
 		embedModel: deps.embedModel,
 		logger:     logger,
 		wake:       make(chan struct{}, 1),
-		done:       make(chan struct{}),
 	}
 }
 
@@ -85,7 +101,23 @@ func (p *ocrProcessor) Start(ctx context.Context) {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
+	// Minted per Start, not once at construction, so a Stop/Start cycle
+	// doesn't wait on an already-closed channel.
+	p.done, p.wdDone = make(chan struct{}), make(chan struct{})
+
+	// No job can legitimately be in flight before the worker exists, so every
+	// in_progress row here is an orphan from a process that died mid-job.
+	// Reclaim before the loop starts so it can pick the requeued work up on
+	// its first pass.
+	if requeued, failed, err := p.store.reclaimStuckOCRJobs(ctx, 0); err != nil {
+		p.logger.Warn("remarkable OCR startup reclaim failed", "error", err)
+	} else if requeued > 0 || failed > 0 {
+		p.logger.Info("reclaimed orphaned remarkable OCR jobs",
+			"requeued", requeued, "failed", failed)
+	}
+
 	go p.loop(runCtx)
+	go p.watchdog(runCtx)
 	go func() {
 		if err := p.EnqueueMissingStale(context.Background()); err != nil {
 			p.logger.Warn("remarkable OCR initial enqueue failed", "error", err)
@@ -97,8 +129,40 @@ func (p *ocrProcessor) Stop() {
 	if p == nil || p.cancel == nil {
 		return
 	}
-	p.cancel()
-	<-p.done
+	cancel, done, wdDone := p.cancel, p.done, p.wdDone
+	cancel()
+	<-done
+	<-wdDone
+	// Clearing cancel is what lets a later Start run at all — and with it the
+	// startup reclaim that cleans up whatever this Stop interrupted.
+	p.cancel = nil
+}
+
+// watchdog requeues jobs whose claiming worker never finished. Without it a
+// crash mid-job orphans the row permanently: the ordinary re-enqueue path is
+// revision-gated (see enqueueOCRPage), so it will never rescue one, and the
+// count sits in the pipeline status bar forever.
+func (p *ocrProcessor) watchdog(ctx context.Context) {
+	defer close(p.wdDone)
+	ticker := time.NewTicker(ocrWatchdogInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			requeued, failed, err := p.store.reclaimStuckOCRJobs(ctx, ocrStuckAfter)
+			if err != nil {
+				p.logger.Warn("remarkable OCR watchdog reclaim failed", "error", err)
+				continue
+			}
+			if requeued > 0 || failed > 0 {
+				p.logger.Warn("reclaimed stuck remarkable OCR jobs",
+					"requeued", requeued, "failed", failed, "stuck_after", ocrStuckAfter)
+				p.notify()
+			}
+		}
+	}
 }
 
 func (p *ocrProcessor) Status(ctx context.Context) (OCRQueueStatus, error) {
@@ -382,6 +446,65 @@ func (s *store) deleteOCRJobs(ctx context.Context, documentID string) error {
 func (s *store) deleteAutomaticOCRJobs(ctx context.Context, documentID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM remarkable_ocr_jobs WHERE document_id = ? AND manual = 0`, documentID)
 	return err
+}
+
+// reclaimStuckOCRJobs returns abandoned in_progress jobs to the pending queue.
+//
+// This is the ONLY cleanup path for in_progress rows. completeOCRJob and
+// failOCRJob are reachable only from the goroutine that claimed the job, so a
+// process that dies mid-job orphans the row, and enqueueOCRPage's ordinary
+// (non-forced) upsert is gated on `revision <> excluded.revision` — an
+// unchanged page will never be re-enqueued over the orphan. Left alone, such
+// a row is in_progress forever.
+//
+// olderThan <= 0 reclaims every in_progress row; that's what start-up wants,
+// since nothing can be legitimately in flight before the worker exists. A
+// positive value bounds the sweep to jobs the watchdog considers stuck.
+//
+// Jobs that have burned through ocrMaxAttempts are failed rather than
+// requeued. attempts is NOT incremented here — claimNextOCRJob already bumps
+// it on every claim, so the counter stays a true claim count.
+func (s *store) reclaimStuckOCRJobs(ctx context.Context, olderThan time.Duration) (requeued, failed int64, err error) {
+	now := time.Now().UnixMilli()
+
+	failSQL := `
+		UPDATE remarkable_ocr_jobs
+		SET status = ?, finished_at = ?, last_error = ?
+		WHERE status = ? AND attempts >= ?`
+	failArgs := []any{
+		ocrStatusFailed, now,
+		fmt.Sprintf("abandoned in_progress after %d attempts", ocrMaxAttempts),
+		ocrStatusInProgress, ocrMaxAttempts,
+	}
+
+	requeueSQL := `
+		UPDATE remarkable_ocr_jobs
+		SET status = ?, started_at = 0
+		WHERE status = ?`
+	requeueArgs := []any{ocrStatusPending, ocrStatusInProgress}
+
+	if olderThan > 0 {
+		cutoff := time.Now().Add(-olderThan).UnixMilli()
+		failSQL += ` AND started_at < ?`
+		failArgs = append(failArgs, cutoff)
+		requeueSQL += ` AND started_at < ?`
+		requeueArgs = append(requeueArgs, cutoff)
+	}
+
+	// Fail the exhausted ones first so the requeue below can't pick them up.
+	res, err := s.db.ExecContext(ctx, failSQL, failArgs...)
+	if err != nil {
+		return 0, 0, fmt.Errorf("fail exhausted remarkable OCR jobs: %w", err)
+	}
+	failed, _ = res.RowsAffected()
+
+	res, err = s.db.ExecContext(ctx, requeueSQL, requeueArgs...)
+	if err != nil {
+		return 0, failed, fmt.Errorf("reclaim stuck remarkable OCR jobs: %w", err)
+	}
+	requeued, _ = res.RowsAffected()
+
+	return requeued, failed, nil
 }
 
 func (s *store) ocrQueueStatus(ctx context.Context) (OCRQueueStatus, error) {
