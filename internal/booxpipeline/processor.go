@@ -4,19 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/sysop/ultrabridge/internal/processor"
 )
 
 // Processor manages the Boox notes processing pipeline.
+//
+// running/cancel/done are guarded by mu as a set: the worker's shutdown
+// channel is minted per Start (not once at construction) so a stop -> start
+// -> stop cycle from the UI doesn't wait on an already-closed channel.
 type Processor struct {
 	store     *Store
 	cfg       WorkerConfig
 	notesPath string
 	logger    *slog.Logger
-	cancel    context.CancelFunc
-	done      chan struct{}
+
+	mu      sync.Mutex
+	running bool
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // New creates a new Boox processor.
@@ -26,8 +34,16 @@ func New(db *sql.DB, notesPath string, cfg WorkerConfig, logger *slog.Logger) *P
 		cfg:       cfg,
 		notesPath: notesPath,
 		logger:    logger,
-		done:      make(chan struct{}),
 	}
+}
+
+// Running reports whether the worker loop is up. Backs the ▶/⏹ glyph on the
+// global pipeline status bar, symmetric with the Supernote processor's
+// Status().Running.
+func (p *Processor) Running() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.running
 }
 
 // Store returns the underlying Boox store for web access.
@@ -42,26 +58,46 @@ func (p *Processor) Enqueue(ctx context.Context, absPath string) error {
 
 // Start begins the worker loop and watchdog.
 // Reclaims any orphaned in_progress jobs from a previous crash/restart.
+// Idempotent: starting an already-running processor is a no-op.
 func (p *Processor) Start(ctx context.Context) error {
+	p.mu.Lock()
+	if p.running {
+		p.mu.Unlock()
+		return nil
+	}
 	if err := p.store.ReclaimAllInProgress(ctx); err != nil {
 		p.logger.Warn("reclaim orphaned jobs on startup", "error", err)
 	}
 	ctx, p.cancel = context.WithCancel(ctx)
-	go p.run(ctx)
+	done := make(chan struct{})
+	p.done, p.running = done, true
+	p.mu.Unlock()
+
+	go p.run(ctx, done)
 	go p.watchdog(ctx)
 	return nil
 }
 
-// Stop signals shutdown and waits for the worker to finish.
+// Stop signals shutdown and waits for the worker to finish. Idempotent:
+// stopping an already-stopped processor is a no-op.
 func (p *Processor) Stop() {
-	if p.cancel != nil {
-		p.cancel()
+	p.mu.Lock()
+	if !p.running {
+		p.mu.Unlock()
+		return
 	}
-	<-p.done
+	cancel, done := p.cancel, p.done
+	p.running = false
+	p.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	<-done
 }
 
-func (p *Processor) run(ctx context.Context) {
-	defer close(p.done)
+func (p *Processor) run(ctx context.Context, done chan struct{}) {
+	defer close(done)
 	for {
 		select {
 		case <-ctx.Done():

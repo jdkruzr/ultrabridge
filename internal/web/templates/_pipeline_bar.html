@@ -1,0 +1,50 @@
+{{define "_pipeline_bar"}}
+{{/*
+  The global pipeline status bar. Rendered once by layout.html, OUTSIDE
+  #main-content: every sidebar link is an hx-get targeting #main-content with
+  the default innerHTML swap, so anything inside that element is destroyed on
+  the first client-side navigation. Living in the layout chrome is what makes
+  the bar appear identically on every page.
+
+  Context is the whole template-data map, for baseTemplateData's
+  HasSupernoteSource / HasBooxSource keys. Only those two sources run a global
+  worker; ForestNote (per-notebook Re-OCR) and reMarkable get status segments
+  but no start/stop controls.
+
+  The live text is filled in by updateProcessorStatus() (layout.html) from a
+  single /files/status poll: #pipeline-summary gets the compact
+  active-or-actionable line, #pipeline-detail the full per-source breakdown.
+
+  data-has-sn is load-bearing: Supernote's counters are top-level in the
+  /files/status JSON and therefore always present, so unlike the boox /
+  forestnote / remarkable blocks the renderer can't infer presence from the
+  payload. Without it an SPC-server-only deployment shows a phantom "SN idle".
+*/}}
+<div class="pipeline-bar-wrap">
+    <div id="pipeline-bar" class="pipeline-bar" data-has-sn="{{if .HasSupernoteSource}}1{{else}}0{{end}}">
+        <span class="text-bold">Pipeline Status:</span>
+        <span id="pipeline-summary" class="text-small">Loading...</span>
+        <div class="flex-spacer"></div>
+        {{if .HasSupernoteSource}}
+        <form hx-post="/processor/supernote/start" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
+            <button type="submit" class="btn-small" title="Start the Supernote processor">▶ SN</button>
+        </form>
+        <form hx-post="/processor/supernote/stop" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
+            <button type="submit" class="btn-small" style="background: var(--text-secondary);" title="Stop the Supernote processor">⏹ SN</button>
+        </form>
+        {{end}}
+        {{if .HasBooxSource}}
+        <form hx-post="/processor/boox/start" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
+            <button type="submit" class="btn-small" title="Start the Boox processor">▶ Boox</button>
+        </form>
+        <form hx-post="/processor/boox/stop" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">
+            <button type="submit" class="btn-small" style="background: var(--text-secondary);" title="Stop the Boox processor">⏹ Boox</button>
+        </form>
+        {{end}}
+        <button type="button" id="pipeline-detail-toggle" class="btn-small"
+                onclick="togglePipelineDetail()" aria-expanded="false" aria-controls="pipeline-detail"
+                title="Show per-source detail">⌄</button>
+    </div>
+    <div id="pipeline-detail" class="pipeline-detail" hidden></div>
+</div>
+{{end}}

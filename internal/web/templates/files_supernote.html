@@ -8,7 +8,6 @@
     {{template "_detail_page_grid" .detail}}
   {{else if .files}}
     {{if .syncModel}}{{template "_sync_model_banner" .syncModel}}{{end}}
-    {{template "_files_status_panel" .pipelinePanel}}
 
     <div class="toolbar">
       <form hx-post="/files/scan" hx-swap="none" hx-on:htmx:after-request="updateProcessorStatus();" style="display:inline;">

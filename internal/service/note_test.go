@@ -236,10 +236,12 @@ func (m *mockFileScanner) ScanNow(ctx context.Context) {
 type mockBooxProcessor struct {
 	started int
 	stopped int
+	running bool
 }
 
-func (m *mockBooxProcessor) Start(context.Context) error { m.started++; return nil }
-func (m *mockBooxProcessor) Stop()                       { m.stopped++ }
+func (m *mockBooxProcessor) Start(context.Context) error { m.started++; m.running = true; return nil }
+func (m *mockBooxProcessor) Stop()                       { m.stopped++; m.running = false }
+func (m *mockBooxProcessor) Running() bool               { return m.running }
 
 func TestNoteService_ListFiles(t *testing.T) {
 	ns := &mockNoteStore{
@@ -345,6 +347,52 @@ func TestNoteService_SourcePresenceAndControls(t *testing.T) {
 	}
 	if booxProc.started != 1 || booxProc.stopped != 1 {
 		t.Fatalf("boox processor start/stop = %d/%d, want 1/1", booxProc.started, booxProc.stopped)
+	}
+}
+
+// TestNoteService_BooxRunningFlag pins the split introduced for the global
+// pipeline status bar: GetQueueStatus (the store) knows nothing about worker
+// lifecycle, so GetProcessorStatus must overlay Running from the processor
+// handle. Without it the bar can't render ▶/⏹ for Boox the way it does for
+// Supernote.
+func TestNoteService_BooxRunningFlag(t *testing.T) {
+	booxProc := &mockBooxProcessor{}
+	svc := &noteService{
+		booxStore: &mockBooxStore{},
+		booxProc:  booxProc,
+		logger:    slog.Default(),
+	}
+
+	st, err := svc.GetProcessorStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetProcessorStatus: %v", err)
+	}
+	if st.Boox == nil {
+		t.Fatalf("expected a boox block")
+	}
+	if st.Boox.Running {
+		t.Errorf("Boox.Running = true before Start, want false")
+	}
+
+	if err := svc.StartBooxProcessor(context.Background()); err != nil {
+		t.Fatalf("StartBooxProcessor: %v", err)
+	}
+	st, err = svc.GetProcessorStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetProcessorStatus after start: %v", err)
+	}
+	if !st.Boox.Running {
+		t.Errorf("Boox.Running = false after Start, want true")
+	}
+
+	// A Boox catalog with no worker wired must not panic or claim to run.
+	noWorker := &noteService{booxStore: &mockBooxStore{}, logger: slog.Default()}
+	st, err = noWorker.GetProcessorStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetProcessorStatus (no worker): %v", err)
+	}
+	if st.Boox == nil || st.Boox.Running {
+		t.Errorf("worker-less boox status = %+v, want a block with Running=false", st.Boox)
 	}
 }
 

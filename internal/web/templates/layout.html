@@ -312,16 +312,60 @@
             flex-wrap: wrap;
         }
 
-        .status-panel {
+        /* Global pipeline status bar (_pipeline_bar.html). The wrapper carries
+           the sticky positioning and bleeds through .content's padding so the
+           bar spans the full column and pins flush to the top. z-index sits
+           below the fixed sidebar (10) and well below the htmx loading
+           indicator (1000). Both rows live in one sticky wrapper — two sticky
+           siblings at top:0 would stack on top of each other. */
+        .pipeline-bar-wrap {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            margin: calc(var(--spacing) * -1) calc(var(--spacing) * -1) var(--spacing);
+            background: var(--surface-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .pipeline-bar {
             display: flex;
             align-items: center;
             gap: 1rem;
-            margin-bottom: 1.5rem;
-            padding: 1rem;
-            background: var(--bg-color);
-            border-radius: var(--radius);
-            border: 1px solid var(--border-color);
+            padding: 0.6rem var(--spacing);
         }
+
+        /* With four busy sources the compact line can outgrow the column;
+           truncate it rather than shoving the controls off the edge. The
+           untruncated breakdown is one ⌄ away in .pipeline-detail. */
+        #pipeline-summary {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .pipeline-detail {
+            padding: 0.5rem var(--spacing) 0.7rem;
+            background: var(--bg-color);
+            border-top: 1px solid var(--border-light);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .pipeline-detail-row {
+            display: flex;
+            gap: 0.75rem;
+            padding: 0.15rem 0;
+        }
+
+        .pipeline-detail-src {
+            min-width: 6rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* Failed / dropped counts in the compact line. */
+        .pipeline-alert { color: var(--status-text-failed); }
 
         .flex-spacer { flex: 1; }
 
@@ -373,6 +417,14 @@
             
             .task-actions button { width: 100%; margin-top: 0.5rem; }
             .search-filter-row { grid-template-columns: 1fr; }
+
+            /* .content drops to 1rem padding here, so the bleed must match. */
+            .pipeline-bar-wrap { margin: -1rem -1rem 1rem; }
+            .pipeline-bar { flex-wrap: wrap; gap: 0.5rem; padding: 0.6rem 1rem; }
+            .pipeline-bar .flex-spacer { flex-basis: 100%; }
+            /* Room to wrap here, so show the whole line instead of clipping. */
+            #pipeline-summary { white-space: normal; overflow: visible; }
+            .pipeline-detail { padding: 0.5rem 1rem 0.7rem; }
         }
 
         /* Logs */
@@ -545,10 +597,18 @@
             </div>
         </nav>
 
-        <main id="main-content" class="content">
-            <div id="global-status" style="margin-bottom: 1rem; font-size: 0.85rem; padding: 0.5rem 1rem; border-radius: var(--radius); background: var(--surface-color); border: 1px solid var(--border-color); display: none;"></div>
-            
-            {{template "content" .}}
+        {{/*
+          The #main-content id sits on the inner div, not on <main>, so the
+          pipeline bar lives outside the HTMX swap target and survives
+          client-side navigation. hx-target="#main-content" selectors and the
+          htmx:afterSwap id check below are unaffected by the move.
+        */}}
+        <main class="content">
+            {{template "_pipeline_bar" .}}
+
+            <div id="main-content">
+                {{template "content" .}}
+            </div>
         </main>
     </div>
 
@@ -725,111 +785,151 @@
 
         let statusInterval = null;
 
+        // ---- Global pipeline status bar --------------------------------
+        // One renderer over one /files/status poll. pipelineSegments() is the
+        // ONLY place that knows the per-source JSON shapes: Supernote's
+        // counters are top-level on EmbeddingJobStatus, while boox /
+        // forestnote / remarkable are omitempty blocks — so those three are
+        // gated on key presence, never on zero values.
+        //
+        // Each segment carries two lists. `compact` is active-or-actionable
+        // state only (in progress / queued / failed / dropped) and feeds the
+        // always-visible summary line; `detail` adds the informational counts
+        // (done, processed, unmigrated) and feeds the collapsible row. A
+        // source with an empty compact list still renders, as "idle" — the bar
+        // is always present so page content never shifts under it.
+        function pipelineSegments(data) {
+          var segs = [];
+          var bar = document.getElementById('pipeline-bar');
+
+          if (bar && bar.dataset.hasSn === '1') {
+            var s = { key: 'SN', label: 'Supernote', running: !!data.running, compact: [], detail: [], alert: false };
+            if (data.in_flight_count > 0) s.compact.push('⚙ ' + data.in_flight_count + ' in progress');
+            if (data.pending_count > 0) s.compact.push(data.pending_count + ' queued');
+            if (data.failed_count > 0) { s.compact.push(data.failed_count + ' failed'); s.alert = true; }
+            s.detail = s.compact.concat([(data.processed_count || 0) + ' done']);
+            segs.push(s);
+          }
+
+          if (data.boox) {
+            var b = data.boox, s = { key: 'Boox', label: 'Boox', running: !!b.running, compact: [], detail: [], alert: false };
+            if (b.in_progress > 0 && b.active_title) s.compact.push('⚙ ' + b.active_title);
+            else if (b.in_progress > 0) s.compact.push('⚙ ' + b.in_progress + ' in progress');
+            if (b.pending > 0) s.compact.push(b.pending + ' queued');
+            if (b.failed > 0) { s.compact.push(b.failed + ' failed'); s.alert = true; }
+            s.detail = s.compact.concat([(b.done || 0) + ' done']);
+            if (b.unmigrated_count > 0) s.detail.push('⬇ ' + b.unmigrated_count + ' unmigrated');
+            segs.push(s);
+          }
+
+          // ForestNote and reMarkable have no global worker (FN reprocessing
+          // is per-notebook), so running stays null and no ▶/⏹ glyph renders.
+          if (data.forestnote) {
+            var fn = data.forestnote, s = { key: 'FN', label: 'ForestNote', running: null, compact: [], detail: [], alert: false };
+            if (fn.in_flight > 0) s.compact.push('⚙ ' + fn.in_flight + ' in progress');
+            if (fn.pending > 0) s.compact.push(fn.pending + ' queued');
+            if (fn.dropped > 0) { s.compact.push(fn.dropped + ' dropped'); s.alert = true; }
+            s.detail = s.compact.concat([(fn.processed || 0) + ' done']);
+            segs.push(s);
+          }
+
+          if (data.remarkable) {
+            var rm = data.remarkable, s = { key: 'RM', label: 'reMarkable', running: null, compact: [], detail: [], alert: false };
+            if (rm.in_progress > 0) s.compact.push('⚙ ' + rm.in_progress + ' in progress');
+            if (rm.pending > 0) s.compact.push(rm.pending + ' queued');
+            if (rm.failed > 0) { s.compact.push(rm.failed + ' failed'); s.alert = true; }
+            s.detail = s.compact.concat([(rm.done || 0) + ' done']);
+            segs.push(s);
+          }
+
+          return segs;
+        }
+
+        // Both renderers build DOM nodes and set textContent per node rather
+        // than assembling innerHTML: Boox's active_title is user data.
+        function renderPipelineSummary(segs) {
+          var el = document.getElementById('pipeline-summary');
+          if (!el) return;
+          el.textContent = '';
+          if (!segs.length) {
+            el.textContent = 'No sources configured';
+            return;
+          }
+          segs.forEach(function(s, i) {
+            if (i > 0) el.appendChild(document.createTextNode(' · '));
+            var span = document.createElement('span');
+            if (s.alert) span.className = 'pipeline-alert';
+            var glyph = s.running === null ? '' : (s.running ? '▶ ' : '⏹ ');
+            span.textContent = s.key + ' ' + glyph + (s.compact.length ? s.compact.join(', ') : 'idle');
+            el.appendChild(span);
+          });
+        }
+
+        function renderPipelineDetail(segs) {
+          var el = document.getElementById('pipeline-detail');
+          if (!el) return;
+          el.textContent = '';
+          if (!segs.length) {
+            el.textContent = 'No sources configured. Add one in Settings → Devices.';
+            return;
+          }
+          segs.forEach(function(s) {
+            var row = document.createElement('div');
+            row.className = 'pipeline-detail-row';
+            var name = document.createElement('span');
+            name.className = 'pipeline-detail-src';
+            name.textContent = s.label;
+            var val = document.createElement('span');
+            if (s.alert) val.className = 'pipeline-alert';
+            var glyph = s.running === null ? '' : (s.running ? '▶ running · ' : '⏹ stopped · ');
+            val.textContent = glyph + (s.detail.length ? s.detail.join(' · ') : 'idle');
+            row.appendChild(name);
+            row.appendChild(val);
+            el.appendChild(row);
+          });
+        }
+
+        // Detail row visibility persists across navigations and reloads; the
+        // bar itself is layout chrome, so only this one bit is client state.
+        function setPipelineDetail(open) {
+          var el = document.getElementById('pipeline-detail');
+          if (!el) return;
+          el.hidden = !open;
+          var btn = document.getElementById('pipeline-detail-toggle');
+          if (btn) {
+            btn.textContent = open ? '⌃' : '⌄';
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+          }
+          try { localStorage.setItem('ub.pipelineDetail', open ? '1' : '0'); } catch (e) {}
+        }
+
+        function togglePipelineDetail() {
+          var el = document.getElementById('pipeline-detail');
+          if (el) setPipelineDetail(el.hidden);
+        }
+
+        function restorePipelineDetail() {
+          var open = false;
+          try { open = localStorage.getItem('ub.pipelineDetail') === '1'; } catch (e) {}
+          var el = document.getElementById('pipeline-detail');
+          if (!el) return;
+          el.hidden = !open;
+          var btn = document.getElementById('pipeline-detail-toggle');
+          if (btn) {
+            btn.textContent = open ? '⌃' : '⌄';
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+          }
+        }
+
+        // Polled every 5s (see setInterval above) and nudged directly by the
+        // hx-on:htmx:after-request handlers on every mutation form.
         function updateProcessorStatus() {
           fetch('/files/status')
             .then(function(r) { return r.json(); })
             .then(function(data) {
-              // Update the in-tab Files panel (#proc-status, if on a Files
-              // page). This is the *detailed* view: it carries the
-              // informational counts (done/processed, unmigrated) that the
-              // global bar intentionally omits.
-              var el = document.getElementById('proc-status');
-              if (el) {
-                var parts = [];
-                parts.push(data.running ? '▶ SN Running' : '⏹ SN Stopped');
-                var snQ = [];
-                if (data.in_flight_count > 0) snQ.push(data.in_flight_count + ' in progress');
-                if (data.pending_count > 0) snQ.push(data.pending_count + ' queued');
-                if (data.failed_count > 0) snQ.push(data.failed_count + ' failed');
-                if (snQ.length) parts.push('SN: ' + snQ.join(', '));
-                if (data.boox) {
-                  var b = data.boox;
-                  var bq = [];
-                  if (b.in_progress > 0 && b.active_title) bq.push('⚙ ' + b.active_title);
-                  else if (b.in_progress > 0) bq.push('⚙ ' + b.in_progress + ' in progress');
-                  if (b.pending > 0) bq.push(b.pending + ' queued');
-                  if (b.failed > 0) bq.push(b.failed + ' failed');
-                  bq.push(b.done + ' done');
-                  if (b.unmigrated_count > 0) bq.push('⬇ ' + b.unmigrated_count + ' unmigrated');
-                  parts.push('Boox: ' + bq.join(', '));
-                }
-                if (data.forestnote) {
-                  var fn = data.forestnote;
-                  var fq = [];
-                  if (fn.in_flight > 0) fq.push('⚙ ' + fn.in_flight + ' in progress');
-                  if (fn.pending > 0) fq.push(fn.pending + ' queued');
-                  if (fn.dropped > 0) fq.push(fn.dropped + ' dropped');
-                  fq.push(fn.processed + ' done');
-                  parts.push('FN: ' + fq.join(', '));
-                }
-                if (data.remarkable) {
-                  var rm = data.remarkable;
-                  var rq = [];
-                  if (rm.in_progress > 0) rq.push('⚙ ' + rm.in_progress + ' in progress');
-                  if (rm.pending > 0) rq.push(rm.pending + ' queued');
-                  if (rm.failed > 0) rq.push(rm.failed + ' failed');
-                  rq.push(rm.done + ' done');
-                  parts.push('RM: ' + rq.join(', '));
-                }
-                el.textContent = parts.join(' | ');
-              }
-
-              // Update the global status bar (visible on every page). One
-              // symmetric rule across all sources: a "Source: ..." segment
-              // appears only when that source has active or actionable state
-              // (in-flight / pending, or failed / dropped). Informational
-              // counts (done, unmigrated) stay in the in-tab panel above, so
-              // an idle deployment shows a quiet, empty bar regardless of
-              // which sources are configured.
-              var gs = document.getElementById('global-status');
-              if (gs) {
-                var gParts = [];
-                if (data.in_flight_count > 0 || data.pending_count > 0 || data.failed_count > 0) {
-                  var s = [];
-                  if (data.in_flight_count > 0) s.push(data.in_flight_count + ' in progress');
-                  if (data.pending_count > 0) s.push(data.pending_count + ' queued');
-                  if (data.failed_count > 0) s.push(data.failed_count + ' failed');
-                  gParts.push('SN: ' + s.join(', '));
-                }
-                if (data.boox) {
-                  var b = data.boox;
-                  if (b.in_progress > 0 || b.pending > 0 || b.failed > 0) {
-                    var s = [];
-                    if (b.in_progress > 0 && b.active_title) s.push('⚙ ' + b.active_title);
-                    else if (b.in_progress > 0) s.push('⚙ ' + b.in_progress + ' in progress');
-                    if (b.pending > 0) s.push(b.pending + ' queued');
-                    if (b.failed > 0) s.push(b.failed + ' failed');
-                    gParts.push('Boox: ' + s.join(', '));
-                  }
-                }
-                if (data.forestnote) {
-                  var fn = data.forestnote;
-                  if (fn.in_flight > 0 || fn.pending > 0 || fn.dropped > 0) {
-                    var s = [];
-                    if (fn.in_flight > 0) s.push(fn.in_flight + ' in progress');
-                    if (fn.pending > 0) s.push(fn.pending + ' queued');
-                    if (fn.dropped > 0) s.push(fn.dropped + ' dropped');
-                    gParts.push('FN: ' + s.join(', '));
-                  }
-                }
-                if (data.remarkable) {
-                  var rm = data.remarkable;
-                  if (rm.in_progress > 0 || rm.pending > 0 || rm.failed > 0) {
-                    var s = [];
-                    if (rm.in_progress > 0) s.push(rm.in_progress + ' in progress');
-                    if (rm.pending > 0) s.push(rm.pending + ' queued');
-                    if (rm.failed > 0) s.push(rm.failed + ' failed');
-                    gParts.push('RM: ' + s.join(', '));
-                  }
-                }
-                if (gParts.length > 0) {
-                  gs.textContent = gParts.join(' | ');
-                  gs.style.display = '';
-                } else {
-                  gs.style.display = 'none';
-                }
-              }
-
+              var segs = pipelineSegments(data);
+              renderPipelineSummary(segs);
+              renderPipelineDetail(segs);
             })
             .catch(function() {});
         }
@@ -838,7 +938,10 @@
 
         // On page load, activate the tab the server designated (for /files and /search routes).
         (function() {
-            // Start global status polling on every page.
+            // The pipeline bar is layout chrome: restore the operator's
+            // detail-row preference, then start polling. Both happen on every
+            // page because the bar now exists on every page.
+            restorePipelineDetail();
             updateProcessorStatus();
 
             const active = "{{.activeTab}}";

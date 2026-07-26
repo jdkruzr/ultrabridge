@@ -1,6 +1,6 @@
 # internal/web
 
-Last verified: 2026-06-30 (MCP is first-class in the main app: the Settings → Integrations MCP card shows the built-in `/mcp` endpoint plus Tokens only; the old sidecar port/stdout config is gone. Prior: Settings IA + sync-model surfacing: `/settings` is now four deep-linkable group pages — `GET /settings` 303s to `/settings/devices` preserving the query string (the `?new_token=` flash must survive the hop); `GET /settings/{group}` over `{devices,ai,integrations,system}` with unknown groups 303-falling-back; the sidebar has a Settings nav-group with 4 `nav-sub` items (`activeTab` = `settings-<group>`). The old monolithic `settings.html` and `saveConfig()` are GONE: cards live in `settings_{devices,ai,integrations,system}.html`; the `section=general` save split into `section=ai|integrations|system`; the JS savers are `saveAuthConfig`/`saveOCRConfig` over a shared `putConfig` helper that OMITS blank secrets (fixes the ocr_api_key wipe). Token create's HX path passes full `settingsData` (was blanking the page). The Devices group renders uniform `<section class="device-source card">` frames (h2 → `_sync_model_banner` → Configuration → Device management slot from `_device_source_section.html`: FN = real registry, SN = reserved `spc_devices` placeholder, Boox = "no registry" note). `source.SyncModelFor` backs the banners (`syncModelFor` template func) and the `sync_model` field `GET /api/sources` now carries via `sourceView`. Prior: ForestNote sync device management: Settings "Sync Devices" card + POST /settings/sync-devices/{prune,compact} + REST GET /api/v1/sync/devices, DELETE /api/v1/sync/devices/{id}, POST /api/v1/sync/compact — all gated on `SetSyncDeviceService` (nil ⇒ card hidden, routes 404); `handleSettings` split into `settingsData(r)` so mutation handlers can re-render with flash keys. Prior: Files-tab consistency: shared _files_pagination/_files_status_panel/_files_breadcrumb partials back all three Files tabs + Digests; ForestNote now gets a status panel; global status bar uses one symmetric per-source active/actionable rule; in-tab note detail (`_detail_page_grid.html` + `NoteService.GetNotePages`) replaced the `#history-modal`/`showHistory` for Supernote+Boox, and Search/Task/CalDAV deep links now navigate to `?detail=` in-tab; Digests viewer: GET `/digests/{id}` detail + `/digests/{id}/render` (source-page image via `spcFileRoot`+`SetSPCFileRoot`), DigestView gained SourcePath/SourceType/HandwriteInnerName/NotePage. Prior: REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
+Last verified: 2026-07-26 (Global pipeline status bar: `_pipeline_bar.html` is now the single pipeline-status surface, rendered by `layout.html` OUTSIDE the `#main-content` swap target — `<main class="content">` wraps `{{template "_pipeline_bar" .}}` + `<div id="main-content">`. The old `#global-status` div lived inside the swap target and was destroyed by every HTMX navigation; `TestPipelineBarOutsideSwapTarget` pins the ordering. `_files_status_panel.html` and the `pipelinePanel` handler struct are GONE — the bar carries `/processor/{supernote,boox}/{start,stop}` on every page, gated on `HasSupernoteSource`/`HasBooxSource`, plus a localStorage-persisted detail row. `updateProcessorStatus()` collapsed to one renderer over `pipelineSegments(data)`; `data-has-sn` threads Supernote presence (its counters are top-level, so absent from omitempty gating). `booxpipeline.QueueStatus` gained `Running`, overlaid by `GetProcessorStatus` from the new `BooxProcessor.Running()`; `booxpipeline.Processor` Start/Stop are now idempotent with a per-Start `done` channel. Prior: MCP is first-class in the main app: the Settings → Integrations MCP card shows the built-in `/mcp` endpoint plus Tokens only; the old sidecar port/stdout config is gone. Prior: Settings IA + sync-model surfacing: `/settings` is now four deep-linkable group pages — `GET /settings` 303s to `/settings/devices` preserving the query string (the `?new_token=` flash must survive the hop); `GET /settings/{group}` over `{devices,ai,integrations,system}` with unknown groups 303-falling-back; the sidebar has a Settings nav-group with 4 `nav-sub` items (`activeTab` = `settings-<group>`). The old monolithic `settings.html` and `saveConfig()` are GONE: cards live in `settings_{devices,ai,integrations,system}.html`; the `section=general` save split into `section=ai|integrations|system`; the JS savers are `saveAuthConfig`/`saveOCRConfig` over a shared `putConfig` helper that OMITS blank secrets (fixes the ocr_api_key wipe). Token create's HX path passes full `settingsData` (was blanking the page). The Devices group renders uniform `<section class="device-source card">` frames (h2 → `_sync_model_banner` → Configuration → Device management slot from `_device_source_section.html`: FN = real registry, SN = reserved `spc_devices` placeholder, Boox = "no registry" note). `source.SyncModelFor` backs the banners (`syncModelFor` template func) and the `sync_model` field `GET /api/sources` now carries via `sourceView`. Prior: ForestNote sync device management: Settings "Sync Devices" card + POST /settings/sync-devices/{prune,compact} + REST GET /api/v1/sync/devices, DELETE /api/v1/sync/devices/{id}, POST /api/v1/sync/compact — all gated on `SetSyncDeviceService` (nil ⇒ card hidden, routes 404); `handleSettings` split into `settingsData(r)` so mutation handlers can re-render with flash keys. Prior: Files-tab consistency: shared _files_pagination/_files_status_panel/_files_breadcrumb partials back all three Files tabs + Digests; ForestNote now gets a status panel; global status bar uses one symmetric per-source active/actionable rule; in-tab note detail (`_detail_page_grid.html` + `NoteService.GetNotePages`) replaced the `#history-modal`/`showHistory` for Supernote+Boox, and Search/Task/CalDAV deep links now navigate to `?detail=` in-tab; Digests viewer: GET `/digests/{id}` detail + `/digests/{id}/render` (source-page image via `spcFileRoot`+`SetSPCFileRoot`), DigestView gained SourcePath/SourceType/HandwriteInnerName/NotePage. Prior: REST v1 task surface: ForestNote-provenance + category/priority filters, include_deleted, write-side url/priority/categories/comment + Clear* sentinels, POST /api/v1/tasks/purge-deleted now returns {deleted, skipped}, POST /api/v1/tasks/purge-completed now returns 200 + {deleted} (was 204); legacy form-route POST /tasks/purge-deleted + Tasks-tab trash view; /files/status `forestnote` block + Re-OCR transient feedback; GET /api/search `?limit=` clamp)
 
 ## REST v1 task API — write/read surface extensions (2026-05-29)
 
@@ -304,33 +304,82 @@ strings preserved where applicable.
 
 `handleFilesStatus` returns `service.EmbeddingJobStatus` verbatim. The
 response carries optional per-source blocks under stable keys: `boox` (the
-`booxpipeline.QueueStatus` shape) and `forestnote` (the
+`booxpipeline.QueueStatus` shape), `forestnote` (the
 `service.ForestNoteQueueStatus` shape — Pending / InFlight / Processed /
-Dropped / Capacity). Both fields are `omitempty`, so non-FN / non-Boox
-deployments emit no key for the missing source — JS gate any UI on
-presence, not on zero values. `updateProcessorStatus()` (layout.html)
-renders both the Files-tab proc-status line and the global status bar from
-this single poll. The two surfaces split by intent: the **in-tab
-`#proc-status`** line is the detailed view (carries the informational
-counts — done/processed, unmigrated — and the SN running/stopped state);
-the **global bar** uses one symmetric per-source rule — a `Source: …`
-segment appears only when that source has *active or actionable* state
-(in-flight/pending, or failed/dropped), so an idle deployment shows an
-empty (hidden) bar regardless of which sources are configured. Done/
-unmigrated are deliberately kept out of the global bar (they kept the Boox
-segment perpetually visible pre-2026-05-30). Re-OCR buttons in
-`_fn_note_row.html` and `files_forestnote.html` show a transient
-"Queued ✓" / "Failed ✗" hint and call `updateProcessorStatus()` after a
-successful enqueue so the operator sees Pending tick up immediately rather
-than waiting for the next 5 s poll.
+Dropped / Capacity), and `remarkable`. All are `omitempty`, so a deployment
+without that source emits no key at all — **JS must gate on key presence,
+never on zero values.** Supernote is the exception: its counters are
+top-level on `EmbeddingJobStatus` and therefore always present, so presence
+has to be threaded from the server (see `data-has-sn` below).
 
-The in-tab panel itself is the shared `_files_status_panel.html` partial,
-fed a `pipelinePanel{Source, StartStop, Note}` context: Supernote/Boox set
-`StartStop` + a `Source` slug (→ `/processor/<source>/{start,stop}`);
-ForestNote (no global worker) sets `Note` instead (Re-OCR is per-notebook).
+`booxpipeline.QueueStatus.Running` is NOT derived from the queue tables —
+`Store.GetQueueStatus` leaves it false and `noteService.GetProcessorStatus`
+overlays it from the `BooxProcessor` handle (`Running() bool`). That keeps
+the store free of worker-lifecycle knowledge and gives Boox the same ▶/⏹
+state Supernote has via `EmbeddingJobStatus.Running`.
+
+### The global pipeline status bar (2026-07-26)
+
+`_pipeline_bar.html` is the single pipeline-status surface. It is rendered
+once by `layout.html` and is the **only** thing in the content column that
+lives outside `#main-content`:
+
+```html
+<main class="content">
+    {{template "_pipeline_bar" .}}
+    <div id="main-content">{{template "content" .}}</div>
+</main>
+```
+
+**This nesting is load-bearing.** `#main-content` is the target of every
+sidebar link's `hx-get` with the default `innerHTML` swap, and
+`renderTemplate` emits only the `content` template on `HX-Request`. The
+predecessor `#global-status` div sat *inside* `<main id="main-content">`, so
+the first client-side navigation destroyed it and it stayed gone until a full
+reload — that was the "bar only shows up sometimes" bug.
+`TestPipelineBarOutsideSwapTarget` (partials_smoke_test.go) pins the
+ordering; it also asserts the bar is absent from HX fragment responses so a
+swap can't nest a second copy.
+
+The bar's context is the whole template-data map, for `baseTemplateData`'s
+`HasSupernoteSource` / `HasBooxSource` — the two sources with a global
+worker, whose `/processor/<source>/{start,stop}` controls it renders.
+ForestNote (per-notebook Re-OCR) and reMarkable get status segments but no
+controls. `data-has-sn` on `#pipeline-bar` carries Supernote presence to the
+JS renderer; without it an SPC-server-only deployment shows a phantom
+"SN idle" forever, since the top-level counters are always in the payload.
+
+`updateProcessorStatus()` (layout.html) drives it from one `/files/status`
+poll (5 s interval, plus a direct nudge from every mutation form's
+`hx-on:htmx:after-request`). `pipelineSegments(data)` is the **only** place
+that knows the per-source JSON shapes; it yields one segment per configured
+source with two lists:
+
+- `compact` → `#pipeline-summary`, the always-visible line: active or
+  actionable state only (in progress / queued / failed / dropped) plus the
+  ▶/⏹ glyph. A quiet source renders as `SN ▶ idle` rather than vanishing —
+  the bar is always present so page content never shifts under it.
+- `detail` → `#pipeline-detail`, the collapsible row: adds the informational
+  counts (done / processed / unmigrated) that would otherwise keep the
+  compact line perpetually noisy. Visibility persists in
+  `localStorage['ub.pipelineDetail']`, restored by `restorePipelineDetail()`
+  on load.
+
+Both renderers build DOM nodes and set `textContent` per node rather than
+assembling `innerHTML` — Boox's `active_title` is user data.
+
+This replaced the old two-surface split (an in-tab `_files_status_panel` on
+three Files tabs plus a hide-when-idle `#global-status` strip), along with
+the `pipelinePanel` handler struct that fed it.
+
 The shared `_files_pagination.html` (a `pager` map: BaseURL/Page/
 TotalPages/Params) and `_files_breadcrumb.html` (`[]crumb{Label, HxGet}`)
-partials likewise back all three Files tabs + Digests.
+partials back all three Files tabs + Digests.
+
+Re-OCR buttons in `_fn_note_row.html` and `files_forestnote.html` show a
+transient "Queued ✓" / "Failed ✗" hint and call `updateProcessorStatus()`
+after a successful enqueue so the operator sees Pending tick up immediately
+rather than waiting for the next poll.
 
 ### In-tab note detail (2026-05-30) — no modal
 

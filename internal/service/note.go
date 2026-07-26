@@ -62,6 +62,9 @@ type BooxImporter interface {
 type BooxProcessor interface {
 	Start(ctx context.Context) error
 	Stop()
+	// Running reports whether the worker loop is up, so the pipeline status
+	// bar can render ▶/⏹ for Boox the same way it does for Supernote.
+	Running() bool
 }
 
 // FileScanner triggers a filesystem scan.
@@ -1604,6 +1607,12 @@ func (s *noteService) GetProcessorStatus(ctx context.Context) (EmbeddingJobStatu
 	if s.booxStore != nil {
 		booxStatus, err := s.booxStore.GetQueueStatus(ctx)
 		if err == nil {
+			// The store knows nothing about worker lifecycle; the Running
+			// flag comes from the processor handle (nil in deployments that
+			// wired a Boox catalog but no worker).
+			if s.booxProc != nil {
+				booxStatus.Running = s.booxProc.Running()
+			}
 			status.Boox = &booxStatus
 		} else {
 			s.logger.Error("failed to get boox queue status", "error", err)

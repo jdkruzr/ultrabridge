@@ -22,7 +22,7 @@ func TestSharedPartialsRender(t *testing.T) {
 	}
 	tmpl := template.Must(template.New("t").Funcs(funcs).ParseFS(templateFS,
 		"templates/_files_pagination.html",
-		"templates/_files_status_panel.html",
+		"templates/_pipeline_bar.html",
 		"templates/_files_breadcrumb.html",
 	))
 
@@ -42,27 +42,40 @@ func TestSharedPartialsRender(t *testing.T) {
 		}
 	}
 
-	// status panel (worker source): slug threads into /processor/<slug>/{start,stop}.
-	var sp bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&sp, "_files_status_panel", pipelinePanel{Source: "supernote", StartStop: true}); err != nil {
-		t.Fatalf("status panel: %v", err)
+	// pipeline bar (both worker sources configured): one bar carries the
+	// controls for every source that has a worker, plus the presence marker
+	// the JS renderer needs for Supernote.
+	var pb bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&pb, "_pipeline_bar", map[string]any{
+		"HasSupernoteSource": true, "HasBooxSource": true,
+	}); err != nil {
+		t.Fatalf("pipeline bar: %v", err)
 	}
-	for _, want := range []string{"/processor/supernote/start", "/processor/supernote/stop", `id="proc-status"`} {
-		if !strings.Contains(sp.String(), want) {
-			t.Errorf("status panel missing %q", want)
+	for _, want := range []string{
+		"/processor/supernote/start", "/processor/supernote/stop",
+		"/processor/boox/start", "/processor/boox/stop",
+		`id="pipeline-summary"`, `id="pipeline-detail"`, `data-has-sn="1"`,
+	} {
+		if !strings.Contains(pb.String(), want) {
+			t.Errorf("pipeline bar missing %q in:\n%s", want, pb.String())
 		}
 	}
 
-	// status panel (no-worker source, e.g. ForestNote): Note instead of controls.
-	var spFN bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&spFN, "_files_status_panel", pipelinePanel{Note: "Re-OCR is per-notebook."}); err != nil {
-		t.Fatalf("status panel (note): %v", err)
+	// pipeline bar with no worker-backed source (e.g. an SPC-server-only or
+	// ForestNote-only deployment): status surface only, no processor controls,
+	// and data-has-sn must be 0 so the renderer doesn't invent an "SN idle"
+	// segment out of the always-present top-level counters.
+	var pbNone bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&pbNone, "_pipeline_bar", map[string]any{
+		"HasSupernoteSource": false, "HasBooxSource": false,
+	}); err != nil {
+		t.Fatalf("pipeline bar (no workers): %v", err)
 	}
-	if strings.Contains(spFN.String(), "/processor/") {
-		t.Errorf("no-worker panel should not render processor controls:\n%s", spFN.String())
+	if strings.Contains(pbNone.String(), "/processor/") {
+		t.Errorf("worker-less pipeline bar should not render processor controls:\n%s", pbNone.String())
 	}
-	if !strings.Contains(spFN.String(), "Re-OCR is per-notebook.") {
-		t.Errorf("no-worker panel missing note text")
+	if !strings.Contains(pbNone.String(), `data-has-sn="0"`) {
+		t.Errorf("worker-less pipeline bar missing data-has-sn=\"0\"")
 	}
 
 	// breadcrumb: []crumb renders label + nav url.
@@ -238,5 +251,50 @@ func TestSyncModelBanner(t *testing.T) {
 				t.Errorf("%s banner contains icon-library markup %q", name, banned)
 			}
 		}
+	}
+}
+
+// TestPipelineBarOutsideSwapTarget is the regression test for the bug this
+// whole surface was built to fix: the status bar used to live INSIDE
+// <main id="main-content">, which is the target of every sidebar link's
+// hx-get with the default innerHTML swap. On HX-Request renderTemplate emits
+// only the "content" template, so the first client-side navigation wiped the
+// bar out and it stayed gone until a full reload.
+//
+// The invariant is positional: the bar must be rendered before — and
+// therefore outside — the #main-content div.
+func TestPipelineBarOutsideSwapTarget(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewHandler(&mockTaskService{}, &mockNoteService{}, &mockSearchService{},
+		&mockConfigService{}, nil, "/notes", "", logger, logging.NewLogBroadcaster())
+
+	// No HX-Request header: full layout render.
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	bar := strings.Index(body, `id="pipeline-bar"`)
+	main := strings.Index(body, `<div id="main-content">`)
+	if bar < 0 {
+		t.Fatalf("layout did not render the pipeline bar")
+	}
+	if main < 0 {
+		t.Fatalf("layout did not render the #main-content swap target")
+	}
+	if bar > main {
+		t.Errorf("pipeline bar renders inside the #main-content swap target "+
+			"(bar at %d, target at %d) — HTMX navigation will destroy it", bar, main)
+	}
+
+	// The bar is layout chrome, so it must NOT appear in an HX-Request
+	// response; otherwise a swap would nest a second copy inside the target.
+	hxReq := httptest.NewRequest("GET", "/", nil)
+	hxReq.Header.Set("HX-Request", "true")
+	hxW := httptest.NewRecorder()
+	handler.ServeHTTP(hxW, hxReq)
+
+	if strings.Contains(hxW.Body.String(), `id="pipeline-bar"`) {
+		t.Error("HX-Request fragment response contains the pipeline bar; it should be layout-only")
 	}
 }

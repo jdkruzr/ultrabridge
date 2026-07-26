@@ -972,3 +972,41 @@ startxref
 `
 	return os.WriteFile(path, []byte(pdfContent), 0644)
 }
+
+// TestProcessorStartStopCycle covers the lifecycle the global pipeline status
+// bar exposes: its Boox ▶/⏹ controls are now reachable from every page, so a
+// stop -> start -> stop round trip has to be safe. It used to panic — `done`
+// was minted once in New and closed by run's defer, so the second Stop waited
+// on (and the second run closed) an already-closed channel.
+func TestProcessorStartStopCycle(t *testing.T) {
+	proc, db := openTestProcessor(t, &mockIndexer{}, &mockContentDeleter{}, nil)
+	defer db.Close()
+
+	if proc.Running() {
+		t.Fatal("Running() = true before Start")
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := proc.Start(context.Background()); err != nil {
+			t.Fatalf("Start #%d: %v", i, err)
+		}
+		if !proc.Running() {
+			t.Fatalf("Running() = false after Start #%d", i)
+		}
+		proc.Stop()
+		if proc.Running() {
+			t.Fatalf("Running() = true after Stop #%d", i)
+		}
+	}
+
+	// Both directions are idempotent: a double-press must be a no-op, not a
+	// second worker or a wait on a closed channel.
+	proc.Stop()
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start after redundant Stop: %v", err)
+	}
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("redundant Start: %v", err)
+	}
+	proc.Stop()
+}

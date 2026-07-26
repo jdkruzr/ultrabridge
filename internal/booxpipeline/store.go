@@ -453,7 +453,13 @@ func (s *Store) DeleteNote(ctx context.Context, path string) error {
 }
 
 // QueueStatus represents the current state of the processing queue.
+//
+// Running is NOT derived from the queue tables — GetQueueStatus leaves it
+// false and the caller (service.GetProcessorStatus) fills it in from the
+// Processor handle. Splitting it this way keeps the store free of any
+// worker-lifecycle knowledge.
 type QueueStatus struct {
+	Running         bool   `json:"running"`
 	ActiveTitle     string `json:"active_title,omitempty"` // title of currently processing note
 	ActivePages     int    `json:"active_pages,omitempty"` // page count of active note
 	Pending         int    `json:"pending"`
