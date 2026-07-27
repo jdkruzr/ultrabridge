@@ -14,13 +14,38 @@ page dimension so any device can reconstruct that ratio.
 
 | column             | type              | notes                                            |
 |--------------------|-------------------|--------------------------------------------------|
-| `aspect_long_axis` | INTEGER, nullable | long-axis page dimension from the creating device |
+| `aspect_long_axis` | INTEGER, nullable | page long edge, short edge normalized to 10000    |
+
+### What the number actually is
+
+**The page's long edge expressed in a coordinate space where the short edge is exactly
+10000** — i.e. the aspect ratio × 10000. Derived empirically from stroke geometry
+(2026-07-27), since no consumer existed to document it:
+
+- Stroke `points` are base64 little-endian records of 5 × int32 — `x, y, pressure,
+  width, t` — 20 bytes per point.
+- Across every device in the fleet, `max(x)` tops out at **exactly 10000** where a stroke
+  reaches the right edge, and `max(y)` always lands at or under that notebook's
+  `aspect_long_axis` — one sample reached 12542 against a bound of 12688. Strokes fill
+  the box and never escape it.
+
+So `12192` is a 1.2192 : 1 page, `18556` is 1.8556 : 1, and the `null` legacy default of
+3:4 is **13333** in these units.
+
+Two consequences worth knowing:
+
+- It is a **ratio, not a size**. Two devices with the same proportions report the same
+  value regardless of physical dimensions — a 10.3″ Tab Ultra C Pro and a 10.3″ Go 10.3
+  both report `12688`. Never use it as a device fingerprint.
+- It is **not the raw panel ratio**. A Boox Go 6's panel is 1448×1072 (1.3507) but it
+  reports `12192` (1.2192), because the client measures the *drawable page* with device
+  chrome excluded. That is the correct thing to sync: it is what has to letterbox on the
+  receiving device.
 
 Nullable is load-bearing: the client authors the notebook row first with
 `aspect_long_axis: null`, then updates it a beat later once page geometry is known. Both
 ops are normal LWW upserts, so a consumer sees null briefly and must not treat it as an
-error. Values observed in the field so far: `12192` and `12556`, two different device
-classes.
+error.
 
 Mirror DDL lives in `internal/syncstore/schema.go` (new-DB column set plus an
 `ensureColumn` entry for existing databases); the wire registry entry is in
