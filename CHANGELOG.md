@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.3.0 - 2026-07-27
+
+### Added
+
+- **One persistent pipeline status bar on every page.** The status bar is now rendered once by the layout, outside the HTMX swap target, so it appears identically on Tasks, Search, every Files tab, Digests, Chat, Logs, and all four Settings groups. It is sticky, always visible (a quiet source reads "idle" so page content never shifts), carries Supernote and Boox start/stop controls everywhere, and has a collapsible per-source detail row whose state persists across navigation.
+- `booxpipeline.Processor.Running()` and `booxpipeline.QueueStatus.Running`, so the Boox worker reports run state the way the Supernote processor already did.
+- Canonical note reference links: `service.ReferenceForPath` maps an internal note path to a UB detail URL plus, where the source has one, a native opener URL. Surfaced through MCP note tools.
+
+### Fixed
+
+- **Pipeline status bar disappeared after the first navigation.** The old `#global-status` element lived inside `<main id="main-content">`, the target of every sidebar link's `hx-get` with the default `innerHTML` swap, so the first client-side navigation destroyed it and it stayed gone until a full page reload.
+- **reMarkable OCR jobs abandoned mid-run were never recovered.** Nothing moved a row out of `in_progress` except the goroutine that claimed it, and the ordinary re-enqueue path is revision-gated, so a process that died mid-job wedged the job permanently — two had been stuck for a month. Added a startup reclaim plus a watchdog that requeues jobs stuck past 15 minutes, with an attempt cap so a page that reliably kills the worker fails visibly instead of cycling forever.
+- **A momentary OCR-backend outage permanently failed Boox notes.** `FailJob` was the only terminal path, so a connection refusal or a 500 stranded a note in `failed` until someone pressed Retry Failed. OCR failures are now classified: dial/timeout failures and 5xx/429/408 responses are retried with backoff doubling from 1 minute (capped at 30), while a 4xx is a verdict and still fails immediately. The long-dormant `requeue_after` column finally drives this.
+- **Empty Boox notebooks were reported as permanent failures.** A notebook created on the device and never drawn in parsed as `read virtual page: entry not found`. It is now skipped with a recorded reason via the new `booxnote.ErrEmptyNotebook`. An archive where only *some* declared pages are missing is still a hard error — that is truncation, and it stays loud.
+- **Stopping the Boox worker mid-note marked the note failed.** Shutdown now leaves the row `in_progress` for the startup reclaim.
+- **`booxpipeline.Processor` panicked on a stop/start/stop cycle** — its shutdown channel was minted once at construction and closed by the worker, so the second stop closed an already-closed channel. Start and Stop are now idempotent with a per-start channel. Same fix applied to the reMarkable OCR processor, whose Start silently no-op'd after any Stop.
+- **ForestNote page-text backfill relayed timestamps ~1000x too small.** `note_content.indexed_at` is stored in seconds while the sync layer is milliseconds; the backfill passed the raw column through, so backfilled pages carried an `ocr_at`/`created_at` reading as January 1970. Converted at the boundary.
+- Note search now defaults to most-recent ordering.
+
+### Verified
+
+- `go test ./...`
+- `go vet ./...`
+- `./rebuild.sh`
+- Live: the two month-old reMarkable jobs reclaimed on startup and OCR'd successfully; the two transient Boox failures recovered on retry and indexed ~600 characters of previously unsearchable handwriting; a newly synced note flowed enqueue -> OCR -> index in about a second.
+
+## v1.2.1 - 2026-06-30
+
+### Fixed
+
+- Improve filtered search recall for source/device/date/location filters by fetching a larger candidate set before post-merge filtering.
+- Make multi-word keyword queries match both exact phrases and all separated terms, so queries like "Froster Glacier" can find notes where the terms appear apart.
+- Improve hybrid search relevance by weighting lexical matches above vector-only matches and suppressing ultra-short vector-only tail results when lexical hits exist.
+
+### Verified
+
+- `go test ./internal/rag ./internal/search`
+- `go test ./...`
+- `./rebuild.sh`
+- Live MCP checks for ForestNote storage and Froster Glacier searches
+
 ## v1.2.0 - 2026-06-30
 
 ### Changed
