@@ -1,6 +1,6 @@
 # Boox Note Parser
 
-Last verified: 2026-04-05
+Last verified: 2026-07-27 (Empty-notebook handling: `Open` now returns the exported sentinel `ErrEmptyNotebook` when note_info declares pages but the archive carries no data for ANY of them — a notebook created on the device and never drawn in. A PARTIALLY missing archive is a different, non-sentinel error and stays loud. `booxpipeline` skips the former and fails the latter.)
 
 ## Purpose
 Parses Boox .note files (ZIP archives containing protobuf metadata, nested shape ZIPs, and binary point files) into an in-memory model of pages, shapes, and stroke points.
@@ -8,6 +8,15 @@ Parses Boox .note files (ZIP archives containing protobuf metadata, nested shape
 ## Contracts
 - **Exposes**: `Open(r io.ReaderAt, size int64) (*Note, error)`, `Note` (NoteID, Title, Pages), `Page` (PageID, Width, Height, Shapes), `Shape` (UniqueID, ShapeType, Color, FillColor, Thickness, ZOrder, BoundingRect, MatrixValues, Text, Points), `TinyPoint` (X, Y, Size, Pressure, Time), `Rect`
 - **Guarantees**: Produces fully correlated model -- shapes have their point data attached via UUID matching. Pages ordered by orderIndex from note_info. Shapes sorted by ZOrder. Blank pages (no shape ZIP) return empty shape slice, not error.
+- **Empty vs truncated**: in the pageNames fallback branch a missing VirtualPage
+  entry is not fatal — the page falls through to the backfill loop, which can
+  rebuild it from shape/point data. After backfill, pages still unresolved are
+  judged: ALL declared pages unresolved (and no pages materialized at all) →
+  `ErrEmptyNotebook`, which callers should treat as "nothing to process";
+  SOME unresolved while others carry real content → a plain error naming the
+  count, because that is a truncated/corrupt archive and must not be silently
+  skipped. `booxpipeline.Processor.handleJobError` maps the sentinel to a
+  `skipped` job with reason "empty notebook (no page data)".
 - **Expects**: Valid Boox .note ZIP with standard directory layout: `{noteId}/note/pb/note_info`, `{noteId}/virtual/page/pb/{pageId}`, `{noteId}/shape/{pageId}#...zip`, `{noteId}/point/{pageId}/{shapeId}`
 
 ## Dependencies

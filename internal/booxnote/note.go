@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -13,6 +14,20 @@ import (
 
 	"google.golang.org/protobuf/encoding/protowire"
 )
+
+// ErrEmptyNotebook reports a .note whose note_info declares pages but which
+// carries no page data for ANY of them — no VirtualPage entry, no shapes, no
+// points. This is what a notebook created on the device and never drawn in
+// looks like, and it is a normal thing for a user to have; callers should
+// treat it as "nothing to process" rather than a failure.
+//
+// A note where only SOME declared pages are missing is NOT this error: that
+// is a truncated or corrupt archive, and stays loud.
+var ErrEmptyNotebook = errors.New("booxnote: notebook declares pages but contains no page data")
+
+// errEntryNotFound distinguishes "this ZIP entry is absent" from a read or
+// parse failure, so Open can tell a hollow notebook from a broken one.
+var errEntryNotFound = errors.New("entry not found")
 
 // Note represents a fully parsed Boox .note file.
 type Note struct {
@@ -101,6 +116,9 @@ func Open(r io.ReaderAt, size int64) (*Note, error) {
 	vpPrefix := noteID + "/virtual/page/pb/"
 	vpFiles := findEntries(entries, vpPrefix)
 
+	// Declared pages whose VirtualPage entry is absent from the archive.
+	var unresolved []string
+
 	if len(vpFiles) > 0 {
 		// Scan all VirtualPage files — the pageId field inside maps to shape/point dirs.
 		for _, vpPath := range vpFiles {
@@ -112,9 +130,19 @@ func Open(r io.ReaderAt, size int64) (*Note, error) {
 		}
 	} else {
 		// Fallback: try pageNames directly (older firmware).
+		//
+		// A missing VirtualPage entry is not fatal here: the backfill loop below
+		// can still reconstruct the page from its shape/point data, and a page
+		// with no data anywhere means the notebook was never drawn in. Collect
+		// the misses and let the post-backfill check decide between "hollow
+		// notebook" and "truncated archive".
 		for _, pageName := range pageNames {
 			pg, err := parsePage(entries, noteID, pageName)
 			if err != nil {
+				if errors.Is(err, errEntryNotFound) {
+					unresolved = append(unresolved, pageName)
+					continue
+				}
 				return nil, fmt.Errorf("booxnote: page %s: %w", pageName, err)
 			}
 			note.Pages = append(note.Pages, pg)
@@ -168,6 +196,34 @@ func Open(r io.ReaderAt, size int64) (*Note, error) {
 			OrderIndex: float32(i),
 			Shapes:     shapes,
 		})
+	}
+
+	// Decide what an unresolved page means, now that backfill has had its
+	// chance to reconstruct pages from shape/point data.
+	if len(unresolved) > 0 {
+		materialized := make(map[string]bool, len(note.Pages))
+		for _, pg := range note.Pages {
+			materialized[pg.PageID] = true
+		}
+		stillMissing := 0
+		for _, pageName := range unresolved {
+			if !materialized[pageName] {
+				stillMissing++
+			}
+		}
+		switch {
+		case stillMissing == 0:
+			// Every miss was recovered from shape/point data — nothing wrong.
+		case len(note.Pages) == 0:
+			// Nothing anywhere: a notebook created on the device and never
+			// drawn in. Normal, and the caller should skip it, not fail it.
+			return nil, fmt.Errorf("%w: %d declared page(s)", ErrEmptyNotebook, len(pageNames))
+		default:
+			// Some pages have real content and others vanished — that is a
+			// truncated or corrupt archive, and must stay loud.
+			return nil, fmt.Errorf("booxnote: %d of %d declared pages missing from archive",
+				stillMissing, len(pageNames))
+		}
 	}
 
 	// Sort pages by orderIndex for consistent ordering.
@@ -421,7 +477,7 @@ func parsePage(entries map[string]*zip.File, noteID, vpPath string) (*Page, erro
 func readEntry(entries map[string]*zip.File, name string) ([]byte, error) {
 	f, ok := entries[name]
 	if !ok {
-		return nil, fmt.Errorf("entry not found: %s", name)
+		return nil, fmt.Errorf("%w: %s", errEntryNotFound, name)
 	}
 
 	rc, err := f.Open()

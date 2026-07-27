@@ -3,10 +3,12 @@ package booxpipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/sysop/ultrabridge/internal/booxnote"
 	"github.com/sysop/ultrabridge/internal/processor"
 )
 
@@ -160,6 +162,20 @@ func (p *Processor) handleJobError(ctx context.Context, job *BooxJob, err error)
 	if ctx.Err() != nil {
 		p.logger.Info("boox job interrupted by shutdown, left for startup reclaim",
 			"job_id", job.ID, "path", job.NotePath)
+		return
+	}
+
+	// An empty notebook is not a failure. A notebook created on the device and
+	// never drawn in has nothing to render, OCR, or index — surfacing it as a
+	// permanent error just leaves a count the operator can't act on. Skip it,
+	// with the reason recorded. (A PARTIALLY missing archive is a different
+	// error and still fails; see booxnote.ErrEmptyNotebook.)
+	if errors.Is(err, booxnote.ErrEmptyNotebook) {
+		p.logger.Info("boox note is empty, skipping",
+			"job_id", job.ID, "path", job.NotePath)
+		if serr := p.store.SkipNote(ctx, job.NotePath, "empty notebook (no page data)"); serr != nil {
+			p.logger.Error("skip empty boox note", "job_id", job.ID, "error", serr)
+		}
 		return
 	}
 

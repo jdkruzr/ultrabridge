@@ -1169,3 +1169,46 @@ func TestProcessJob_PermanentFailureDoesNotRetry(t *testing.T) {
 		t.Errorf("status = %q, want failed on the first attempt", status)
 	}
 }
+
+// TestProcessJob_EmptyNotebookSkips pins the pipeline half of the empty-notebook
+// rule: a notebook the user created but never drew in has nothing to process,
+// so it must land in `skipped` with a reason rather than sitting in `failed`
+// forever as a count nobody can act on. Boox jobs 1504 and 1571 were this.
+func TestProcessJob_EmptyNotebookSkips(t *testing.T) {
+	proc, db := openTestProcessor(t, &mockIndexer{}, &mockContentDeleter{}, nil)
+	defer db.Close()
+	ctx := context.Background()
+
+	notePath := filepath.Join(proc.notesPath, "never-drawn-in.note")
+	if err := os.WriteFile(notePath, []byte("placeholder"), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+	if err := proc.store.EnqueueJob(ctx, notePath); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	job, err := proc.store.ClaimNextJob(ctx)
+	if err != nil || job == nil {
+		t.Fatalf("claim: job=%v err=%v", job, err)
+	}
+
+	// Wrapped, as executeJob returns it ("parse note: %w").
+	proc.handleJobError(ctx, job, fmt.Errorf("parse note: %w", booxnote.ErrEmptyNotebook))
+
+	var status, skipReason string
+	if err := db.QueryRowContext(ctx,
+		`SELECT status, skip_reason FROM boox_jobs WHERE id = ?`, job.ID).
+		Scan(&status, &skipReason); err != nil {
+		t.Fatalf("read job: %v", err)
+	}
+	if status != "skipped" {
+		t.Errorf("status = %q, want skipped", status)
+	}
+	if skipReason == "" {
+		t.Error("skip_reason is empty, want the reason recorded for the operator")
+	}
+
+	// And it must not be re-claimed on the next pass.
+	if next, err := proc.store.ClaimNextJob(ctx); err != nil || next != nil {
+		t.Errorf("skipped job was re-claimed: next=%v err=%v", next, err)
+	}
+}
