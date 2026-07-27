@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.4.0 - 2026-07-27
+
+### Added
+
+- **ForestNote sync schema v4: `notebook.aspect_long_axis`.** A notebook now carries the native page aspect of the device that created it, so a note authored on one device letterboxes rather than distorts when opened on another. Schema hash moves to `74e6b5d7…`; the prior v3 hash stays in the `AcceptsSchemaHash` grace window for one release.
+
+### Changed
+
+- **v2 and v1 sync clients are now rejected.** This bump closes v2's grace window — a v2 client gets a hard 409. All devices were on v3 or later before release.
+
+### Notes
+
+- The ForestNote client half shipped ahead of the server and had been sending `aspect_long_axis` since 2026-07-04. Because `sync_ops.payload` stores each op verbatim, the column survived in the changelog while the server was still on v3, and the mirror backfilled from that history on deploy — 24 notebooks had ever been sent a non-null value, and 24 carried one afterward. Devices did not re-author anything. Recorded in `docs/sync/aspect-ratio-client-handoff.md`.
+
+### Verified
+
+- `go test ./...`, `go vet ./...`
+- Runtime `SchemaHash()` matches the v4 constant; `AcceptsSchemaHash` accepts v4 and v3, rejects v2.
+- `./rebuild.sh`, then a live device sync: 1046 ops pushed (1031 stroke, 7 page_text_from_client, 4 notebook, 4 page), relay high-water 67641 → 68688, no 409s, and a server-authored `page_text_from_server` op back — full round trip on v4.
+
 ## v1.3.0 - 2026-07-27
 
 ### Added
