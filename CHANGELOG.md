@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.5.0 - 2026-07-28
+
+### Added
+
+- **Name your synced devices.** Settings → Devices now lets you give each ForestNote and reMarkable device a label you recognize, instead of picking it out of a 26-character ULID. The label is stored in its own `operator_label` column and is never written by the sync path, so nothing a device reports can overwrite it. Clearing the field falls back to the device-reported name. Also available as `PATCH /api/v1/sync/devices/{id}` and `PATCH /api/v1/remarkable/devices/{id}` with a `{"label": "…"}` body.
+
+  Both registries needed this for the same reason: `RecordCursor` refreshes ForestNote's `device_name` from the request envelope on any sync that carries one, and reMarkable's `touchDevice` rewrites `device_desc` on *every* check-in. A hand-set name stored in either field would not have survived. It also unblocks the still-owed ForestNote client work — `device_name` is now purely additive and cannot clobber an operator's label.
+
+### Fixed
+
+- **ForestNote's pipeline "done" count read 0 after every restart.** Not a stuck pipeline: every other source counts done jobs from a persistent table, but ForestNote has no job table, so the bar was rendering the sync bridge's in-memory counter — monotonic since process start by design. It now shows `indexed`, a live count of pages carrying OCR text, which survives restarts and means the same thing as the other sources' "done". The since-boot figure is still shown as "N this session" while work is flowing.
+
+### Notes
+
+- The indexed count joins through page **and** notebook, so a soft-deleted notebook's pages drop out. That matches Boox (deleting a note removes its job rows) and matches what the Files tab lists — on a development instance it was the difference between 109 raw text rows and 85 live ones.
+- Device labels are deliberately not seeded by any migration: fleet naming is per-instance state, not something to ship in a schema.
+
+### Verified
+
+- `go test ./...`, `go vet ./...`
+- New coverage pins the reason the separate column exists: label a device, then drive a real `RecordCursor` sync (ForestNote) or `touchDevice` heartbeat (reMarkable) and assert the label survives while the device-reported name still lands in its own field.
+- `./rebuild.sh`, then live: both columns migrated onto the existing database, three devices named through the UI, and a subsequent device sync left the labels intact.
+
 ## v1.4.0 - 2026-07-27
 
 ### Added
