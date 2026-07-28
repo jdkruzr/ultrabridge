@@ -293,6 +293,16 @@ func (s *Source) PruneDevice(ctx context.Context, siteID string) (bool, error) {
 	return s.store.DeleteDevice(ctx, siteID)
 }
 
+// SetDeviceLabel sets (or clears, on an empty label) the operator's name for a
+// device. Distinct from the wire's device_name, which every sync overwrites.
+// Returns whether the device existed.
+func (s *Source) SetDeviceLabel(ctx context.Context, siteID, label string) (bool, error) {
+	if s == nil || s.store == nil {
+		return false, fmt.Errorf("forestnote source not started")
+	}
+	return s.store.SetDeviceLabel(ctx, siteID, label)
+}
+
 // CompactNow runs one watermark + sweep pass on demand. Deliberately NOT gated
 // on cfg.Compaction: the periodic gate exists so a deploy never sweeps before
 // the operator has inspected the log, and an explicit button press IS that

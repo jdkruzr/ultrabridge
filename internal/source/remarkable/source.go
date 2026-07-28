@@ -97,6 +97,16 @@ func (s *Source) Devices(ctx context.Context) ([]DeviceRow, error) {
 	return s.store.listDevices(ctx)
 }
 
+// SetDeviceLabel sets (or clears, on an empty label) the operator's name for a
+// paired device. Distinct from the device-reported description, which the
+// pairing heartbeat overwrites. Returns whether the device existed.
+func (s *Source) SetDeviceLabel(ctx context.Context, deviceID, label string) (bool, error) {
+	if s.store == nil {
+		return false, fmt.Errorf("remarkable source not started")
+	}
+	return s.store.setDeviceLabel(ctx, deviceID, label)
+}
+
 // ListDocuments returns the synced document/folder tree (read-only). It reads
 // the modern sync-v3 blob hashtree when present and falls back to the legacy
 // document-storage v2 metadata table otherwise.

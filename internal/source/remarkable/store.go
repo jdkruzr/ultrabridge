@@ -26,8 +26,13 @@ var (
 type DeviceRow struct {
 	DeviceID   string
 	DeviceDesc string
-	CreatedAt  int64
-	LastSeen   int64
+	// Label is the operator's own name for this device, set through Settings.
+	// It needs its own column because touchDevice rewrites DeviceDesc from the
+	// device on every heartbeat — a hand-set name stored there would not
+	// survive the next request. "" = unset.
+	Label     string
+	CreatedAt int64
+	LastSeen  int64
 }
 
 type documentMeta struct {
@@ -76,6 +81,7 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS remarkable_devices (
 			device_id TEXT PRIMARY KEY,
 			device_desc TEXT NOT NULL,
+			operator_label TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL,
 			last_seen INTEGER NOT NULL
 		)`,
@@ -142,6 +148,11 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, `ALTER TABLE remarkable_ocr_jobs ADD COLUMN manual INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 		return fmt.Errorf("remarkable migrate OCR manual column: %w", err)
 	}
+	// Operator-set device label (CREATE TABLE above is a no-op on DBs that
+	// predate it, so existing installs pick the column up here).
+	if _, err := db.ExecContext(ctx, `ALTER TABLE remarkable_devices ADD COLUMN operator_label TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return fmt.Errorf("remarkable migrate device label column: %w", err)
+	}
 	return nil
 }
 
@@ -172,7 +183,7 @@ func (s *store) touchDevice(ctx context.Context, deviceID, deviceDesc string) er
 
 func (s *store) listDevices(ctx context.Context) ([]DeviceRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT device_id, device_desc, created_at, last_seen
+		SELECT device_id, device_desc, operator_label, created_at, last_seen
 		FROM remarkable_devices
 		ORDER BY last_seen DESC, device_id ASC`)
 	if err != nil {
@@ -182,12 +193,29 @@ func (s *store) listDevices(ctx context.Context) ([]DeviceRow, error) {
 	var out []DeviceRow
 	for rows.Next() {
 		var d DeviceRow
-		if err := rows.Scan(&d.DeviceID, &d.DeviceDesc, &d.CreatedAt, &d.LastSeen); err != nil {
+		if err := rows.Scan(&d.DeviceID, &d.DeviceDesc, &d.Label, &d.CreatedAt, &d.LastSeen); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// setDeviceLabel writes the operator's label for a paired device, or clears it
+// when label is empty (falling display back to the device-reported desc).
+// Returns whether the device exists. UPDATE-only: a label must never conjure a
+// pairing row, which only the device handshake may create.
+func (s *store) setDeviceLabel(ctx context.Context, deviceID, label string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE remarkable_devices SET operator_label = ? WHERE device_id = ?`, label, deviceID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 func (s *store) issueToken(ctx context.Context, kind, deviceID, deviceDesc, scopes string, ttl time.Duration) (string, error) {

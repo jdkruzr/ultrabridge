@@ -103,3 +103,29 @@ Sync with `"device_name":"Test Tablet"` → `GET /api/v1/sync/devices` shows
 `{"name":"Test Tablet","first_seen":<ULID-decoded ms>,…}`; a follow-up sync
 without the field leaves the name intact; pruning the device and syncing again
 re-registers it cleanly (accepted_through reseeds from the changelog, §4.3).
+
+## Addendum 2026-07-28: `device_name` can no longer clobber a hand-set name
+
+The client half above is still owed. In the meantime the server grew an
+**operator label** — a separate `sync_cursors.operator_label` column, set only
+from UltraBridge's own Settings → Devices UI (or `PATCH
+/api/v1/sync/devices/{id}`), and surfaced as `label` alongside `name` on `GET
+/api/v1/sync/devices`.
+
+This changes nothing on the wire and requires nothing from the client. It is
+recorded here because it removes the one hazard in shipping this work order:
+
+- `operator_label` is **server-local**. It is never read from, nor written to,
+  the sync envelope, and it is not part of the schema hash.
+- The operator's label takes **display precedence**. Where both exist, the UI
+  shows the label and prints the device-reported name beside it as
+  "reports itself as …".
+- So `device_name` is now purely additive. Send it on every sync exactly as
+  specified above; it lands in its own column and cannot overwrite a name the
+  operator typed. Before this, the two shared a field, and the day the client
+  started sending `device_name` it would silently have replaced every hand-set
+  name in the registry.
+
+The reverse also holds: an operator label does not suppress the value of
+sending `device_name`. It is what a never-labeled device displays as, and it
+is how the operator tells two unlabeled rows apart in the first place.

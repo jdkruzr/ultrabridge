@@ -18,6 +18,7 @@ var ErrSyncDeviceNotFound = errors.New("sync device not found")
 type ForestNoteSyncAdmin interface {
 	Devices(ctx context.Context) ([]syncstore.DeviceRow, error)
 	PruneDevice(ctx context.Context, siteID string) (bool, error)
+	SetDeviceLabel(ctx context.Context, siteID, label string) (bool, error)
 	CompactNow(ctx context.Context) (syncstore.CompactOutcome, error)
 }
 
@@ -45,6 +46,7 @@ func (s *syncDeviceService) ListSyncDevices(ctx context.Context) ([]SyncDevice, 
 		out[i] = SyncDevice{
 			SiteID:        d.SiteID,
 			Name:          d.Name,
+			Label:         d.Label,
 			FirstSeen:     d.FirstSeenMs,
 			LastSeen:      d.LastSeenMs,
 			LastPullSeq:   d.LastPullSeq,
@@ -59,6 +61,17 @@ func (s *syncDeviceService) ListSyncDevices(ctx context.Context) ([]SyncDevice, 
 
 func (s *syncDeviceService) PruneSyncDevice(ctx context.Context, siteID string) error {
 	found, err := s.admin.PruneDevice(ctx, siteID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrSyncDeviceNotFound
+	}
+	return nil
+}
+
+func (s *syncDeviceService) RenameSyncDevice(ctx context.Context, siteID, label string) error {
+	found, err := s.admin.SetDeviceLabel(ctx, siteID, normalizeOperatorLabel(label))
 	if err != nil {
 		return err
 	}

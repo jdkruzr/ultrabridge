@@ -72,10 +72,12 @@ func (h *Handler) RegisterAPIv1() {
 	// is wired (no ForestNote source configured).
 	h.mux.HandleFunc("GET /api/v1/sync/devices", h.handleV1ListSyncDevices)
 	h.mux.HandleFunc("DELETE /api/v1/sync/devices/{id}", h.handleV1PruneSyncDevice)
+	h.mux.HandleFunc("PATCH /api/v1/sync/devices/{id}", h.handleV1RenameSyncDevice)
 	h.mux.HandleFunc("POST /api/v1/sync/compact", h.handleV1SyncCompact)
 
 	// reMarkable device management. Read-only in phase 1.
 	h.mux.HandleFunc("GET /api/v1/remarkable/devices", h.handleV1ListRemarkableDevices)
+	h.mux.HandleFunc("PATCH /api/v1/remarkable/devices/{id}", h.handleV1RenameRemarkableDevice)
 	h.mux.HandleFunc("GET /api/v1/remarkable/documents", h.handleV1ListRemarkableDocuments)
 	h.mux.HandleFunc("GET /api/v1/remarkable/documents/{id}", h.handleV1GetRemarkableDocument)
 }
@@ -448,6 +450,85 @@ func (h *Handler) handleV1PruneSyncDevice(w http.ResponseWriter, r *http.Request
 	h.auditMutation(r, "sync_device_prune", "site_id", siteID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"site_id": siteID, "pruned": true})
+}
+
+// deviceLabelRequest is the PATCH body for both device-rename endpoints. A
+// present-but-empty label clears the operator's label, falling display back to
+// the device-reported name; the pointer distinguishes that from a body that
+// omits the field entirely (which is a no-op request, rejected as 400).
+type deviceLabelRequest struct {
+	Label *string `json:"label"`
+}
+
+func decodeDeviceLabel(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var req deviceLabelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		apiError(w, http.StatusBadRequest, "invalid JSON body")
+		return "", false
+	}
+	if req.Label == nil {
+		apiError(w, http.StatusBadRequest, "label is required (send \"\" to clear)")
+		return "", false
+	}
+	return *req.Label, true
+}
+
+// handleV1RenameSyncDevice sets a ForestNote device's operator label. Stored
+// apart from the wire's device_name, so a later sync cannot overwrite it.
+func (h *Handler) handleV1RenameSyncDevice(w http.ResponseWriter, r *http.Request) {
+	if h.syncDevices == nil {
+		apiError(w, http.StatusNotFound, "no ForestNote sync source configured")
+		return
+	}
+	siteID := r.PathValue("id")
+	if !syncstore.IsULID(siteID) {
+		apiError(w, http.StatusBadRequest, "device id must be a 26-char ULID")
+		return
+	}
+	label, ok := decodeDeviceLabel(w, r)
+	if !ok {
+		return
+	}
+	if err := h.syncDevices.RenameSyncDevice(r.Context(), siteID, label); err != nil {
+		if errors.Is(err, service.ErrSyncDeviceNotFound) {
+			apiError(w, http.StatusNotFound, "no such device")
+			return
+		}
+		apiError(w, http.StatusInternalServerError, "failed to rename device")
+		return
+	}
+	h.auditMutation(r, "sync_device_rename", "site_id", siteID, "label", label)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"site_id": siteID, "label": label})
+}
+
+// handleV1RenameRemarkableDevice is the reMarkable sibling. Its ids come from
+// the pairing handshake with no guaranteed shape, so only non-empty is checked.
+func (h *Handler) handleV1RenameRemarkableDevice(w http.ResponseWriter, r *http.Request) {
+	if h.rmDevices == nil {
+		http.NotFound(w, r)
+		return
+	}
+	deviceID := r.PathValue("id")
+	if strings.TrimSpace(deviceID) == "" {
+		apiError(w, http.StatusBadRequest, "device id is required")
+		return
+	}
+	label, ok := decodeDeviceLabel(w, r)
+	if !ok {
+		return
+	}
+	if err := h.rmDevices.RenameDevice(r.Context(), deviceID, label); err != nil {
+		if errors.Is(err, service.ErrRemarkableDeviceNotFound) {
+			apiError(w, http.StatusNotFound, "no such device")
+			return
+		}
+		apiError(w, http.StatusInternalServerError, "failed to rename device")
+		return
+	}
+	h.auditMutation(r, "remarkable_device_rename", "device_id", deviceID, "label", label)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"device_id": deviceID, "label": label})
 }
 
 // handleV1SyncCompact runs one relay-log compaction pass on demand (typically

@@ -589,6 +589,10 @@ type DigestService interface {
 type SyncDevice struct {
 	SiteID string `json:"site_id"`
 	Name   string `json:"name"` // "" if the device never sent a device_name
+	// Label is the operator's own name for this device, set through Settings and
+	// never touched by the sync path. Separate from Name because every sync
+	// refreshes that from the request envelope. "" = unset.
+	Label string `json:"label"`
 	// FirstSeen is decoded from the site_id ULID's embedded timestamp (when the
 	// install minted it); 0 for synthetic/test ids. LastSeen is the registry
 	// row's updated_at. Both millisecond UTC.
@@ -602,6 +606,11 @@ type SyncDevice struct {
 	// compaction back behind another active device.
 	PinsWatermark bool `json:"pins_watermark"`
 }
+
+// DisplayName is what the UI should call this device: the operator's label when
+// set, else whatever the device reported. Empty when neither exists — callers
+// supply their own placeholder rather than baking UI copy in here.
+func (d SyncDevice) DisplayName() string { return displayName(d.Label, d.Name) }
 
 // SyncCompactResult is one manual relay-log compaction pass's outcome.
 type SyncCompactResult struct {
@@ -619,15 +628,26 @@ type SyncDeviceService interface {
 	ListSyncDevices(ctx context.Context) ([]SyncDevice, error)
 	// PruneSyncDevice returns ErrSyncDeviceNotFound when no such device exists.
 	PruneSyncDevice(ctx context.Context, siteID string) error
+	// RenameSyncDevice sets the operator's label, or clears it when label is
+	// empty. Returns ErrSyncDeviceNotFound when no such device exists.
+	RenameSyncDevice(ctx context.Context, siteID, label string) error
 	CompactNow(ctx context.Context) (SyncCompactResult, error)
 }
 
 type RemarkableDevice struct {
-	DeviceID  string `json:"device_id"`
-	Name      string `json:"name"`
+	DeviceID string `json:"device_id"`
+	Name     string `json:"name"`
+	// Label is the operator's own name for this device (see SyncDevice.Label);
+	// "" when unset.
+	Label     string `json:"label"`
 	FirstSeen int64  `json:"first_seen"`
 	LastSeen  int64  `json:"last_seen"`
 }
+
+// DisplayName is what the UI should call this device: the operator's label when
+// set, else whatever the device reported. Empty when neither exists — callers
+// supply their own placeholder rather than baking UI copy in here.
+func (d RemarkableDevice) DisplayName() string { return displayName(d.Label, d.Name) }
 
 // RemarkableDocument is a read-only view of one node (folder or document) in
 // the synced reMarkable tree, surfaced on the Files tab and /api/v1.
@@ -642,6 +662,9 @@ type RemarkableDocument struct {
 type RemarkableDeviceService interface {
 	ListDevices(ctx context.Context) ([]RemarkableDevice, error)
 	ListDocuments(ctx context.Context) ([]RemarkableDocument, error)
+	// RenameDevice sets the operator's label, or clears it when label is empty.
+	// Returns ErrRemarkableDeviceNotFound when no such device exists.
+	RenameDevice(ctx context.Context, deviceID, label string) error
 }
 
 // ConfigService manages system configuration and sources.

@@ -132,6 +132,75 @@ func TestListDevices_FieldsStalenessAndPinning(t *testing.T) {
 	}
 }
 
+// TestSetDeviceLabel_SurvivesSync is the whole reason operator_label is its own
+// column. device_name is refreshed from the request envelope on every sync, so
+// a hand-set name stored there would be silently overwritten the moment the
+// (still-owed) client half starts sending one.
+func TestSetDeviceLabel_SurvivesSync(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.RecordCursor(ctx, siteA, 1, "sync-v1-client"); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	found, err := s.SetDeviceLabel(ctx, siteA, "Boox Go 10.3 II")
+	if err != nil || !found {
+		t.Fatalf("SetDeviceLabel = (%v, %v), want (true, nil)", found, err)
+	}
+
+	// The device syncs again, reporting a different name of its own.
+	if err := s.RecordCursor(ctx, siteA, 2, "Renamed By Client"); err != nil {
+		t.Fatalf("record 2: %v", err)
+	}
+
+	devs, err := s.ListDevices(ctx, time.Now().UnixMilli(), 1000*60)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(devs) != 1 {
+		t.Fatalf("got %d devices, want 1", len(devs))
+	}
+	if devs[0].Label != "Boox Go 10.3 II" {
+		t.Errorf("label = %q after a sync, want it untouched by RecordCursor", devs[0].Label)
+	}
+	if devs[0].Name != "Renamed By Client" {
+		t.Errorf("device_name = %q, want the wire value still to land in its own field", devs[0].Name)
+	}
+}
+
+func TestSetDeviceLabel_ClearAndUnknownDevice(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.RecordCursor(ctx, siteA, 1, "Reported Name"); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if _, err := s.SetDeviceLabel(ctx, siteA, "My Tablet"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	// Empty clears it — display falls back to the device-reported name.
+	if found, err := s.SetDeviceLabel(ctx, siteA, ""); err != nil || !found {
+		t.Fatalf("clear = (%v, %v), want (true, nil)", found, err)
+	}
+	devs, _ := s.ListDevices(ctx, time.Now().UnixMilli(), 1000*60)
+	if len(devs) != 1 || devs[0].Label != "" {
+		t.Errorf("label after clear = %+v, want empty", devs)
+	}
+
+	// An unregistered site is a miss, never an insert: a fabricated cursor row
+	// would sit at seq 0 and pin the relay log against compaction forever.
+	found, err := s.SetDeviceLabel(ctx, siteB, "Ghost")
+	if err != nil {
+		t.Fatalf("set unknown: %v", err)
+	}
+	if found {
+		t.Error("labeling an unregistered site_id reported success")
+	}
+	if _, _, exists := cursorRow(t, s, siteB); exists {
+		t.Error("labeling an unregistered site_id created a cursor row")
+	}
+}
+
 func TestListDevices_SoleDeviceNeverPins(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

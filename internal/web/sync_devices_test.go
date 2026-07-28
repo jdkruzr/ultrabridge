@@ -16,6 +16,8 @@ type fakeSyncDeviceService struct {
 	devices    []service.SyncDevice
 	pruned     []string
 	pruneErr   error
+	renamed    map[string]string // site_id -> label
+	renameErr  error
 	compacted  int
 	compactRes service.SyncCompactResult
 }
@@ -23,6 +25,19 @@ type fakeSyncDeviceService struct {
 type fakeRemarkableDeviceService struct {
 	devices   []service.RemarkableDevice
 	documents []service.RemarkableDocument
+	renamed   map[string]string // device_id -> label
+	renameErr error
+}
+
+func (f *fakeRemarkableDeviceService) RenameDevice(_ context.Context, deviceID, label string) error {
+	if f.renameErr != nil {
+		return f.renameErr
+	}
+	if f.renamed == nil {
+		f.renamed = map[string]string{}
+	}
+	f.renamed[deviceID] = label
+	return nil
 }
 
 func (f *fakeRemarkableDeviceService) ListDevices(context.Context) ([]service.RemarkableDevice, error) {
@@ -45,6 +60,17 @@ func (f *fakeSyncDeviceService) PruneSyncDevice(_ context.Context, siteID string
 	return nil
 }
 
+func (f *fakeSyncDeviceService) RenameSyncDevice(_ context.Context, siteID, label string) error {
+	if f.renameErr != nil {
+		return f.renameErr
+	}
+	if f.renamed == nil {
+		f.renamed = map[string]string{}
+	}
+	f.renamed[siteID] = label
+	return nil
+}
+
 func (f *fakeSyncDeviceService) CompactNow(context.Context) (service.SyncCompactResult, error) {
 	f.compacted++
 	return f.compactRes, nil
@@ -55,7 +81,7 @@ const testSiteID = "01HZXM5K8PQRSTVWXYZ0123456"
 func TestSettings_SyncDevicesCard(t *testing.T) {
 	h := newTestHandler()
 	h.SetSyncDeviceService(&fakeSyncDeviceService{devices: []service.SyncDevice{
-		{SiteID: testSiteID, Name: "Viwoods AiPaper", LastSeen: 1700000000000, PendingOps: 3},
+		{SiteID: testSiteID, Name: "Viwoods AiPaper", Label: "Studio tablet", LastSeen: 1700000000000, PendingOps: 3},
 		{SiteID: "01HZXM5K8PQRSTVWXYZ0123457", Name: "", Stale: true},
 	}})
 
@@ -67,7 +93,15 @@ func TestSettings_SyncDevicesCard(t *testing.T) {
 		t.Fatalf("GET /settings/devices = %d", w.Code)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"Devices registered with the ForestNote sync server", "Viwoods AiPaper", "(unnamed)", "01HZXM5K", "Stale", "Compact Relay Log"} {
+	for _, want := range []string{
+		"Devices registered with the ForestNote sync server",
+		`value="Studio tablet"`,         // the operator's label, editable in place
+		"reports itself as",             // ...with the device's own name kept visible
+		"Viwoods AiPaper",               //
+		"Name this device",              // placeholder for the row with neither name
+		"/settings/sync-devices/rename", // the rename form posts somewhere real
+		"01HZXM5K", "Stale", "Compact Relay Log",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("settings page missing %q", want)
 		}
@@ -129,6 +163,33 @@ func TestAPIv1RemarkableDevices(t *testing.T) {
 	if len(body.Devices) != 1 || body.Devices[0].DeviceID != "rm-device-001" {
 		t.Fatalf("devices = %+v", body.Devices)
 	}
+
+	t.Run("rename", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/remarkable/devices/rm-device-001",
+			strings.NewReader(`{"label":"Desk tablet"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		if got := fake.renamed["rm-device-001"]; got != "Desk tablet" {
+			t.Errorf("label passthrough = %q", got)
+		}
+	})
+
+	t.Run("rename missing device", func(t *testing.T) {
+		fake.renameErr = service.ErrRemarkableDeviceNotFound
+		defer func() { fake.renameErr = nil }()
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/remarkable/devices/ghost",
+			strings.NewReader(`{"label":"X"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("status=%d, want 404", w.Code)
+		}
+	})
 }
 
 func TestAPIv1RemarkableDevices404WhenUnwired(t *testing.T) {
@@ -206,9 +267,85 @@ func TestSyncDevicePrune(t *testing.T) {
 	}
 }
 
+func TestSyncDeviceRename(t *testing.T) {
+	h := newTestHandler()
+	fake := &fakeSyncDeviceService{}
+	h.SetSyncDeviceService(fake)
+
+	post := func(siteID, label string, hx bool) *httptest.ResponseRecorder {
+		form := url.Values{"site_id": {siteID}, "label": {label}}
+		req := httptest.NewRequest("POST", "/settings/sync-devices/rename", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if hx {
+			req.Header.Set("HX-Request", "true")
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := post(testSiteID, "Boox Go 10.3 II", false); w.Code != http.StatusSeeOther {
+		t.Errorf("rename = %d, want 303", w.Code)
+	}
+	if got := fake.renamed[testSiteID]; got != "Boox Go 10.3 II" {
+		t.Errorf("label passthrough = %q", got)
+	}
+
+	// On HX the Devices group re-renders in place, showing the new name.
+	fake.devices = []service.SyncDevice{{SiteID: testSiteID, Label: "Boox Go 10.3 II"}}
+	w := post(testSiteID, "Boox Go 10.3 II", true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("rename (HX) = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Boox Go 10.3 II") {
+		t.Error("HX re-render does not show the new label")
+	}
+
+	if w := post("not-a-ulid", "X", false); w.Code != http.StatusBadRequest {
+		t.Errorf("rename invalid ULID = %d, want 400", w.Code)
+	}
+
+	fake.renameErr = service.ErrSyncDeviceNotFound
+	if w := post(testSiteID, "X", false); w.Code != http.StatusNotFound {
+		t.Errorf("rename missing device = %d, want 404", w.Code)
+	}
+}
+
+func TestRemarkableDeviceRename(t *testing.T) {
+	h := newTestHandler()
+	fake := &fakeRemarkableDeviceService{}
+	h.SetRemarkableDeviceService(fake)
+
+	post := func(deviceID, label string) *httptest.ResponseRecorder {
+		form := url.Values{"device_id": {deviceID}, "label": {label}}
+		req := httptest.NewRequest("POST", "/settings/remarkable-devices/rename", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := post("rm-device-001", "Desk tablet"); w.Code != http.StatusSeeOther {
+		t.Errorf("rename = %d, want 303", w.Code)
+	}
+	if got := fake.renamed["rm-device-001"]; got != "Desk tablet" {
+		t.Errorf("label passthrough = %q", got)
+	}
+
+	// reMarkable ids have no guaranteed shape, so blank is the only rejection.
+	if w := post("  ", "X"); w.Code != http.StatusBadRequest {
+		t.Errorf("rename blank device_id = %d, want 400", w.Code)
+	}
+
+	fake.renameErr = service.ErrRemarkableDeviceNotFound
+	if w := post("rm-device-001", "X"); w.Code != http.StatusNotFound {
+		t.Errorf("rename missing device = %d, want 404", w.Code)
+	}
+}
+
 func TestSyncDeviceRoutes404WhenUnwired(t *testing.T) {
 	h := newTestHandler()
-	for _, path := range []string{"/settings/sync-devices/prune", "/settings/sync-devices/compact"} {
+	for _, path := range []string{"/settings/sync-devices/prune", "/settings/sync-devices/rename", "/settings/sync-devices/compact"} {
 		req := httptest.NewRequest("POST", path, strings.NewReader("site_id="+testSiteID))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		w := httptest.NewRecorder()
@@ -319,6 +456,62 @@ func TestAPIv1SyncDevices(t *testing.T) {
 		}
 	})
 
+	patch := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("rename", func(t *testing.T) {
+		fake.renameErr = nil
+		w := patch("/api/v1/sync/devices/"+testSiteID, `{"label":"Boox Go 6 II"}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		if got := fake.renamed[testSiteID]; got != "Boox Go 6 II" {
+			t.Errorf("label passthrough = %q", got)
+		}
+		if !strings.Contains(w.Body.String(), `"label":"Boox Go 6 II"`) {
+			t.Errorf("rename body = %s", w.Body.String())
+		}
+	})
+
+	t.Run("rename with empty label clears", func(t *testing.T) {
+		if w := patch("/api/v1/sync/devices/"+testSiteID, `{"label":""}`); w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		if got, ok := fake.renamed[testSiteID]; !ok || got != "" {
+			t.Errorf("cleared label = %q (present=%v), want empty", got, ok)
+		}
+	})
+
+	t.Run("rename without a label field is a 400", func(t *testing.T) {
+		// An omitted field is indistinguishable from a typo'd one; failing loudly
+		// beats silently clearing the operator's name.
+		if w := patch("/api/v1/sync/devices/"+testSiteID, `{}`); w.Code != http.StatusBadRequest {
+			t.Errorf("status=%d, want 400", w.Code)
+		}
+		if w := patch("/api/v1/sync/devices/"+testSiteID, `not json`); w.Code != http.StatusBadRequest {
+			t.Errorf("malformed body status=%d, want 400", w.Code)
+		}
+	})
+
+	t.Run("rename invalid id", func(t *testing.T) {
+		if w := patch("/api/v1/sync/devices/nope", `{"label":"X"}`); w.Code != http.StatusBadRequest {
+			t.Errorf("status=%d, want 400", w.Code)
+		}
+	})
+
+	t.Run("rename missing device", func(t *testing.T) {
+		fake.renameErr = service.ErrSyncDeviceNotFound
+		if w := patch("/api/v1/sync/devices/"+testSiteID, `{"label":"X"}`); w.Code != http.StatusNotFound {
+			t.Errorf("status=%d, want 404", w.Code)
+		}
+		fake.renameErr = nil
+	})
+
 	t.Run("compact", func(t *testing.T) {
 		fake.compactRes = service.SyncCompactResult{Watermark: 9, CollapsedSuperseded: 1, PurgedTombstones: 4, EvictedSites: []string{}}
 		w := httptest.NewRecorder()
@@ -341,6 +534,7 @@ func TestAPIv1SyncRoutes404WhenUnwired(t *testing.T) {
 	for _, c := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v1/sync/devices"},
 		{http.MethodDelete, "/api/v1/sync/devices/" + testSiteID},
+		{http.MethodPatch, "/api/v1/sync/devices/" + testSiteID},
 		{http.MethodPost, "/api/v1/sync/compact"},
 	} {
 		w := httptest.NewRecorder()

@@ -8,6 +8,8 @@
       factory-reset rejoins with a <em>new</em> ID, leaving its old row behind — prune dead rows so
       relay-log compaction can reclaim the history they pin. Pruning removes only the sync
       registration; the device's notes are kept, and a still-active device re-registers on its next sync.
+      Give each one a name you recognize — your name is kept separately from whatever the device
+      reports, so syncing never overwrites it. Clear the field to fall back to the reported name.
     </p>
 
     {{if .SyncCompactResult}}
@@ -38,7 +40,16 @@
         <tbody>
           {{range .SyncDevices}}
           <tr>
-            <td class="text-bold">{{if .Name}}{{.Name}}{{else}}(unnamed){{end}}</td>
+            <td>
+              <form hx-post="/settings/sync-devices/rename" hx-target="#main-content" style="margin:0; display:flex; gap:0.4rem; align-items:center;">
+                <input type="hidden" name="site_id" value="{{.SiteID}}">
+                <input type="text" name="label" value="{{.Label}}" maxlength="128"
+                  placeholder="{{if .Name}}{{.Name}}{{else}}Name this device{{end}}"
+                  aria-label="Name for device {{slice .SiteID 0 8}}" style="max-width: 14rem;">
+                <button type="submit" class="btn-small" title="Save name">✓</button>
+              </form>
+              {{if and .Label .Name}}<span class="text-small">reports itself as “{{.Name}}”</span>{{end}}
+            </td>
             <td><code title="{{.SiteID}}">{{slice .SiteID 0 8}}…</code></td>
             <td class="text-small">{{formatTimestamp .FirstSeen}}</td>
             <td class="text-small">{{formatTimestamp .LastSeen}}</td>
@@ -52,7 +63,7 @@
               <form hx-post="/settings/sync-devices/prune" hx-target="#main-content" style="margin:0;">
                 <input type="hidden" name="site_id" value="{{.SiteID}}">
                 <button type="submit" class="btn-small"
-                  onclick="return confirm('Prune {{if .Name}}{{.Name}}{{else}}this device{{end}} ({{slice .SiteID 0 8}}…)?\n\nRemoves only its sync registration; its notes are kept. A still-active device re-registers on its next sync.')"
+                  onclick="return confirm('Prune {{if .DisplayName}}{{.DisplayName}}{{else}}this device{{end}} ({{slice .SiteID 0 8}}…)?\n\nRemoves only its sync registration; its notes are kept. A still-active device re-registers on its next sync.')"
                   style="background: var(--status-text-failed);">✕ Prune</button>
               </form>
             </td>
@@ -100,6 +111,11 @@
 {{define "_device_mgmt_remarkable"}}
 {{if .RemarkableDevicesEnabled}}
   {{if .RemarkableDevices}}
+  <p class="device-info" style="margin-bottom: 1rem;">
+    Give each device a name you recognize — your name is kept separately from the description the
+    device reports, which it rewrites every time it checks in. Clear the field to fall back to that
+    reported description.
+  </p>
   <div class="table-container">
     <table>
       <thead>
@@ -113,7 +129,16 @@
       <tbody>
         {{range .RemarkableDevices}}
         <tr>
-          <td class="text-bold">{{if .Name}}{{.Name}}{{else}}(unnamed){{end}}</td>
+          <td>
+            <form hx-post="/settings/remarkable-devices/rename" hx-target="#main-content" style="margin:0; display:flex; gap:0.4rem; align-items:center;">
+              <input type="hidden" name="device_id" value="{{.DeviceID}}">
+              <input type="text" name="label" value="{{.Label}}" maxlength="128"
+                placeholder="{{if .Name}}{{.Name}}{{else}}Name this device{{end}}"
+                aria-label="Name for device {{slice .DeviceID 0 8}}" style="max-width: 14rem;">
+              <button type="submit" class="btn-small" title="Save name">✓</button>
+            </form>
+            {{if and .Label .Name}}<span class="text-small">reports itself as “{{.Name}}”</span>{{end}}
+          </td>
           <td><code title="{{.DeviceID}}">{{slice .DeviceID 0 8}}…</code></td>
           <td class="text-small">{{formatTimestamp .FirstSeen}}</td>
           <td class="text-small">{{formatTimestamp .LastSeen}}</td>

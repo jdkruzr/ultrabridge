@@ -12,10 +12,16 @@ import (
 // the site_id ULID's embedded timestamp (the moment the client minted it — when
 // that install first enabled sync), not stored.
 type DeviceRow struct {
-	SiteID      string
-	Name        string // "" if the device never sent a device_name
-	FirstSeenMs int64  // 0 if the ULID timestamp half is all-zero (test/synthetic ids)
-	LastSeenMs  int64  // sync_cursors.updated_at
+	SiteID string
+	Name   string // "" if the device never sent a device_name
+	// Label is the operator's own name for this device, set through Settings.
+	// It lives in its own column because Name is refreshed from the request
+	// envelope on every sync (RecordCursor), which would otherwise overwrite a
+	// hand-set name the moment a client started sending device_name. "" = unset;
+	// see DisplayName on the service-layer view for the precedence rule.
+	Label       string
+	FirstSeenMs int64 // 0 if the ULID timestamp half is all-zero (test/synthetic ids)
+	LastSeenMs  int64 // sync_cursors.updated_at
 	LastPullSeq int64
 	AckedOpSeq  int64
 	PendingOps  int64 // relay ops this device has not pulled yet (excluding its own)
@@ -34,7 +40,7 @@ type DeviceRow struct {
 // ComputeWatermark); staleHorizonMs is the compaction stale horizon.
 func (s *Store) ListDevices(ctx context.Context, nowMs, staleHorizonMs int64) ([]DeviceRow, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT c.site_id, c.device_name, c.last_pull_seq, c.acked_op_seq, c.updated_at,
+		`SELECT c.site_id, c.device_name, c.operator_label, c.last_pull_seq, c.acked_op_seq, c.updated_at,
 		        (SELECT COUNT(*) FROM sync_ops o
 		          WHERE o.seq > c.last_pull_seq AND o.site_id <> c.site_id) AS pending
 		   FROM sync_cursors c
@@ -50,7 +56,7 @@ func (s *Store) ListDevices(ctx context.Context, nowMs, staleHorizonMs int64) ([
 	var activeSites int
 	for rows.Next() {
 		var d DeviceRow
-		if err := rows.Scan(&d.SiteID, &d.Name, &d.LastPullSeq, &d.AckedOpSeq, &d.LastSeenMs, &d.PendingOps); err != nil {
+		if err := rows.Scan(&d.SiteID, &d.Name, &d.Label, &d.LastPullSeq, &d.AckedOpSeq, &d.LastSeenMs, &d.PendingOps); err != nil {
 			return nil, fmt.Errorf("scan device: %w", err)
 		}
 		d.FirstSeenMs, _ = ULIDTime(d.SiteID)
@@ -92,6 +98,28 @@ func (s *Store) DeleteDevice(ctx context.Context, siteID string) (bool, error) {
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("delete device %s: rows affected: %w", siteID, err)
+	}
+	return n > 0, nil
+}
+
+// SetDeviceLabel writes the operator's label for a device, or clears it when
+// label is empty (falling display back to the device-reported name). Returns
+// whether the device exists — an unregistered site_id is a 404, not a silent
+// no-op, since the caller is naming something it just listed.
+//
+// Deliberately UPDATE-only: this must never conjure a registry row. A device's
+// registration is created by its first sync, and inserting one here would
+// fabricate a cursor at seq 0 that compaction would then treat as a laggard
+// pinning the whole relay log.
+func (s *Store) SetDeviceLabel(ctx context.Context, siteID, label string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE sync_cursors SET operator_label = ? WHERE site_id = ?`, label, siteID)
+	if err != nil {
+		return false, fmt.Errorf("set device label %s: %w", siteID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set device label %s: rows affected: %w", siteID, err)
 	}
 	return n > 0, nil
 }

@@ -198,6 +198,10 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		// Device management: optional human-readable label refreshed on every sync
 		// that carries one ('' = the device never sent a name).
 		{"sync_cursors", "device_name", "TEXT NOT NULL DEFAULT ''"},
+		// The operator's own label, set through Settings and never written by the
+		// sync path — device_name is refreshed from the wire on every request, so a
+		// hand-set name needs a column the protocol cannot reach ('' = unset).
+		{"sync_cursors", "operator_label", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := ensureColumn(ctx, db, a.table, a.col, a.decl); err != nil {
 			return fmt.Errorf("syncstore migrate: %w", err)

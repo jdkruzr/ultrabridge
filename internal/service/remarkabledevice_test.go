@@ -13,6 +13,23 @@ type fakeRemarkableAdmin struct {
 	devicesErr   error
 	documents    []rmsource.Document
 	documentsErr error
+	labeled      map[string]string // device_id -> label, as SetDeviceLabel saw it
+	labelMissing bool              // report the device as unknown
+	labelErr     error
+}
+
+func (f *fakeRemarkableAdmin) SetDeviceLabel(_ context.Context, deviceID, label string) (bool, error) {
+	if f.labelErr != nil {
+		return false, f.labelErr
+	}
+	if f.labelMissing {
+		return false, nil
+	}
+	if f.labeled == nil {
+		f.labeled = map[string]string{}
+	}
+	f.labeled[deviceID] = label
+	return true, nil
 }
 
 func (f *fakeRemarkableAdmin) Devices(context.Context) ([]rmsource.DeviceRow, error) {
@@ -31,16 +48,21 @@ func TestNewRemarkableDeviceService_NilAdminYieldsNil(t *testing.T) {
 
 func TestRemarkableListDevices_MapsFields(t *testing.T) {
 	admin := &fakeRemarkableAdmin{devices: []rmsource.DeviceRow{{
-		DeviceID: "dev-1", DeviceDesc: "Paper Pro", CreatedAt: 100, LastSeen: 200,
+		DeviceID: "dev-1", DeviceDesc: "Paper Pro", Label: "Desk tablet", CreatedAt: 100, LastSeen: 200,
 	}}}
 
 	got, err := NewRemarkableDeviceService(admin).ListDevices(context.Background())
 	if err != nil {
 		t.Fatalf("ListDevices: %v", err)
 	}
-	want := RemarkableDevice{DeviceID: "dev-1", Name: "Paper Pro", FirstSeen: 100, LastSeen: 200}
+	want := RemarkableDevice{
+		DeviceID: "dev-1", Name: "Paper Pro", Label: "Desk tablet", FirstSeen: 100, LastSeen: 200,
+	}
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("mapped devices = %+v, want %+v", got, want)
+	}
+	if n := got[0].DisplayName(); n != "Desk tablet" {
+		t.Errorf("DisplayName = %q, want the operator's label to win over the reported name", n)
 	}
 }
 

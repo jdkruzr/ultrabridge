@@ -319,7 +319,10 @@ func NewHandler(
 	// wired (it arrives via SetSyncDeviceService after construction, so route
 	// registration can't be gated on it).
 	h.mux.HandleFunc("POST /settings/sync-devices/prune", h.handleSyncDevicePrune)
+	h.mux.HandleFunc("POST /settings/sync-devices/rename", h.handleSyncDeviceRename)
 	h.mux.HandleFunc("POST /settings/sync-devices/compact", h.handleSyncDeviceCompact)
+	// Same deal for the reMarkable registry (SetRemarkableDeviceService).
+	h.mux.HandleFunc("POST /settings/remarkable-devices/rename", h.handleRemarkableDeviceRename)
 
 	h.mux.HandleFunc("GET /files", h.handleFiles)
 	h.mux.HandleFunc("GET /files/supernote", h.handleFilesSupernote)
@@ -1384,14 +1387,78 @@ func (h *Handler) handleSyncDevicePrune(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.logger.Info("pruned sync device", "site_id", siteID)
-	if r.Header.Get("HX-Request") == "true" {
-		data := h.settingsData(r)
-		data["activeTab"] = "settings-devices"
-		data["SettingsGroup"] = "devices"
-		h.renderTemplate(w, r, "settings_devices", data)
+	h.respondSettingsDevices(w, r, "", nil)
+}
+
+// respondSettingsDevices closes out a device-management mutation: re-render the
+// Devices group in place on HX, otherwise 303 back to it. flashKey/flashVal
+// attach a one-shot result (e.g. SyncCompactResult) to the render.
+func (h *Handler) respondSettingsDevices(w http.ResponseWriter, r *http.Request, flashKey string, flashVal any) {
+	if r.Header.Get("HX-Request") != "true" {
+		http.Redirect(w, r, "/settings/devices", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/settings/devices", http.StatusSeeOther)
+	data := h.settingsData(r)
+	data["activeTab"] = "settings-devices"
+	data["SettingsGroup"] = "devices"
+	if flashKey != "" {
+		data[flashKey] = flashVal
+	}
+	h.renderTemplate(w, r, "settings_devices", data)
+}
+
+// handleSyncDeviceRename sets the operator's label for a ForestNote sync device
+// (blank clears it). The label is stored apart from the wire's device_name, so
+// the device's next sync cannot overwrite it.
+func (h *Handler) handleSyncDeviceRename(w http.ResponseWriter, r *http.Request) {
+	if h.syncDevices == nil {
+		http.NotFound(w, r)
+		return
+	}
+	siteID := strings.TrimSpace(r.FormValue("site_id"))
+	if !syncstore.IsULID(siteID) {
+		http.Error(w, "site_id must be a ULID", http.StatusBadRequest)
+		return
+	}
+	label := r.FormValue("label")
+	if err := h.syncDevices.RenameSyncDevice(r.Context(), siteID, label); err != nil {
+		if errors.Is(err, service.ErrSyncDeviceNotFound) {
+			http.Error(w, "no such device", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to rename sync device", "site_id", siteID, "error", err)
+		http.Error(w, "failed to rename device", http.StatusInternalServerError)
+		return
+	}
+	h.logger.Info("renamed sync device", "site_id", siteID, "label", label)
+	h.respondSettingsDevices(w, r, "", nil)
+}
+
+// handleRemarkableDeviceRename is the reMarkable sibling of
+// handleSyncDeviceRename. Its ids come from the pairing handshake and have no
+// guaranteed shape, so the only validation is non-empty.
+func (h *Handler) handleRemarkableDeviceRename(w http.ResponseWriter, r *http.Request) {
+	if h.rmDevices == nil {
+		http.NotFound(w, r)
+		return
+	}
+	deviceID := strings.TrimSpace(r.FormValue("device_id"))
+	if deviceID == "" {
+		http.Error(w, "device_id is required", http.StatusBadRequest)
+		return
+	}
+	label := r.FormValue("label")
+	if err := h.rmDevices.RenameDevice(r.Context(), deviceID, label); err != nil {
+		if errors.Is(err, service.ErrRemarkableDeviceNotFound) {
+			http.Error(w, "no such device", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to rename remarkable device", "device_id", deviceID, "error", err)
+		http.Error(w, "failed to rename device", http.StatusInternalServerError)
+		return
+	}
+	h.logger.Info("renamed remarkable device", "device_id", deviceID, "label", label)
+	h.respondSettingsDevices(w, r, "", nil)
 }
 
 // handleSyncDeviceCompact runs one relay-log compaction pass on demand (the
@@ -1407,15 +1474,7 @@ func (h *Handler) handleSyncDeviceCompact(w http.ResponseWriter, r *http.Request
 		http.Error(w, "compaction failed", http.StatusInternalServerError)
 		return
 	}
-	if r.Header.Get("HX-Request") == "true" {
-		data := h.settingsData(r)
-		data["activeTab"] = "settings-devices"
-		data["SettingsGroup"] = "devices"
-		data["SyncCompactResult"] = result
-		h.renderTemplate(w, r, "settings_devices", data)
-		return
-	}
-	http.Redirect(w, r, "/settings/devices", http.StatusSeeOther)
+	h.respondSettingsDevices(w, r, "SyncCompactResult", result)
 }
 
 func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
