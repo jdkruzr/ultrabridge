@@ -98,6 +98,10 @@ type ForestNoteReader interface {
 	SoftDeleteNotebook(ctx context.Context, notebookID string) ([]string, error)
 	LiveNotebookPageIDs(ctx context.Context, notebookID string) ([]string, error)
 	ListNotebookTextBoxes(ctx context.Context, notebookID string) ([]syncstore.TextBoxRef, error)
+	// CountIndexedPages backs the FN "indexed" figure in the pipeline bar — a
+	// durable count of live pages carrying OCR text, unlike the bridge's
+	// since-boot Processed counter.
+	CountIndexedPages(ctx context.Context) (int64, error)
 }
 
 // ForestNoteReprocessor is the source-level write/render seam (it holds both the
@@ -1629,13 +1633,24 @@ func (s *noteService) GetProcessorStatus(ctx context.Context) (EmbeddingJobStatu
 		// passthrough); treat as "no FN block to render" so the UI stays
 		// silent until the source is actually live.
 		if bs.Capacity > 0 || bs.Processed > 0 || bs.Dropped > 0 || bs.Pending > 0 || bs.InFlight > 0 {
-			status.ForestNote = &ForestNoteQueueStatus{
+			fn := &ForestNoteQueueStatus{
 				Pending:   bs.Pending,
 				InFlight:  bs.InFlight,
 				Processed: bs.Processed,
 				Dropped:   bs.Dropped,
 				Capacity:  bs.Capacity,
 			}
+			// Durable "done" figure, read from the mirror. Best-effort: a failed
+			// count leaves Indexed at 0 rather than blanking the whole block,
+			// since the live queue numbers are the time-critical ones.
+			if s.fnReader != nil {
+				if n, err := s.fnReader.CountIndexedPages(ctx); err == nil {
+					fn.Indexed = n
+				} else {
+					s.logger.Error("failed to count indexed forestnote pages", "error", err)
+				}
+			}
+			status.ForestNote = fn
 		}
 	}
 

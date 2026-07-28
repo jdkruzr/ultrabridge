@@ -829,7 +829,13 @@
             if (fn.in_flight > 0) s.compact.push('⚙ ' + fn.in_flight + ' in progress');
             if (fn.pending > 0) s.compact.push(fn.pending + ' queued');
             if (fn.dropped > 0) { s.compact.push(fn.dropped + ' dropped'); s.alert = true; }
-            s.detail = s.compact.concat([(fn.processed || 0) + ' done']);
+            // "indexed" is the durable count (live pages carrying OCR text), so it
+            // is the one that means the same thing as the other sources' "done".
+            // fn.processed is monotonic since process start — it reads 0 after
+            // every restart, so it is shown only when it has actually moved, and
+            // labelled as the session figure it is.
+            s.detail = s.compact.concat([(fn.indexed || 0) + ' indexed']);
+            if (fn.processed > 0) s.detail.push(fn.processed + ' this session');
             segs.push(s);
           }
 

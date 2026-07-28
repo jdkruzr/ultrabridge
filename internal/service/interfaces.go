@@ -280,6 +280,12 @@ type ForestNoteQueueStatus struct {
 	Processed int64 `json:"processed"` // pages finished since process start
 	Dropped   int64 `json:"dropped"`   // enqueues lost to channel-full
 	Capacity  int   `json:"capacity"`  // channel buffer size
+	// Indexed is the durable count of live pages carrying OCR text, read from
+	// the mirror rather than from a counter. It is the field that answers "how
+	// much is done" — Processed is in-memory and monotonic since process start,
+	// so it reads 0 after every restart and is only meaningful as a
+	// this-session figure.
+	Indexed int64 `json:"indexed"`
 }
 
 // RemarkableQueueStatus is the reMarkable render-to-fulltext OCR queue state.

@@ -343,11 +343,24 @@ strings preserved where applicable.
 response carries optional per-source blocks under stable keys: `boox` (the
 `booxpipeline.QueueStatus` shape), `forestnote` (the
 `service.ForestNoteQueueStatus` shape — Pending / InFlight / Processed /
-Dropped / Capacity), and `remarkable`. All are `omitempty`, so a deployment
+Dropped / Capacity / Indexed), and `remarkable`. All are `omitempty`, so a deployment
 without that source emits no key at all — **JS must gate on key presence,
 never on zero values.** Supernote is the exception: its counters are
 top-level on `EmbeddingJobStatus` and therefore always present, so presence
 has to be threaded from the server (see `data-has-sn` below).
+
+**ForestNote's "done" is `indexed`, not `processed`.** Every other source
+derives its done count from a persistent job table (`SELECT COUNT(*) … WHERE
+status = 'done'`). ForestNote has no job table: `syncbridge.Status.Processed` is
+an in-memory `atomic.Int64`, monotonic *since process start*, so it reads 0 after
+every restart. The bar showed a permanent "0 done" for exactly that reason.
+`ForestNoteQueueStatus.Indexed` fixes it — `syncstore.CountIndexedPages`, a live
+count of pages carrying server-authored OCR text, joined through page **and**
+notebook so a soft-deleted notebook's pages drop out (matching Boox, where
+deleting a note removes its job rows). `Processed` is still reported and the bar
+renders it as "N this session" when non-zero; it is a rate/activity signal, not a
+total. The count is best-effort: a query failure logs and leaves `Indexed` at 0
+rather than dropping the whole block, since the live queue numbers matter more.
 
 `booxpipeline.QueueStatus.Running` is NOT derived from the queue tables —
 `Store.GetQueueStatus` leaves it false and `noteService.GetProcessorStatus`

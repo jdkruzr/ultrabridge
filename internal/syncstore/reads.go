@@ -113,3 +113,31 @@ func (s *Store) LivePageTextFromClient(ctx context.Context, pagePK string) (Page
 		return PageTextData{}, false, fmt.Errorf("live client page text: %w", err)
 	}
 }
+
+// CountIndexedPages returns how many live pages currently carry server-authored
+// OCR text — the ForestNote analogue of the other sources' "done" job count.
+//
+// The bridge's own Processed counter cannot answer this: it is in-memory and
+// monotonic since process start, so it reads 0 after every restart even though
+// the work is long since done and durable. This counts the surviving output
+// instead.
+//
+// Deliberately joined through to the notebook so a soft-deleted notebook's
+// pages drop out. That matches what the Files tab lists, and it matches Boox,
+// where deleting a note removes its job rows and so decrements its done count.
+func (s *Store) CountIndexedPages(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM fn_page_text_from_server t
+		  JOIN fn_page p     ON p.id = t.id
+		  JOIN fn_notebook n ON n.id = p.notebook_id
+		 WHERE t.deleted_at IS NULL
+		   AND p.deleted_at IS NULL
+		   AND n.deleted_at IS NULL
+		   AND COALESCE(t.text, '') <> ''`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count indexed pages: %w", err)
+	}
+	return n, nil
+}

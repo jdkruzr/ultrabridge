@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -15,14 +16,16 @@ import (
 // fakeFNReader is a canned ForestNoteReader for testing the note service's
 // ForestNote surfacing without a real syncstore.
 type fakeFNReader struct {
-	folders   []syncstore.FolderRow
-	notebooks []syncstore.NotebookRow
-	pages     map[string][]syncstore.PageRef
-	strokes   map[string][]syncstore.StrokeData
-	textBoxes map[string][]syncstore.TextBoxData
-	meta      map[string]syncstore.NotebookRow
-	live      map[string]bool // page id → live; absent ⇒ not live (missing/deleted)
-	contents  map[string]struct {
+	indexedPages int64
+	indexedErr   error
+	folders      []syncstore.FolderRow
+	notebooks    []syncstore.NotebookRow
+	pages        map[string][]syncstore.PageRef
+	strokes      map[string][]syncstore.StrokeData
+	textBoxes    map[string][]syncstore.TextBoxData
+	meta         map[string]syncstore.NotebookRow
+	live         map[string]bool // page id → live; absent ⇒ not live (missing/deleted)
+	contents     map[string]struct {
 		f []syncstore.FolderRow
 		n []syncstore.NotebookRow
 	} // folderID → direct children
@@ -45,6 +48,9 @@ func (f *fakeFNReader) SoftDeleteNotebook(_ context.Context, nb string) ([]strin
 }
 func (f *fakeFNReader) ListNotebookTextBoxes(_ context.Context, nb string) ([]syncstore.TextBoxRef, error) {
 	return f.textRefs[nb], nil
+}
+func (f *fakeFNReader) CountIndexedPages(context.Context) (int64, error) {
+	return f.indexedPages, f.indexedErr
 }
 func (f *fakeFNReader) LiveNotebookPageIDs(_ context.Context, nb string) ([]string, error) {
 	var ids []string
@@ -480,6 +486,43 @@ func TestGetProcessorStatus_PopulatesForestNoteWhenWired(t *testing.T) {
 		got, _ := s.GetProcessorStatus(context.Background())
 		if got.ForestNote == nil {
 			t.Errorf("ForestNote block should be present when Capacity>0; got nil")
+		}
+	})
+
+	// Indexed is the durable "done" figure. It must come from the mirror, not
+	// from the bridge's Processed counter — that one is in-memory and resets to
+	// zero on every restart, which is exactly the "permanently 0 done" the bar
+	// used to show after a rebuild.
+	t.Run("Indexed comes from the mirror, not the since-boot counter", func(t *testing.T) {
+		s := &noteService{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		s.SetForestNoteReprocessor(&fakeReprocessor{status: syncbridge.Status{Capacity: 256}}) // Processed = 0
+		s.SetForestNoteReader(&fakeFNReader{indexedPages: 85})
+
+		got, _ := s.GetProcessorStatus(context.Background())
+		if got.ForestNote == nil {
+			t.Fatal("ForestNote block missing")
+		}
+		if got.ForestNote.Indexed != 85 {
+			t.Errorf("Indexed = %d, want 85 (durable mirror count)", got.ForestNote.Indexed)
+		}
+		if got.ForestNote.Processed != 0 {
+			t.Errorf("Processed = %d, want 0 — the session counter is reported separately", got.ForestNote.Processed)
+		}
+	})
+
+	t.Run("a failed count leaves Indexed at 0 without dropping the block", func(t *testing.T) {
+		// The live queue numbers are the time-critical ones; losing them because
+		// a COUNT(*) failed would be the worse trade.
+		s := &noteService{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		s.SetForestNoteReprocessor(&fakeReprocessor{status: syncbridge.Status{Pending: 3, Capacity: 256}})
+		s.SetForestNoteReader(&fakeFNReader{indexedErr: errors.New("db down")})
+
+		got, _ := s.GetProcessorStatus(context.Background())
+		if got.ForestNote == nil {
+			t.Fatal("ForestNote block dropped because the indexed count failed")
+		}
+		if got.ForestNote.Pending != 3 || got.ForestNote.Indexed != 0 {
+			t.Errorf("ForestNote = %+v, want Pending 3 / Indexed 0", got.ForestNote)
 		}
 	})
 
