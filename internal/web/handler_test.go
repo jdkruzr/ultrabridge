@@ -146,7 +146,7 @@ func (m *mockTaskStore) Delete(ctx context.Context, taskID string) error {
 	return fmt.Errorf("task not found")
 }
 
-func (m *mockTaskStore) MaxLastModified(ctx context.Context) (int64, error) {
+func (m *mockTaskStore) MaxUpdatedAt(ctx context.Context) (int64, error) {
 	var max int64
 	for _, t := range m.tasks {
 		if t.LastModified.Valid && t.LastModified.Int64 > max {
@@ -699,9 +699,11 @@ func TestPostCompleteTaskUpdatesStatus(t *testing.T) {
 		t.Errorf("Task status is %q, want 'completed'", taskstore.NullStr(completedTask.Status))
 	}
 
-	// Verify completedTime is set
-	if !completedTask.CompletedTime.Valid || completedTask.CompletedTime.Int64 == 0 {
-		t.Errorf("Task CompletedTime should be set")
+	// Verify the completion instant is recorded. This is completed_at, not
+	// completed_time — the latter is SPC's creation-time field despite the name,
+	// and Complete() no longer touches it.
+	if !completedTask.CompletedAt.Valid || completedTask.CompletedAt.Int64 == 0 {
+		t.Errorf("Task CompletedAt should be set")
 	}
 
 	// Verify notifier was called

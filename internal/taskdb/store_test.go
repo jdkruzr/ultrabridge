@@ -205,12 +205,12 @@ func TestStore_Delete_SoftDeletesAndHides(t *testing.T) {
 	}
 }
 
-// TestStore_MaxLastModified_TracksChanges verifies AC1.6: Create a task,
-// note MaxLastModified() value; update the task, verify MaxLastModified()
-// increased; delete the task with a fresh timestamp, verify MaxLastModified()
+// TestStore_MaxUpdatedAt_TracksChanges verifies AC1.6: Create a task,
+// note MaxUpdatedAt() value; update the task, verify MaxUpdatedAt()
+// increased; delete the task with a fresh timestamp, verify MaxUpdatedAt()
 // reflects the deleted task's bumped timestamp is excluded (deleted tasks
 // filtered from MAX query).
-func TestStore_MaxLastModified_TracksChanges(t *testing.T) {
+func TestStore_MaxUpdatedAt_TracksChanges(t *testing.T) {
 	store := openTestStore(t)
 
 	task := &taskstore.Task{
@@ -222,9 +222,9 @@ func TestStore_MaxLastModified_TracksChanges(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	maxAfterCreate, err := store.MaxLastModified(context.Background())
+	maxAfterCreate, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after create: %v", err)
+		t.Fatalf("MaxUpdatedAt after create: %v", err)
 	}
 
 	time.Sleep(2 * time.Millisecond)
@@ -235,13 +235,13 @@ func TestStore_MaxLastModified_TracksChanges(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	maxAfterUpdate, err := store.MaxLastModified(context.Background())
+	maxAfterUpdate, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after update: %v", err)
+		t.Fatalf("MaxUpdatedAt after update: %v", err)
 	}
 
 	if maxAfterUpdate <= maxAfterCreate {
-		t.Errorf("MaxLastModified should increase after update: %d <= %d", maxAfterUpdate, maxAfterCreate)
+		t.Errorf("MaxUpdatedAt should increase after update: %d <= %d", maxAfterUpdate, maxAfterCreate)
 	}
 
 	time.Sleep(2 * time.Millisecond)
@@ -263,30 +263,30 @@ func TestStore_MaxLastModified_TracksChanges(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	maxAfterDelete, err := store.MaxLastModified(context.Background())
+	maxAfterDelete, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after delete: %v", err)
+		t.Fatalf("MaxUpdatedAt after delete: %v", err)
 	}
 
-	// After deleting task1, MaxLastModified returns task2's last_modified
+	// After deleting task1, MaxUpdatedAt returns task2's last_modified
 	// (the only remaining non-deleted task), which is newer than maxAfterUpdate.
 	if maxAfterDelete <= maxAfterUpdate {
-		t.Errorf("MaxLastModified after delete should reflect surviving task2: got %d, want > %d", maxAfterDelete, maxAfterUpdate)
+		t.Errorf("MaxUpdatedAt after delete should reflect surviving task2: got %d, want > %d", maxAfterDelete, maxAfterUpdate)
 	}
 }
 
-// TestStore_MaxLastModified_EmptyStore verifies AC1.7: On empty store,
-// MaxLastModified() returns 0.
-func TestStore_MaxLastModified_EmptyStore(t *testing.T) {
+// TestStore_MaxUpdatedAt_EmptyStore verifies AC1.7: On empty store,
+// MaxUpdatedAt() returns 0.
+func TestStore_MaxUpdatedAt_EmptyStore(t *testing.T) {
 	store := openTestStore(t)
 
-	max, err := store.MaxLastModified(context.Background())
+	max, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified on empty store: %v", err)
+		t.Fatalf("MaxUpdatedAt on empty store: %v", err)
 	}
 
 	if max != 0 {
-		t.Errorf("MaxLastModified on empty store should be 0, got %d", max)
+		t.Errorf("MaxUpdatedAt on empty store should be 0, got %d", max)
 	}
 }
 
@@ -296,12 +296,12 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 	store := openTestStore(t)
 
 	// Initial CTag on empty store
-	ctagEmpty, err := store.MaxLastModified(context.Background())
+	ctagEmpty, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified on empty store: %v", err)
+		t.Fatalf("MaxUpdatedAt on empty store: %v", err)
 	}
 	if ctagEmpty != 0 {
-		t.Errorf("CTag (MaxLastModified) on empty store should be 0, got %d", ctagEmpty)
+		t.Errorf("CTag (MaxUpdatedAt) on empty store should be 0, got %d", ctagEmpty)
 	}
 
 	// Create first task
@@ -313,9 +313,9 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 		t.Fatalf("Create task1: %v", err)
 	}
 
-	ctagAfterCreate1, err := store.MaxLastModified(context.Background())
+	ctagAfterCreate1, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after create1: %v", err)
+		t.Fatalf("MaxUpdatedAt after create1: %v", err)
 	}
 
 	if ctagAfterCreate1 <= ctagEmpty {
@@ -333,9 +333,9 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 		t.Fatalf("Create task2: %v", err)
 	}
 
-	ctagAfterCreate2, err := store.MaxLastModified(context.Background())
+	ctagAfterCreate2, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after create2: %v", err)
+		t.Fatalf("MaxUpdatedAt after create2: %v", err)
 	}
 
 	if ctagAfterCreate2 <= ctagAfterCreate1 {
@@ -350,9 +350,9 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 		t.Fatalf("Update task1: %v", err)
 	}
 
-	ctagAfterUpdate, err := store.MaxLastModified(context.Background())
+	ctagAfterUpdate, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after update: %v", err)
+		t.Fatalf("MaxUpdatedAt after update: %v", err)
 	}
 
 	if ctagAfterUpdate <= ctagAfterCreate2 {
@@ -366,12 +366,12 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 		t.Fatalf("Delete task2: %v", err)
 	}
 
-	ctagAfterDelete, err := store.MaxLastModified(context.Background())
+	ctagAfterDelete, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after delete: %v", err)
+		t.Fatalf("MaxUpdatedAt after delete: %v", err)
 	}
 
-	// After deleting task2, MaxLastModified reflects only non-deleted tasks.
+	// After deleting task2, MaxUpdatedAt reflects only non-deleted tasks.
 	// task1 (updated) is the sole survivor, so CTag equals ctagAfterUpdate.
 	if ctagAfterDelete != ctagAfterUpdate {
 		t.Errorf("CTag after delete should equal surviving task's CTag: got %d, want %d", ctagAfterDelete, ctagAfterUpdate)
@@ -661,10 +661,12 @@ func TestStore_HardDeleteOlderThan_RespectsAgeAndDeletedFlag(t *testing.T) {
 	//   (b) live + ancient         → must survive (live)
 	//   (c) deleted + recent       → must survive (within window)
 	//   (d) deleted + ancient      → must be removed
+	// Age is carried by updated_at — the store-owned modification watermark the
+	// purge predicate reads. last_modified mirrors it (SPC-facing only).
 	rows := []struct {
-		id           string
-		isDeleted    string
-		lastModified int64
+		id        string
+		isDeleted string
+		updatedAt int64
 	}{
 		{"a-live-recent", "N", now - 1*dayMs},
 		{"b-live-ancient", "N", now - 90*dayMs},
@@ -675,7 +677,7 @@ func TestStore_HardDeleteOlderThan_RespectsAgeAndDeletedFlag(t *testing.T) {
 		_, err := store.db.ExecContext(ctx, `INSERT INTO tasks
 			(task_id, title, status, is_deleted, last_modified, created_at, updated_at, is_reminder_on)
 			VALUES (?, ?, 'needsAction', ?, ?, ?, ?, 'N')`,
-			r.id, "row "+r.id, r.isDeleted, r.lastModified, now, now)
+			r.id, "row "+r.id, r.isDeleted, r.updatedAt, now, r.updatedAt)
 		if err != nil {
 			t.Fatalf("insert %s: %v", r.id, err)
 		}
@@ -754,4 +756,146 @@ func TestStore_HardDeleteOlderThan_NoMatchesReturnsZero(t *testing.T) {
 	}
 }
 
+// TestStore_RoundTripsCompletedAtAndUpdatedAt pins the native timestamp
+// columns: completed_at is caller-owned and survives an unrelated Update,
+// and updated_at is store-owned and advances on every write. Before the
+// native-semantics fix, completion time lived in last_modified — which
+// Update overwrote — so editing a completed task moved its completion date.
+func TestStore_RoundTripsCompletedAtAndUpdatedAt(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
 
+	// A task completed a month ago.
+	completedAt := time.Now().Add(-30 * 24 * time.Hour).UnixMilli()
+	task := &taskstore.Task{
+		TaskID:      "completed-last-month",
+		Title:       sql.NullString{String: "Finished last month", Valid: true},
+		Status:      sql.NullString{String: "completed", Valid: true},
+		CompletedAt: sql.NullInt64{Int64: completedAt, Valid: true},
+		IsDeleted:   "N",
+	}
+	if err := store.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := store.Get(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("Get after create: %v", err)
+	}
+	if !got.CompletedAt.Valid || got.CompletedAt.Int64 != completedAt {
+		t.Errorf("completed_at after create: got %v, want %d", got.CompletedAt, completedAt)
+	}
+	if got.UpdatedAt == 0 {
+		t.Error("updated_at after create: got 0, want a timestamp")
+	}
+	createUpdatedAt := got.UpdatedAt
+
+	// Edit something unrelated. Completion time must not move.
+	time.Sleep(2 * time.Millisecond)
+	got.Title = sql.NullString{String: "Finished last month (edited)", Valid: true}
+	if err := store.Update(ctx, got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	after, err := store.Get(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if !after.CompletedAt.Valid || after.CompletedAt.Int64 != completedAt {
+		t.Errorf("completed_at after unrelated edit: got %v, want %d (unchanged)",
+			after.CompletedAt, completedAt)
+	}
+	if after.UpdatedAt <= createUpdatedAt {
+		t.Errorf("updated_at after edit: got %d, want > %d", after.UpdatedAt, createUpdatedAt)
+	}
+}
+
+// TestBackfillCompletedAt covers the one-time migration that seeds completed_at.
+// The stored ical_blob's COMPLETED is what the CalDAV client actually sent and
+// is preferred; last_modified is the approximate fallback, since UB's Update
+// stamped it on every write and it drifts away from the real completion.
+func TestBackfillCompletedAt(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	insert := func(id, status string, lastModified int64, blob any) {
+		t.Helper()
+		_, err := store.db.ExecContext(ctx, `INSERT INTO tasks
+			(task_id, title, status, is_deleted, last_modified, created_at, updated_at,
+			 is_reminder_on, ical_blob, completed_at)
+			VALUES (?, ?, ?, 'N', ?, ?, ?, 'N', ?, NULL)`,
+			id, id, status, lastModified, lastModified, lastModified, blob)
+		if err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+
+	const (
+		trueCompletion   = int64(1_747_238_714_000) // 2025-05-14T16:05:14Z
+		driftedWatermark = int64(1_748_306_000_000) // a later edit
+	)
+	blobWith := func(completed string) string {
+		return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:x\r\n" +
+			"DTSTAMP:20260101T000000Z\r\nSTATUS:COMPLETED\r\n" +
+			"COMPLETED:" + completed + "\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+	}
+
+	// Blob carries the client's COMPLETED; last_modified has drifted weeks later.
+	insert("from-blob", "completed", driftedWatermark, blobWith("20250514T160514Z"))
+	// No blob → fall back to the watermark.
+	insert("from-watermark", "completed", driftedWatermark, nil)
+	// Blob present but carries no COMPLETED → fall back.
+	insert("blob-without-completed", "completed", driftedWatermark,
+		"BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:y\r\nEND:VTODO\r\nEND:VCALENDAR\r\n")
+	// Not completed → must stay NULL.
+	insert("active", "needsAction", driftedWatermark, nil)
+	// Completed with neither source → nothing to invent.
+	insert("no-source", "completed", 0, nil)
+
+	fromBlob, fromWatermark, err := backfillCompletedAt(ctx, store.db)
+	if err != nil {
+		t.Fatalf("backfillCompletedAt: %v", err)
+	}
+	if fromBlob != 1 {
+		t.Errorf("fromBlob: got %d, want 1", fromBlob)
+	}
+	if fromWatermark != 2 {
+		t.Errorf("fromWatermark: got %d, want 2", fromWatermark)
+	}
+
+	got := func(id string) sql.NullInt64 {
+		t.Helper()
+		var v sql.NullInt64
+		if err := store.db.QueryRowContext(ctx,
+			`SELECT completed_at FROM tasks WHERE task_id = ?`, id).Scan(&v); err != nil {
+			t.Fatalf("select %s: %v", id, err)
+		}
+		return v
+	}
+
+	// The whole point: the blob wins over the drifted watermark.
+	if v := got("from-blob"); !v.Valid || v.Int64 != trueCompletion {
+		t.Errorf("from-blob completed_at: got %v, want %d (the client's COMPLETED)", v, trueCompletion)
+	}
+	if v := got("from-watermark"); !v.Valid || v.Int64 != driftedWatermark {
+		t.Errorf("from-watermark completed_at: got %v, want %d", v, driftedWatermark)
+	}
+	if v := got("blob-without-completed"); !v.Valid || v.Int64 != driftedWatermark {
+		t.Errorf("blob-without-completed completed_at: got %v, want %d", v, driftedWatermark)
+	}
+	if v := got("active"); v.Valid {
+		t.Errorf("active completed_at: got %v, want NULL (task is not completed)", v)
+	}
+	if v := got("no-source"); v.Valid {
+		t.Errorf("no-source completed_at: got %v, want NULL", v)
+	}
+
+	// Idempotent: a second run finds nothing left to do.
+	b2, w2, err := backfillCompletedAt(ctx, store.db)
+	if err != nil {
+		t.Fatalf("second backfillCompletedAt: %v", err)
+	}
+	if b2 != 0 || w2 != 0 {
+		t.Errorf("second run: got (%d, %d), want (0, 0) — not idempotent", b2, w2)
+	}
+}

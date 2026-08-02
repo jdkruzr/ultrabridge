@@ -16,12 +16,18 @@ func GenerateTaskID(title string, createdAtMs int64) string {
 }
 
 // ComputeETag generates an ETag for a task based on its mutable fields.
+//
+// updated_at is the entropy that matters: it is the store-owned watermark
+// stamped on every write, so any change to any field moves it — including
+// fields not named here (description, priority, categories, ical_blob).
+// It replaced last_modified, which stopped being a reliable "something
+// changed" signal once completion time moved to its own column.
 func ComputeETag(t *Task) string {
 	data := t.TaskID +
 		NullStr(t.Title) +
 		NullStr(t.Status) +
 		strconv.FormatInt(t.DueTime, 10) +
-		nullInt64Str(t.LastModified)
+		strconv.FormatInt(t.UpdatedAt, 10)
 	return fmt.Sprintf("%x", md5.Sum([]byte(data)))
 }
 
@@ -38,16 +44,20 @@ func ComputeCTag(tasks []Task) string {
 }
 
 // CompletionTime returns the actual completion timestamp for a completed task.
-// Per Supernote quirk: completed_time holds creation time, last_modified holds
-// the real completion time.
+//
+// Reads the dedicated completed_at column. It previously read last_modified,
+// following the Supernote convention where that field doubles as the completion
+// time — but that convention only holds for a client that never edits a task
+// after completing it. UB does, and its own Update stamped last_modified on
+// every write, so the completion time drifted to the last edit.
 func CompletionTime(t *Task) (time.Time, bool) {
 	if NullStr(t.Status) != "completed" {
 		return time.Time{}, false
 	}
-	if !t.LastModified.Valid {
+	if !t.CompletedAt.Valid || t.CompletedAt.Int64 == 0 {
 		return time.Time{}, false
 	}
-	return MsToTime(t.LastModified.Int64), true
+	return MsToTime(t.CompletedAt.Int64), true
 }
 
 // MsToTime converts a millisecond UTC timestamp to time.Time.
@@ -67,27 +77,47 @@ func TimeToMs(t time.Time) int64 {
 	return t.UnixMilli()
 }
 
-// CalDAVStatus converts a Supernote status string to a CalDAV STATUS value.
-func CalDAVStatus(supernoteStatus string) string {
-	switch supernoteStatus {
-	case "completed":
+// Stored task statuses. These are UB's native set: the four RFC 5545 VTODO
+// states, spelled in the lowerCamelCase the REST/MCP surface already exposed
+// for the original two. Supernote's two-state model is a projection of this
+// set, applied at the SPC boundary (internal/spcserver/mapping) — not here.
+const (
+	StatusNeedsAction = "needsAction"
+	StatusInProcess   = "inProcess"
+	StatusCompleted   = "completed"
+	StatusCancelled   = "cancelled"
+)
+
+// CalDAVStatus converts a stored status to an RFC 5545 VTODO STATUS value.
+func CalDAVStatus(stored string) string {
+	switch stored {
+	case StatusCompleted:
 		return "COMPLETED"
-	case "needsAction", "":
-		return "NEEDS-ACTION"
+	case StatusInProcess:
+		return "IN-PROCESS"
+	case StatusCancelled:
+		return "CANCELLED"
 	default:
 		return "NEEDS-ACTION"
 	}
 }
 
-// SupernoteStatus converts a CalDAV STATUS value to a Supernote status string.
-func SupernoteStatus(caldavStatus string) string {
+// FromCalDAVStatus converts an RFC 5545 VTODO STATUS value to a stored status.
+//
+// Formerly SupernoteStatus, which was a misnomer with consequences: it is used
+// on the CalDAV inbound path, but its name and its two-value range came from
+// the device wire format. Every IN-PROCESS and CANCELLED a client sent was
+// silently flattened to needsAction on the way into UB's own store.
+func FromCalDAVStatus(caldavStatus string) string {
 	switch caldavStatus {
 	case "COMPLETED":
-		return "completed"
-	case "NEEDS-ACTION", "":
-		return "needsAction"
+		return StatusCompleted
+	case "IN-PROCESS":
+		return StatusInProcess
+	case "CANCELLED":
+		return StatusCancelled
 	default:
-		return "needsAction"
+		return StatusNeedsAction
 	}
 }
 

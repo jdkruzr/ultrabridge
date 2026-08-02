@@ -50,6 +50,7 @@ func TestComputeETag(t *testing.T) {
 		Status:       sql.NullString{String: "needsAction", Valid: true},
 		DueTime:      1000,
 		LastModified: sql.NullInt64{Int64: 5000, Valid: true},
+		UpdatedAt:    5000,
 	}
 
 	baseETag := ComputeETag(baseTask)
@@ -81,11 +82,23 @@ func TestComputeETag(t *testing.T) {
 			wantDiff: true,
 		},
 		{
-			name: "last_modified change",
+			// updated_at is the store-owned modification watermark and the only
+			// field guaranteed to move on every write, so it carries the ETag.
+			name: "updated_at change",
+			modifyFn: func(task *Task) {
+				task.UpdatedAt = 6000
+			},
+			wantDiff: true,
+		},
+		{
+			// last_modified is now only an SPC-facing mirror. It must not feed the
+			// ETag: once completion time moved to its own column, this field stops
+			// tracking "did anything change" and starts meaning something else.
+			name: "last_modified change alone",
 			modifyFn: func(task *Task) {
 				task.LastModified = sql.NullInt64{Int64: 6000, Valid: true}
 			},
-			wantDiff: true,
+			wantDiff: false,
 		},
 		{
 			name: "no change",
@@ -178,8 +191,8 @@ func TestCompletionTime(t *testing.T) {
 		{
 			name: "completed task",
 			task: &Task{
-				Status:       sql.NullString{String: "completed", Valid: true},
-				LastModified: sql.NullInt64{Int64: 1704067200000, Valid: true}, // 2024-01-01 00:00:00 UTC
+				Status:      sql.NullString{String: "completed", Valid: true},
+				CompletedAt: sql.NullInt64{Int64: 1704067200000, Valid: true}, // 2024-01-01 00:00:00 UTC
 			},
 			wantTime:  time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 			wantValid: true,
@@ -187,29 +200,34 @@ func TestCompletionTime(t *testing.T) {
 		{
 			name: "not completed task",
 			task: &Task{
-				Status:       sql.NullString{String: "needsAction", Valid: true},
-				LastModified: sql.NullInt64{Int64: 1704067200000, Valid: true},
+				Status:      sql.NullString{String: "needsAction", Valid: true},
+				CompletedAt: sql.NullInt64{Int64: 1704067200000, Valid: true},
 			},
 			wantTime:  time.Time{},
 			wantValid: false,
 		},
 		{
-			name: "completed but no last_modified",
+			name: "completed but no completed_at",
 			task: &Task{
-				Status:       sql.NullString{String: "completed", Valid: true},
-				LastModified: sql.NullInt64{Valid: false},
+				Status:      sql.NullString{String: "completed", Valid: true},
+				CompletedAt: sql.NullInt64{Valid: false},
 			},
 			wantTime:  time.Time{},
 			wantValid: false,
 		},
 		{
-			name: "completed_time and last_modified differ",
+			// The whole point of the native column: neither of the two
+			// Supernote-shaped fields is the completion time. completed_time is
+			// the creation time (device convention) and last_modified is the
+			// write watermark. Only completed_at is authoritative.
+			name: "ignores completed_time and last_modified",
 			task: &Task{
 				Status:        sql.NullString{String: "completed", Valid: true},
 				CompletedTime: sql.NullInt64{Int64: 1704067200000, Valid: true}, // creation time
-				LastModified:  sql.NullInt64{Int64: 1704153600000, Valid: true}, // completion time (24h later)
+				LastModified:  sql.NullInt64{Int64: 1735689600000, Valid: true}, // a much later write
+				CompletedAt:   sql.NullInt64{Int64: 1704153600000, Valid: true}, // 2024-01-02
 			},
-			wantTime:  time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), // should be last_modified, not completed_time
+			wantTime:  time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
 			wantValid: true,
 		},
 	}
@@ -376,29 +394,44 @@ func TestSuperNoteStatus(t *testing.T) {
 			status: "unknown",
 			want:   "needsAction",
 		},
+		{
+			// Previously collapsed to needsAction, stopping Cfait's running timer.
+			name:   "in process",
+			status: "IN-PROCESS",
+			want:   "inProcess",
+		},
+		{
+			// Previously collapsed to needsAction, so cancelled tasks un-cancelled
+			// themselves on the next sync.
+			name:   "cancelled",
+			status: "CANCELLED",
+			want:   "cancelled",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := SupernoteStatus(tt.status)
+			got := FromCalDAVStatus(tt.status)
 			if got != tt.want {
-				t.Errorf("SupernoteStatus(%q) = %q, want %q", tt.status, got, tt.want)
+				t.Errorf("FromCalDAVStatus(%q) = %q, want %q", tt.status, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestCalDAVStatusSuperNoteStatusRoundTrip(t *testing.T) {
+func TestCalDAVStatusRoundTrip(t *testing.T) {
 	testCases := []string{
 		"completed",
 		"needsAction",
+		"inProcess",
+		"cancelled",
 		"",
 	}
 
 	for _, status := range testCases {
 		t.Run(status, func(t *testing.T) {
 			caldav := CalDAVStatus(status)
-			got := SupernoteStatus(caldav)
+			got := FromCalDAVStatus(caldav)
 			expected := status
 			if status == "" {
 				expected = "needsAction"

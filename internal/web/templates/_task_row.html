@@ -21,7 +21,11 @@
         </span>
         {{end}}
     </td>
-    <td class="task-due-date">{{.CompletedAt | formatCreated}}</td>
+    {{/* The column header is "Created". This rendered .CompletedAt back when
+         that field was sourced from completed_time — SPC's creation-time
+         column — so it happened to show the right thing. .CompletedAt now
+         means the real completion instant, so read creation time directly. */}}
+    <td class="task-due-date">{{.CreatedAt | formatCreated}}</td>
     <td class="task-due-date">
         {{if .DueAt}}
             {{.DueAt | formatDueTime}}

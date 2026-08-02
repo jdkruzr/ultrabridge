@@ -102,10 +102,11 @@ func (h *Handler) handleV1ListTasks(w http.ResponseWriter, r *http.Request) {
 	// Pre-parse query params so a 400 doesn't burn a list query first.
 	status := q.Get("status")
 	switch status {
-	case "", "all", "needs_action", "completed":
+	case "", "all", "needs_action", "in_process", "completed", "cancelled":
 		// ok
 	default:
-		apiError(w, http.StatusBadRequest, "status must be needs_action, completed, or all")
+		apiError(w, http.StatusBadRequest,
+			"status must be needs_action, in_process, completed, cancelled, or all")
 		return
 	}
 	var dueBefore, dueAfter *time.Time
@@ -155,8 +156,16 @@ func (h *Handler) handleV1ListTasks(w http.ResponseWriter, r *http.Request) {
 			if t.Status != service.StatusNeedsAction {
 				continue
 			}
+		case "in_process":
+			if t.Status != service.StatusInProcess {
+				continue
+			}
 		case "completed":
 			if t.Status != service.StatusCompleted {
+				continue
+			}
+		case "cancelled":
+			if t.Status != service.StatusCancelled {
 				continue
 			}
 		}

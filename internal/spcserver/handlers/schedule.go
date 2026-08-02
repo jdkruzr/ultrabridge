@@ -28,7 +28,7 @@ type TaskStore interface {
 	Create(ctx context.Context, t *taskstore.Task) error
 	Update(ctx context.Context, t *taskstore.Task) error
 	Delete(ctx context.Context, taskID string) error
-	MaxLastModified(ctx context.Context) (int64, error)
+	MaxUpdatedAt(ctx context.Context) (int64, error)
 }
 
 // ScheduleHandler serves the device-facing task group/task/sort endpoints,
@@ -102,7 +102,7 @@ func (h *ScheduleHandler) TaskAll(w http.ResponseWriter, r *http.Request) {
 	if end < len(all) {
 		next = strconv.Itoa(end)
 	}
-	syncToken, _ := h.Store.MaxLastModified(r.Context())
+	syncToken, _ := h.Store.MaxUpdatedAt(r.Context())
 
 	envelope.WriteJSON(w, dto.ScheduleTaskAllVO{
 		BaseVO:        envelope.OK(),
@@ -124,15 +124,36 @@ func (h *ScheduleHandler) TaskCreate(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, "E0330", "bad task")
 		return
 	}
-	t := mapping.SPCToTask(s)
+	t, isNew := h.resolve(r.Context(), s)
 	if t.TaskListID.String == "" {
 		t.TaskListID.String, t.TaskListID.Valid = h.Groups.DefaultID(), true
 	}
-	if err := h.Store.Create(r.Context(), &t); err != nil {
+	// A "create" for an id we already hold is an upsert — the device retries,
+	// and re-running SPCToTask on an existing rich task would drop its blob.
+	var err error
+	if isNew {
+		err = h.Store.Create(r.Context(), &t)
+	} else {
+		err = h.Store.Update(r.Context(), &t)
+	}
+	if err != nil {
 		envelope.WriteError(w, "E0330", "create failed")
 		return
 	}
 	envelope.WriteJSON(w, envelope.OK())
+}
+
+// resolve turns a device task into the row to persist, merging onto the stored
+// task when one exists so device-invisible state (ical_blob, ForestNote
+// provenance, created_at, completed_time) survives the write. The bool reports
+// whether the task is new.
+func (h *ScheduleHandler) resolve(ctx context.Context, s dto.SPCTask) (taskstore.Task, bool) {
+	if s.ID != "" {
+		if existing, err := h.Store.Get(ctx, s.ID); err == nil && existing != nil {
+			return mapping.MergeSPCIntoTask(*existing, s), false
+		}
+	}
+	return mapping.SPCToTask(s), true
 }
 
 // TaskUpdate handles PUT /api/file/schedule/task.
@@ -142,7 +163,11 @@ func (h *ScheduleHandler) TaskUpdate(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, "E0330", "bad task")
 		return
 	}
-	t := mapping.SPCToTask(s)
+	t, isNew := h.resolve(r.Context(), s)
+	if isNew {
+		envelope.WriteError(w, "E0330", "update failed")
+		return
+	}
 	if err := h.Store.Update(r.Context(), &t); err != nil {
 		envelope.WriteError(w, "E0330", "update failed")
 		return
@@ -160,13 +185,17 @@ func (h *ScheduleHandler) TaskListUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	for i := range req.UpdateScheduleTaskList {
-		t := mapping.SPCToTask(req.UpdateScheduleTaskList[i])
+		t, isNew := h.resolve(r.Context(), req.UpdateScheduleTaskList[i])
 		if t.TaskListID.String == "" {
 			t.TaskListID.String, t.TaskListID.Valid = h.Groups.DefaultID(), true
 		}
-		// Upsert: update, falling back to create for new ids.
-		if err := h.Store.Update(r.Context(), &t); err != nil {
+		// Upsert, but decided by whether the row exists rather than by letting
+		// Update fail and retrying as Create — a failed Update used to mask real
+		// errors (e.g. the NOT NULL violation on completed_time) as "new task".
+		if isNew {
 			_ = h.Store.Create(r.Context(), &t)
+		} else {
+			_ = h.Store.Update(r.Context(), &t)
 		}
 	}
 	envelope.WriteJSON(w, envelope.OK())

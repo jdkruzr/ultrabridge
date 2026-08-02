@@ -13,7 +13,10 @@ Device-facing reimplementation of the Supernote Private Cloud (SPC) protocol so 
 - `auth/` — HS256 JWT mint/verify + `x-access-token` middleware (+ userId harvest).
 - `login/` — randomCode store, password recipe (`sha256Hex(md5Hex(raw)+code)`), `ResolveUserID`.
 - `dto/` — request DTOs / response VOs, field names verbatim from decompiled source.
-- `mapping/` — `taskstore.Task ↔ dto.SPCTask` at the controller boundary (no second store).
+- `mapping/` — `taskstore.Task ↔ dto.SPCTask` at the controller boundary (no second store). **This is where the Supernote wire quirks live, and the only place they may live.** UB's store holds native RFC 5545 task semantics; this package projects them onto the device's narrower model and merges device writes back:
+  - `StatusToSPC` collapses the four native states onto the device's two (`inProcess`→needsAction, `cancelled`→completed). `mergeStatus` makes the inbound direction non-destructive — the device can only echo the projection we sent, so a device value that already agrees with the stored status must not flatten `inProcess`/`cancelled`.
+  - `spcLastModified` reconstructs the device's overloaded `lastModified` (completion time when completed, else the write watermark) and never returns 0, which would hide the task on-device.
+  - `MergeSPCIntoTask` is **required** for any device write against an existing task. A wire task is a partial view; building a fresh `Task` from it and calling `Store.Update` (which writes every column) wiped `ical_blob` and the ForestNote columns, destroying recurrence, alarms, hierarchy and all `X-CFAIT-*` state on any task the device touched. `SPCToTask` is only correct when there is no stored row.
 - `socketio/` — Engine.IO v3 codec, connection registry, websocket handler.
 - `groups/` — `GroupProvider` seam; single synthesized group today (multi-collection deferred).
 - `dedup/` — ResubmitCheck (1s TTL). `notify/` — STARTSYNC notifier over the socket registry (`Notify`→`to-do`/TASK-SYN, `NotifyFile`→`ServerMessage`/FILE-SYN) plus `TombstoneQueue` (D2): `DrainDigest`/`AckDigest` deliver durable digest `DELETE_DIGEST` tombstones, called from the socket handler on `ratta_ping`/`"Received"`.

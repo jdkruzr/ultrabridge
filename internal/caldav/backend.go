@@ -23,7 +23,7 @@ type TaskStore interface {
 	Update(ctx context.Context, t *taskstore.Task) error
 	Delete(ctx context.Context, taskID string) error
 	DeleteCompleted(ctx context.Context) (int64, error)
-	MaxLastModified(ctx context.Context) (int64, error)
+	MaxUpdatedAt(ctx context.Context) (int64, error)
 }
 
 // SyncNotifier triggers device sync after task writes.

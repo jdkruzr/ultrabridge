@@ -37,6 +37,20 @@ type Task struct {
 	// SPC's t_schedule_task has no created_at; mapping leaves it zero. Surfaced in
 	// the REST API as `created_at` (was previously mis-mapped from DueTime).
 	CreatedAt int64
+	// UpdatedAt mirrors `tasks.updated_at` (ms UTC) — the store-owned modification
+	// watermark, stamped by Create and every Update. It is the input to ComputeETag
+	// and the SPC sync token. Taskdb-only; the SPC wire has no equivalent (the
+	// device's `lastModified` is derived from this at the boundary).
+	UpdatedAt int64
+	// CompletedAt is the real completion instant (ms UTC), NULL unless the task is
+	// completed. Caller-owned: the store persists it verbatim and never rewrites it.
+	//
+	// This is the native replacement for the Supernote convention where
+	// `lastModified` doubles as the completion time (see docs/PRIVATE_CLOUD_REFERENCE.md
+	// §Task Field Reference). That convention only holds because the device never
+	// edits a task after completing it; UB does, so completion needs its own column.
+	// The device-shaped value is reconstructed in internal/spcserver/mapping.
+	CompletedAt sql.NullInt64
 	// ForestNote provenance (taskdb-only; SPC ignores).
 	ForestNoteNotebookID   sql.NullString
 	ForestNotePageID       sql.NullString

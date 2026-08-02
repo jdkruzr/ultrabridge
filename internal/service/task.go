@@ -221,8 +221,12 @@ func (s *taskService) Complete(ctx context.Context, id string) error {
 	}
 
 	task.Status = taskstore.SqlStr("completed")
-	if !task.CompletedTime.Valid {
-		task.CompletedTime = sql.NullInt64{Int64: time.Now().UnixMilli(), Valid: true}
+	// completed_at is the real completion instant. (completed_time is SPC's
+	// creation-time field despite the name — it is not touched here.) Only set
+	// it on the transition, so re-completing an already-completed task doesn't
+	// move the original timestamp.
+	if !task.CompletedAt.Valid {
+		task.CompletedAt = sql.NullInt64{Int64: time.Now().UnixMilli(), Valid: true}
 	}
 
 	if err := s.store.Update(ctx, task); err != nil {
@@ -320,8 +324,11 @@ func mapInternalTask(it taskstore.Task) Task {
 		t.DueAt = &dt
 	}
 
-	if it.CompletedTime.Valid && it.CompletedTime.Int64 > 0 {
-		ct := time.UnixMilli(it.CompletedTime.Int64)
+	// completed_at, and only for tasks that are actually completed. This used to
+	// read completed_time — SPC's creation-time field — with no status guard, so
+	// every task reported a completed_at equal to its creation time, including
+	// tasks that had never been completed.
+	if ct, ok := taskstore.CompletionTime(&it); ok {
 		t.CompletedAt = &ct
 	}
 

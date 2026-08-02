@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Editing a completed task moved its completion date.** Verified against a live instance: a title-only edit shifted `COMPLETED` from `20260701T120000Z` to the moment of the write, discarding the client's correct value even though it was re-sent. Completion time was read from `last_modified`, following the Supernote convention documented in `docs/PRIVATE_CLOUD_REFERENCE.md` ("use as COMPLETED when status=completed") — but that convention only holds for a client that never edits a task after completing it. The device doesn't; UltraBridge does, and its own `Update` stamped that column on every write. Completion now lives in a dedicated `completed_at` column, end to end.
+
+- **Every task reported a `completed_at`, including ones never completed.** The REST and MCP surfaces mapped it from `completed_time` — SPC's creation-time field, despite the name — with no status guard, so `completed_at` was always just the creation timestamp. It now comes from the real column and is absent unless the task is completed.
+
+- **`IN-PROCESS` and `CANCELLED` collapsed to `NEEDS-ACTION`.** The store held Supernote's two states, so those two were flattened on the way in, and because the VTODO emit path overlays `STATUS` from the database after decoding the iCal blob, the blob couldn't preserve them either. A CalDAV client's running timer stopped and a cancelled task un-cancelled itself on the next sync. The store now holds all four RFC 5545 states.
+
+- **Device writes wiped everything the device doesn't understand.** The SPC handlers built a task from wire fields alone and handed it to an update that writes every column, so completing a task *on the Supernote* nulled its `ical_blob` and ForestNote provenance — destroying recurrence rules, alarms, parent/child hierarchy, dependencies and all `X-CFAIT-*` state. Device writes are now read-modify-write.
+
+- **`PUT /api/file/schedule/task` failed for payloads omitting `completedTime`**, hitting a `NOT NULL` violation. Pre-existing; resolved by the same merge, since that column now comes from the stored row.
+
+### Changed
+
+- `/api/v1/tasks?status=` accepts `in_process` and `cancelled` alongside the existing values, so every status the API can return can also be filtered on.
+- The Tasks table's "Created" column reads the creation timestamp directly. It rendered `CompletedAt`, which only looked right because that field was sourced from the creation-time column.
+- `taskstore.SupernoteStatus` is now `FromCalDAVStatus`, and `taskdb.MaxLastModified` is now `MaxUpdatedAt`. Both old names described the wrong thing; the first ran on the CalDAV inbound path, which is how the vendor's two-state model came to govern the store in the first place.
+
+### Notes
+
+- The architectural rule this restores was in the original design (`docs/design-plans/2026-04-04-caldav-native-taskstore.md`, DoD #1): UltraBridge owns task storage with full VTODO fidelity, and Supernote's quirks stay isolated in one boundary package. That package was never built — the "UB as SPC" refactor replaced it with `internal/spcserver/mapping`, which declared it carried the quirks "straight through", and so the wire format quietly became the schema's meaning.
+- `completed_time` and `last_modified` are retained for SPC wire compatibility only: the first feeds MD5 task-id generation, and a zero `lastModified` makes a task invisible on-device. Neither is a completion time any more.
+- The one-time `completed_at` backfill seeds from `last_modified` and logs how many rows are **suspect** — where `last_modified == updated_at`, meaning the value was written by an `Update` and may be an edit time rather than a completion. Those are unrecoverable; the count is reported rather than guessed at.
+
+### Verified
+
+- `go test ./...` (53 packages), `go vet ./...`
+- New coverage pins each symptom: completion time surviving an unrelated edit, all four statuses round-tripping through the blob-overlay path, `completed_at` absent unless completed, the non-destructive device status merge, and blob/provenance survival through both device write paths.
+- End-to-end against a live instance over raw CalDAV: the `COMPLETED` drift, the two collapsed statuses, and the spurious `completed_at` are all gone; blob passthrough still intact.
+
 ## v1.5.0 - 2026-07-28
 
 ### Added

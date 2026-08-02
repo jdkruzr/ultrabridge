@@ -60,8 +60,8 @@ func TestTaskToVTODO(t *testing.T) {
 			task: &taskstore.Task{
 				TaskID:       "test-id",
 				Title:        sql.NullString{String: "Done Task", Valid: true},
-				Status:       sql.NullString{String: "completed", Valid: true},
-				LastModified: sql.NullInt64{Int64: taskstore.TimeToMs(time.Date(2025, 3, 17, 14, 30, 0, 0, time.UTC)), Valid: true},
+				Status:      sql.NullString{String: "completed", Valid: true},
+				CompletedAt: sql.NullInt64{Int64: taskstore.TimeToMs(time.Date(2025, 3, 17, 14, 30, 0, 0, time.UTC)), Valid: true},
 			},
 			dueTimeMode: "preserve",
 			verify: func(t *testing.T, cal *ical.Calendar) {
@@ -1384,4 +1384,152 @@ func TestParseBlobMetadata_Attachments(t *testing.T) {
 			t.Errorf("want no attachments, got %+v", got.Attachments)
 		}
 	})
+}
+
+// TestCompletedTimeIsNative pins the fix for the completion-time drift bug:
+// COMPLETED must travel through the dedicated completed_at column, not through
+// last_modified. Under the old mapping, last_modified carried the completion
+// time (the Supernote convention) while taskdb.Update stamped it on every
+// write — so editing anything on a completed task moved its completion date.
+func TestCompletedTimeIsNative(t *testing.T) {
+	completedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	writtenAt := time.Date(2026, 8, 2, 19, 17, 22, 0, time.UTC)
+
+	t.Run("inbound COMPLETED lands in CompletedAt", func(t *testing.T) {
+		cal := buildCal(map[string]string{
+			"UID":       "completed-task",
+			"SUMMARY":   "Finished last month",
+			"STATUS":    "COMPLETED",
+			"COMPLETED": completedAt.Format("20060102T150405Z"),
+		})
+
+		task, err := VTODOToTask(cal, "preserve")
+		if err != nil {
+			t.Fatalf("VTODOToTask: %v", err)
+		}
+		if !task.CompletedAt.Valid {
+			t.Fatal("CompletedAt not set from COMPLETED property")
+		}
+		if got := taskstore.MsToTime(task.CompletedAt.Int64); !got.Equal(completedAt) {
+			t.Errorf("CompletedAt: got %v, want %v", got, completedAt)
+		}
+	})
+
+	t.Run("outbound COMPLETED comes from CompletedAt, not the write watermark", func(t *testing.T) {
+		// A task completed in July, last written in August. The emitted COMPLETED
+		// must be July; only LAST-MODIFIED tracks the write.
+		task := &taskstore.Task{
+			TaskID:      "completed-task",
+			Title:       sql.NullString{String: "Finished last month", Valid: true},
+			Status:      sql.NullString{String: "completed", Valid: true},
+			CompletedAt: sql.NullInt64{Int64: taskstore.TimeToMs(completedAt), Valid: true},
+			UpdatedAt:   taskstore.TimeToMs(writtenAt),
+		}
+
+		todo, err := FindVTODO(TaskToVTODO(task, "preserve"))
+		if err != nil {
+			t.Fatalf("FindVTODO: %v", err)
+		}
+
+		completedProp := todo.Props.Get("COMPLETED")
+		if completedProp == nil {
+			t.Fatal("COMPLETED property missing")
+		}
+		got, err := completedProp.DateTime(time.UTC)
+		if err != nil {
+			t.Fatalf("parse COMPLETED: %v", err)
+		}
+		if !got.Equal(completedAt) {
+			t.Errorf("COMPLETED: got %v, want %v (must not drift to the write time)", got, completedAt)
+		}
+
+		lastMod := todo.Props.Get("LAST-MODIFIED")
+		if lastMod == nil {
+			t.Fatal("LAST-MODIFIED property missing")
+		}
+		lm, err := lastMod.DateTime(time.UTC)
+		if err != nil {
+			t.Fatalf("parse LAST-MODIFIED: %v", err)
+		}
+		if !lm.Equal(writtenAt) {
+			t.Errorf("LAST-MODIFIED: got %v, want %v", lm, writtenAt)
+		}
+	})
+
+	t.Run("no COMPLETED emitted for an incomplete task", func(t *testing.T) {
+		task := &taskstore.Task{
+			TaskID:    "active-task",
+			Title:     sql.NullString{String: "Still going", Valid: true},
+			Status:    sql.NullString{String: "needsAction", Valid: true},
+			UpdatedAt: taskstore.TimeToMs(writtenAt),
+		}
+		todo, err := FindVTODO(TaskToVTODO(task, "preserve"))
+		if err != nil {
+			t.Fatalf("FindVTODO: %v", err)
+		}
+		if p := todo.Props.Get("COMPLETED"); p != nil {
+			t.Errorf("COMPLETED emitted for an incomplete task: %q", p.Value)
+		}
+	})
+}
+
+// buildCal assembles a single-VTODO VCALENDAR from raw property values.
+func buildCal(props map[string]string) *ical.Calendar {
+	cal := ical.NewCalendar()
+	cal.Props.SetText("PRODID", "-//test//EN")
+	cal.Props.SetText("VERSION", "2.0")
+	todo := ical.NewComponent("VTODO")
+	for k, v := range props {
+		p := ical.NewProp(k)
+		p.Value = v
+		todo.Props.Set(p)
+	}
+	cal.Children = append(cal.Children, todo)
+	return cal
+}
+
+// TestStatusRoundTripsAllFourStates pins the widened status model. UB's store
+// previously held Supernote's two states, so IN-PROCESS and CANCELLED were
+// flattened to NEEDS-ACTION on the way in — and because the emit path overlays
+// STATUS from the DB after decoding the blob, the blob couldn't preserve them
+// either. A Cfait task with a running timer stopped, and a cancelled task
+// un-cancelled itself, on the next sync.
+func TestStatusRoundTripsAllFourStates(t *testing.T) {
+	for _, tc := range []struct {
+		vtodoStatus string
+		stored      string
+	}{
+		{"NEEDS-ACTION", "needsAction"},
+		{"IN-PROCESS", "inProcess"},
+		{"COMPLETED", "completed"},
+		{"CANCELLED", "cancelled"},
+	} {
+		t.Run(tc.vtodoStatus, func(t *testing.T) {
+			cal := buildCal(map[string]string{
+				"UID":     "status-task",
+				"SUMMARY": "Status carrier",
+				"DTSTAMP": "20260801T120000Z",
+				"STATUS":  tc.vtodoStatus,
+			})
+
+			task, err := VTODOToTask(cal, "preserve")
+			if err != nil {
+				t.Fatalf("VTODOToTask: %v", err)
+			}
+			if got := taskstore.NullStr(task.Status); got != tc.stored {
+				t.Errorf("stored status: got %q, want %q", got, tc.stored)
+			}
+
+			// And back out again, through the blob-overlay path — the one that
+			// rewrites STATUS from the DB column.
+			task.UpdatedAt = taskstore.TimeToMs(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
+			todo, err := FindVTODO(TaskToVTODO(task, "preserve"))
+			if err != nil {
+				t.Fatalf("FindVTODO: %v", err)
+			}
+			if got := todo.Props.Get("STATUS").Value; got != tc.vtodoStatus {
+				t.Errorf("emitted STATUS: got %q, want %q", got, tc.vtodoStatus)
+			}
+		})
+	}
 }

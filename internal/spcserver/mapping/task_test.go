@@ -112,3 +112,129 @@ func TestNewTaskGetsGeneratedID(t *testing.T) {
 		t.Errorf("expected 32-char MD5 id, got %q (len %d)", tk.TaskID, len(tk.TaskID))
 	}
 }
+
+// TestStatusToSPC pins the outbound projection onto the device's two states.
+func TestStatusToSPC(t *testing.T) {
+	for _, tc := range []struct{ stored, want string }{
+		{taskstore.StatusNeedsAction, "needsAction"},
+		{taskstore.StatusInProcess, "needsAction"}, // device has no "in process"
+		{taskstore.StatusCompleted, "completed"},
+		{taskstore.StatusCancelled, "completed"}, // closest to "abandoned"
+		{"", "needsAction"},
+	} {
+		if got := StatusToSPC(tc.stored); got != tc.want {
+			t.Errorf("StatusToSPC(%q) = %q, want %q", tc.stored, got, tc.want)
+		}
+	}
+}
+
+// TestMergeStatusIsNonDestructive pins the inbound half. The device can only
+// ever report the projection StatusToSPC produced, so a device value that
+// already agrees with the stored status carries no new information and must not
+// flatten the richer local state. Without this, every device sync round-tripped
+// inProcess and cancelled back down to the device's two states.
+func TestMergeStatusIsNonDestructive(t *testing.T) {
+	for _, tc := range []struct {
+		device, stored, want string
+	}{
+		// Echoes of what we sent — local state wins.
+		{"completed", taskstore.StatusCancelled, taskstore.StatusCancelled},
+		{"needsAction", taskstore.StatusInProcess, taskstore.StatusInProcess},
+		// Genuine device transitions.
+		{"completed", taskstore.StatusNeedsAction, taskstore.StatusCompleted},
+		{"completed", taskstore.StatusInProcess, taskstore.StatusCompleted},
+		{"needsAction", taskstore.StatusCompleted, taskstore.StatusNeedsAction},
+		{"needsAction", taskstore.StatusCancelled, taskstore.StatusNeedsAction},
+		// No-ops.
+		{"completed", taskstore.StatusCompleted, taskstore.StatusCompleted},
+		{"needsAction", taskstore.StatusNeedsAction, taskstore.StatusNeedsAction},
+		// Absent on the wire — leave the stored value alone.
+		{"", taskstore.StatusInProcess, taskstore.StatusInProcess},
+	} {
+		if got := mergeStatus(tc.device, tc.stored); got != tc.want {
+			t.Errorf("mergeStatus(device=%q, stored=%q) = %q, want %q",
+				tc.device, tc.stored, got, tc.want)
+		}
+	}
+}
+
+// TestSPCLastModifiedNeverZero covers the device-visibility requirement: a task
+// whose lastModified is 0 is stored but invisible to the device and partner app
+// (docs/PRIVATE_CLOUD_REFERENCE.md §Required fields).
+func TestSPCLastModifiedNeverZero(t *testing.T) {
+	const completedAt, updatedAt = int64(1_700_000_000_000), int64(1_760_000_000_000)
+
+	completed := taskstore.Task{
+		Status:      sql.NullString{String: taskstore.StatusCompleted, Valid: true},
+		CompletedAt: sql.NullInt64{Int64: completedAt, Valid: true},
+		UpdatedAt:   updatedAt,
+	}
+	if got := spcLastModified(completed); got != completedAt {
+		t.Errorf("completed task lastModified: got %d, want completed_at %d", got, completedAt)
+	}
+
+	active := taskstore.Task{
+		Status:    sql.NullString{String: taskstore.StatusNeedsAction, Valid: true},
+		UpdatedAt: updatedAt,
+	}
+	if got := spcLastModified(active); got != updatedAt {
+		t.Errorf("active task lastModified: got %d, want updated_at %d", got, updatedAt)
+	}
+
+	// Falls back rather than emitting 0, which would hide the task on-device.
+	legacy := taskstore.Task{
+		Status:       sql.NullString{String: taskstore.StatusNeedsAction, Valid: true},
+		LastModified: sql.NullInt64{Int64: 42, Valid: true},
+	}
+	if got := spcLastModified(legacy); got != 42 {
+		t.Errorf("legacy row lastModified: got %d, want 42", got)
+	}
+}
+
+// TestMergeCompletedAtTracksStatus verifies the completion instant is stamped on
+// the transition, held steady while completed, and cleared on the way out.
+func TestMergeCompletedAtTracksStatus(t *testing.T) {
+	const deviceCompletion = int64(1_754_000_000_000)
+
+	t.Run("stamped on transition from the device's lastModified", func(t *testing.T) {
+		existing := taskstore.Task{Status: sql.NullString{String: taskstore.StatusNeedsAction, Valid: true}}
+		got := MergeSPCIntoTask(existing, dto.SPCTask{Status: "completed", LastModified: deviceCompletion})
+		if !got.CompletedAt.Valid || got.CompletedAt.Int64 != deviceCompletion {
+			t.Errorf("completed_at: got %v, want %d", got.CompletedAt, deviceCompletion)
+		}
+	})
+
+	t.Run("preserved while it stays completed", func(t *testing.T) {
+		existing := taskstore.Task{
+			Status:      sql.NullString{String: taskstore.StatusCompleted, Valid: true},
+			CompletedAt: sql.NullInt64{Int64: deviceCompletion, Valid: true},
+		}
+		// A later device write (e.g. a sort-order reshuffle) must not move it.
+		got := MergeSPCIntoTask(existing, dto.SPCTask{Status: "completed", LastModified: deviceCompletion + 999_999})
+		if got.CompletedAt.Int64 != deviceCompletion {
+			t.Errorf("completed_at moved: got %d, want %d", got.CompletedAt.Int64, deviceCompletion)
+		}
+	})
+
+	t.Run("cleared when the device un-completes", func(t *testing.T) {
+		existing := taskstore.Task{
+			Status:      sql.NullString{String: taskstore.StatusCompleted, Valid: true},
+			CompletedAt: sql.NullInt64{Int64: deviceCompletion, Valid: true},
+		}
+		got := MergeSPCIntoTask(existing, dto.SPCTask{Status: "needsAction", LastModified: deviceCompletion + 1})
+		if got.CompletedAt.Valid {
+			t.Errorf("completed_at should be cleared, got %v", got.CompletedAt)
+		}
+	})
+
+	t.Run("cancelled task stays cancelled and keeps no completion instant", func(t *testing.T) {
+		existing := taskstore.Task{Status: sql.NullString{String: taskstore.StatusCancelled, Valid: true}}
+		got := MergeSPCIntoTask(existing, dto.SPCTask{Status: "completed", LastModified: deviceCompletion})
+		if taskstore.NullStr(got.Status) != taskstore.StatusCancelled {
+			t.Errorf("status: got %q, want cancelled", taskstore.NullStr(got.Status))
+		}
+		if got.CompletedAt.Valid {
+			t.Errorf("cancelled task should have no completed_at, got %v", got.CompletedAt)
+		}
+	})
+}

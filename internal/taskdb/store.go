@@ -23,7 +23,8 @@ func NewStore(db *sql.DB) *Store {
 
 const taskColumns = `task_id, title, detail, status, importance, due_time,
 	completed_time, last_modified, recurrence, is_reminder_on, links, is_deleted,
-	ical_blob, created_at, forestnote_notebook_id, forestnote_page_id,
+	ical_blob, created_at, updated_at, completed_at,
+	forestnote_notebook_id, forestnote_page_id,
 	forestnote_notebook_name, forestnote_source`
 
 func (s *Store) List(ctx context.Context) ([]taskstore.Task, error) {
@@ -94,12 +95,12 @@ func (s *Store) Create(ctx context.Context, t *taskstore.Task) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO tasks
 		(task_id, title, detail, status, importance, due_time,
 		 completed_time, last_modified, recurrence, is_reminder_on,
-		 links, is_deleted, ical_blob, created_at, updated_at,
+		 links, is_deleted, ical_blob, created_at, updated_at, completed_at,
 		 forestnote_notebook_id, forestnote_page_id, forestnote_notebook_name, forestnote_source)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.TaskID, t.Title, t.Detail, t.Status, t.Importance, t.DueTime,
 		t.CompletedTime, t.LastModified, t.Recurrence, t.IsReminderOn,
-		t.Links, t.IsDeleted, t.ICalBlob, now, now,
+		t.Links, t.IsDeleted, t.ICalBlob, now, now, t.CompletedAt,
 		t.ForestNoteNotebookID, t.ForestNotePageID, t.ForestNoteNotebookName, t.ForestNoteSource)
 	if err != nil {
 		return fmt.Errorf("create task: %w", err)
@@ -109,18 +110,24 @@ func (s *Store) Create(ctx context.Context, t *taskstore.Task) error {
 
 func (s *Store) Update(ctx context.Context, t *taskstore.Task) error {
 	now := time.Now().UnixMilli()
+	// last_modified mirrors updated_at: it is an SPC-facing field only, and the
+	// device requires it to be non-zero to show the task at all. It deliberately
+	// no longer carries the completion time — that lives in completed_at, which
+	// this method persists verbatim from the caller.
 	t.LastModified = sql.NullInt64{Int64: now, Valid: true}
+	t.UpdatedAt = now
 
 	result, err := s.db.ExecContext(ctx, `UPDATE tasks SET
 		title = ?, detail = ?, status = ?, importance = ?, due_time = ?,
 		completed_time = ?, last_modified = ?, recurrence = ?,
 		is_reminder_on = ?, links = ?, ical_blob = ?, updated_at = ?,
+		completed_at = ?,
 		forestnote_notebook_id = ?, forestnote_page_id = ?,
 		forestnote_notebook_name = ?, forestnote_source = ?
 		WHERE task_id = ?`,
 		t.Title, t.Detail, t.Status, t.Importance, t.DueTime,
 		t.CompletedTime, t.LastModified, t.Recurrence,
-		t.IsReminderOn, t.Links, t.ICalBlob, now,
+		t.IsReminderOn, t.Links, t.ICalBlob, now, t.CompletedAt,
 		t.ForestNoteNotebookID, t.ForestNotePageID,
 		t.ForestNoteNotebookName, t.ForestNoteSource,
 		t.TaskID)
@@ -204,12 +211,12 @@ func (s *Store) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged
 	}()
 
 	if err = tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE is_deleted = 'Y' AND last_modified >= ?`,
+		`SELECT COUNT(*) FROM tasks WHERE is_deleted = 'Y' AND updated_at >= ?`,
 		cutoffMs).Scan(&skipped); err != nil {
 		return 0, 0, fmt.Errorf("count skipped tasks at cutoff %d: %w", cutoffMs, err)
 	}
 	result, err := tx.ExecContext(ctx,
-		`DELETE FROM tasks WHERE is_deleted = 'Y' AND last_modified < ?`,
+		`DELETE FROM tasks WHERE is_deleted = 'Y' AND updated_at < ?`,
 		cutoffMs)
 	if err != nil {
 		return 0, 0, fmt.Errorf("hard delete tasks older than %d: %w", cutoffMs, err)
@@ -235,12 +242,16 @@ func (s *Store) IsEmpty(ctx context.Context) (bool, error) {
 	return exists == 0, nil
 }
 
-func (s *Store) MaxLastModified(ctx context.Context) (int64, error) {
+// MaxUpdatedAt returns the highest updated_at across non-deleted tasks — the
+// collection change watermark, used as the SPC sync token. It reads updated_at
+// rather than last_modified because only updated_at is guaranteed to advance on
+// every write; last_modified is now an SPC-facing mirror.
+func (s *Store) MaxUpdatedAt(ctx context.Context) (int64, error) {
 	var max sql.NullInt64
 	err := s.db.QueryRowContext(ctx,
-		"SELECT MAX(last_modified) FROM tasks WHERE is_deleted = 'N'").Scan(&max)
+		"SELECT MAX(updated_at) FROM tasks WHERE is_deleted = 'N'").Scan(&max)
 	if err != nil {
-		return 0, fmt.Errorf("max last_modified: %w", err)
+		return 0, fmt.Errorf("max updated_at: %w", err)
 	}
 	if !max.Valid {
 		return 0, nil
@@ -258,7 +269,7 @@ func scanTask(s scanner) (taskstore.Task, error) {
 		&t.TaskID, &t.Title, &t.Detail, &t.Status, &t.Importance,
 		&t.DueTime, &t.CompletedTime, &t.LastModified, &t.Recurrence,
 		&t.IsReminderOn, &t.Links, &t.IsDeleted, &t.ICalBlob,
-		&t.CreatedAt,
+		&t.CreatedAt, &t.UpdatedAt, &t.CompletedAt,
 		&t.ForestNoteNotebookID, &t.ForestNotePageID,
 		&t.ForestNoteNotebookName, &t.ForestNoteSource,
 	)
