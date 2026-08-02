@@ -756,8 +756,6 @@ func TestStore_HardDeleteOlderThan_NoMatchesReturnsZero(t *testing.T) {
 	}
 }
 
-
-
 // TestStore_RoundTripsCompletedAtAndUpdatedAt pins the native timestamp
 // columns: completed_at is caller-owned and survives an unrelated Update,
 // and updated_at is store-owned and advances on every write. Before the
@@ -812,51 +810,57 @@ func TestStore_RoundTripsCompletedAtAndUpdatedAt(t *testing.T) {
 	}
 }
 
-// TestBackfillCompletedAt covers the one-time migration that seeds completed_at
-// from last_modified, including the suspect-row heuristic. A row whose
-// last_modified equals its updated_at was last written by Update (which stamped
-// both from the same instant), so its completion time may really be an edit
-// time; a row where they differ was last written by Create, which preserves the
-// caller's value.
+// TestBackfillCompletedAt covers the one-time migration that seeds completed_at.
+// The stored ical_blob's COMPLETED is what the CalDAV client actually sent and
+// is preferred; last_modified is the approximate fallback, since UB's Update
+// stamped it on every write and it drifts away from the real completion.
 func TestBackfillCompletedAt(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
 
-	insert := func(id, status string, lastModified, updatedAt int64) {
+	insert := func(id, status string, lastModified int64, blob any) {
 		t.Helper()
 		_, err := store.db.ExecContext(ctx, `INSERT INTO tasks
 			(task_id, title, status, is_deleted, last_modified, created_at, updated_at,
-			 is_reminder_on, completed_at)
-			VALUES (?, ?, ?, 'N', ?, ?, ?, 'N', NULL)`,
-			id, id, status, lastModified, updatedAt, updatedAt)
+			 is_reminder_on, ical_blob, completed_at)
+			VALUES (?, ?, ?, 'N', ?, ?, ?, 'N', ?, NULL)`,
+			id, id, status, lastModified, lastModified, lastModified, blob)
 		if err != nil {
 			t.Fatalf("insert %s: %v", id, err)
 		}
 	}
 
 	const (
-		completedInstant = int64(1_750_000_000_000)
-		editInstant      = int64(1_760_000_000_000)
+		trueCompletion   = int64(1_747_238_714_000) // 2025-05-14T16:05:14Z
+		driftedWatermark = int64(1_748_306_000_000) // a later edit
 	)
+	blobWith := func(completed string) string {
+		return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:x\r\n" +
+			"DTSTAMP:20260101T000000Z\r\nSTATUS:COMPLETED\r\n" +
+			"COMPLETED:" + completed + "\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+	}
 
-	// Completed, last written by Create → last_modified is a real completion time.
-	insert("trustworthy", "completed", completedInstant, editInstant)
-	// Completed, last written by Update → both stamps match; value is suspect.
-	insert("suspect", "completed", editInstant, editInstant)
+	// Blob carries the client's COMPLETED; last_modified has drifted weeks later.
+	insert("from-blob", "completed", driftedWatermark, blobWith("20250514T160514Z"))
+	// No blob → fall back to the watermark.
+	insert("from-watermark", "completed", driftedWatermark, nil)
+	// Blob present but carries no COMPLETED → fall back.
+	insert("blob-without-completed", "completed", driftedWatermark,
+		"BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:y\r\nEND:VTODO\r\nEND:VCALENDAR\r\n")
 	// Not completed → must stay NULL.
-	insert("active", "needsAction", editInstant, editInstant)
-	// Completed but never synced (last_modified 0) → nothing usable to copy.
-	insert("no-timestamp", "completed", 0, editInstant)
+	insert("active", "needsAction", driftedWatermark, nil)
+	// Completed with neither source → nothing to invent.
+	insert("no-source", "completed", 0, nil)
 
-	total, suspect, err := backfillCompletedAt(ctx, store.db)
+	fromBlob, fromWatermark, err := backfillCompletedAt(ctx, store.db)
 	if err != nil {
 		t.Fatalf("backfillCompletedAt: %v", err)
 	}
-	if total != 2 {
-		t.Errorf("total backfilled: got %d, want 2 (trustworthy + suspect)", total)
+	if fromBlob != 1 {
+		t.Errorf("fromBlob: got %d, want 1", fromBlob)
 	}
-	if suspect != 1 {
-		t.Errorf("suspect: got %d, want 1", suspect)
+	if fromWatermark != 2 {
+		t.Errorf("fromWatermark: got %d, want 2", fromWatermark)
 	}
 
 	got := func(id string) sql.NullInt64 {
@@ -869,25 +873,29 @@ func TestBackfillCompletedAt(t *testing.T) {
 		return v
 	}
 
-	if v := got("trustworthy"); !v.Valid || v.Int64 != completedInstant {
-		t.Errorf("trustworthy completed_at: got %v, want %d", v, completedInstant)
+	// The whole point: the blob wins over the drifted watermark.
+	if v := got("from-blob"); !v.Valid || v.Int64 != trueCompletion {
+		t.Errorf("from-blob completed_at: got %v, want %d (the client's COMPLETED)", v, trueCompletion)
 	}
-	if v := got("suspect"); !v.Valid || v.Int64 != editInstant {
-		t.Errorf("suspect completed_at: got %v, want %d (best available)", v, editInstant)
+	if v := got("from-watermark"); !v.Valid || v.Int64 != driftedWatermark {
+		t.Errorf("from-watermark completed_at: got %v, want %d", v, driftedWatermark)
+	}
+	if v := got("blob-without-completed"); !v.Valid || v.Int64 != driftedWatermark {
+		t.Errorf("blob-without-completed completed_at: got %v, want %d", v, driftedWatermark)
 	}
 	if v := got("active"); v.Valid {
 		t.Errorf("active completed_at: got %v, want NULL (task is not completed)", v)
 	}
-	if v := got("no-timestamp"); v.Valid {
-		t.Errorf("no-timestamp completed_at: got %v, want NULL (no usable source)", v)
+	if v := got("no-source"); v.Valid {
+		t.Errorf("no-source completed_at: got %v, want NULL", v)
 	}
 
 	// Idempotent: a second run finds nothing left to do.
-	total2, _, err := backfillCompletedAt(ctx, store.db)
+	b2, w2, err := backfillCompletedAt(ctx, store.db)
 	if err != nil {
 		t.Fatalf("second backfillCompletedAt: %v", err)
 	}
-	if total2 != 0 {
-		t.Errorf("second run total: got %d, want 0 (idempotent)", total2)
+	if b2 != 0 || w2 != 0 {
+		t.Errorf("second run: got (%d, %d), want (0, 0) — not idempotent", b2, w2)
 	}
 }

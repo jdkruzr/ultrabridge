@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"time"
 )
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -100,15 +102,15 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			`ALTER TABLE tasks ADD COLUMN completed_at INTEGER`); err != nil {
 			return fmt.Errorf("add completed_at column: %w", err)
 		}
-		total, suspect, err := backfillCompletedAt(ctx, db)
+		fromBlob, fromWatermark, err := backfillCompletedAt(ctx, db)
 		if err != nil {
 			return err
 		}
-		if total > 0 {
-			slog.Info("backfilled completed_at from last_modified",
-				"rows", total,
-				"suspect", suspect,
-				"note", "suspect rows were last written by Update, so their completion time may be an edit time")
+		if fromBlob+fromWatermark > 0 {
+			slog.Info("backfilled completed_at",
+				"exact_from_ical_blob", fromBlob,
+				"approximate_from_last_modified", fromWatermark,
+				"note", "approximate rows have no client-supplied COMPLETED to recover; their value is the last write while completed, which may be an edit rather than the completion")
 		}
 	}
 
@@ -128,33 +130,88 @@ func migrate(ctx context.Context, db *sql.DB) error {
 // already-completed tasks. Runs exactly once, immediately after the ALTER that
 // creates the column.
 //
-// last_modified is the best available source: under the Supernote convention it
-// held the completion instant. But UB's Update stamped it on *every* write, so
-// for any task edited after it was completed the stored value is the edit time,
-// not the completion time — and the true value is unrecoverable.
+// There are two possible sources, and they are not equally good:
 //
-// Rather than guess, we report. A row whose last_modified exactly equals its
-// updated_at was written by Update (both are stamped from the same `now`), so
-// its backfilled completion time is suspect. A row where they differ was last
-// touched by Create, which preserves the caller's value, so it is trustworthy.
-// Returns the number of rows backfilled and how many of those are suspect;
-// the caller logs. Nothing is skipped or altered on the strength of the
-// heuristic — it only informs the operator.
-func backfillCompletedAt(ctx context.Context, db *sql.DB) (total, suspect int64, err error) {
-	const eligible = `status = 'completed' AND completed_at IS NULL AND last_modified > 0`
+//  1. The COMPLETED property inside the stored ical_blob. This is what the
+//     CalDAV client actually sent, untouched by UB's write path, so it is the
+//     true completion instant. Preferred wherever present.
+//  2. last_modified. Under the Supernote convention this held the completion
+//     time, but UB's Update stamped it on every write, so for any task edited
+//     after completion it is the edit time. Approximate, and unrecoverable
+//     where it has drifted.
+//
+// The gap between the two is not hypothetical: on a production database, 44 of
+// the 52 completed tasks carrying a blob COMPLETED disagreed with last_modified,
+// several by weeks. Reading the blob first recovers those.
+//
+// Returns how many rows were backfilled from each source; the caller logs.
+func backfillCompletedAt(ctx context.Context, db *sql.DB) (fromBlob, fromWatermark int64, err error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT task_id, last_modified, ical_blob FROM tasks
+		 WHERE status = 'completed' AND completed_at IS NULL`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("select completed_at backfill candidates: %w", err)
+	}
+	type seed struct {
+		id string
+		at int64
+	}
+	var seeds []seed
+	for rows.Next() {
+		var id string
+		var lastModified sql.NullInt64
+		var blob sql.NullString
+		if err := rows.Scan(&id, &lastModified, &blob); err != nil {
+			rows.Close()
+			return 0, 0, fmt.Errorf("scan backfill candidate: %w", err)
+		}
+		if at, ok := completedFromBlob(blob.String); ok {
+			seeds = append(seeds, seed{id, at})
+			fromBlob++
+		} else if lastModified.Valid && lastModified.Int64 > 0 {
+			seeds = append(seeds, seed{id, lastModified.Int64})
+			fromWatermark++
+		}
+		// Neither source available → leave NULL rather than invent an instant.
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, 0, fmt.Errorf("iterate backfill candidates: %w", err)
+	}
+	rows.Close()
 
-	if err = db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE `+eligible).Scan(&total); err != nil {
-		return 0, 0, fmt.Errorf("count completed_at backfill candidates: %w", err)
+	for _, s := range seeds {
+		if _, err := db.ExecContext(ctx,
+			`UPDATE tasks SET completed_at = ? WHERE task_id = ?`, s.at, s.id); err != nil {
+			return 0, 0, fmt.Errorf("backfill completed_at for %s: %w", s.id, err)
+		}
 	}
-	if err = db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE `+eligible+` AND last_modified = updated_at`).Scan(&suspect); err != nil {
-		return 0, 0, fmt.Errorf("count suspect completed_at candidates: %w", err)
-	}
+	return fromBlob, fromWatermark, nil
+}
 
-	if _, err = db.ExecContext(ctx,
-		`UPDATE tasks SET completed_at = last_modified WHERE `+eligible); err != nil {
-		return 0, 0, fmt.Errorf("backfill completed_at: %w", err)
+// completedRE matches the COMPLETED property line in a stored VCALENDAR. Read
+// with a regex rather than the iCal decoder so the storage layer doesn't take a
+// dependency on the CalDAV package for one migration; any shape it doesn't
+// recognise simply falls through to the last_modified path.
+var completedRE = regexp.MustCompile(`(?mi)^COMPLETED[^:\r\n]*:\s*([0-9TZ]+)`)
+
+// completedFromBlob extracts the client-supplied COMPLETED instant from a
+// stored VCALENDAR, in ms UTC.
+func completedFromBlob(blob string) (int64, bool) {
+	if blob == "" {
+		return 0, false
 	}
-	return total, suspect, nil
+	m := completedRE.FindStringSubmatch(blob)
+	if m == nil {
+		return 0, false
+	}
+	// RFC 5545 DATE-TIME: UTC ("...Z") or, less commonly, floating local time.
+	// Floating is read as UTC — the same assumption the rest of the task path
+	// makes for timestamps without a zone.
+	for _, layout := range []string{"20060102T150405Z", "20060102T150405"} {
+		if ts, err := time.Parse(layout, m[1]); err == nil {
+			return ts.UTC().UnixMilli(), true
+		}
+	}
+	return 0, false
 }

@@ -1,6 +1,6 @@
 # CalDAV Backend
 
-Last verified: 2026-05-29 (ForestNote provenance extractor + BlobMetadata read/build/merge surface)
+Last verified: 2026-08-02 (COMPLETED sourced from completed_at; STATUS carries all four VTODO states)
 
 ## Purpose
 Exposes tasks as a standard CalDAV VTODO collection so any CalDAV client
@@ -8,7 +8,7 @@ Exposes tasks as a standard CalDAV VTODO collection so any CalDAV client
 
 ## Contracts
 - **Exposes**: `Backend` (implements `gocaldav.Backend`), `TaskStore` interface, `SyncNotifier` interface, `ProppatchStub` http middleware. Plus the metadata helpers: `BlobMetadata`, `ParseBlobMetadata(blob) BlobMetadata`, `BuildBlobWithMetadata(taskID, meta) string`, `BlobMetadataPatch`, `MergeBlobMetadataPatch(taskID, existingBlob, patch) string`.
-- **Guarantees**: Single fixed collection at `{prefix}/tasks/`. Only VTODO supported (VEVENT rejected). Writes trigger sync notification (graceful degradation if notifier down). ETags computed from mutable fields. Collection display name is mutable at runtime via client PROPPATCH of `DAV:displayname`. `VTODOToTask` populates the four `Task.ForestNote*` columns from `X-FORESTNOTE-*` properties via `extractForestNoteMetadata` (defensive: missing props leave the columns NULL). `ParseBlobMetadata` and the merge helpers never error — corrupt/blank blobs degrade to zero-value output.
+- **Guarantees**: Single fixed collection at `{prefix}/tasks/`. Only VTODO supported (VEVENT rejected). Writes trigger sync notification (graceful degradation if notifier down). ETags computed from mutable fields (via `updated_at`). All four RFC 5545 STATUS values round-trip (`NEEDS-ACTION`, `IN-PROCESS`, `COMPLETED`, `CANCELLED`); `COMPLETED` is sourced from and written to `completed_at`, while `LAST-MODIFIED`/`DTSTAMP` track `updated_at`. Collection display name is mutable at runtime via client PROPPATCH of `DAV:displayname`. `VTODOToTask` populates the four `Task.ForestNote*` columns from `X-FORESTNOTE-*` properties via `extractForestNoteMetadata` (defensive: missing props leave the columns NULL). `ParseBlobMetadata` and the merge helpers never error — corrupt/blank blobs degrade to zero-value output.
 - **Expects**: A `TaskStore` implementation and a `SyncNotifier`. Caller sets HTTP prefix. Caller wraps the CalDAV `http.Handler` with `ProppatchStub` if PROPPATCH acceptance is desired (it is — see Gotchas).
 
 ## Dependencies
