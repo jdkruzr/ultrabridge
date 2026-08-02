@@ -206,12 +206,12 @@ func (s *Store) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged
 	}()
 
 	if err = tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE is_deleted = 'Y' AND last_modified >= ?`,
+		`SELECT COUNT(*) FROM tasks WHERE is_deleted = 'Y' AND updated_at >= ?`,
 		cutoffMs).Scan(&skipped); err != nil {
 		return 0, 0, fmt.Errorf("count skipped tasks at cutoff %d: %w", cutoffMs, err)
 	}
 	result, err := tx.ExecContext(ctx,
-		`DELETE FROM tasks WHERE is_deleted = 'Y' AND last_modified < ?`,
+		`DELETE FROM tasks WHERE is_deleted = 'Y' AND updated_at < ?`,
 		cutoffMs)
 	if err != nil {
 		return 0, 0, fmt.Errorf("hard delete tasks older than %d: %w", cutoffMs, err)
@@ -237,12 +237,16 @@ func (s *Store) IsEmpty(ctx context.Context) (bool, error) {
 	return exists == 0, nil
 }
 
-func (s *Store) MaxLastModified(ctx context.Context) (int64, error) {
+// MaxUpdatedAt returns the highest updated_at across non-deleted tasks — the
+// collection change watermark, used as the SPC sync token. It reads updated_at
+// rather than last_modified because only updated_at is guaranteed to advance on
+// every write; last_modified is now an SPC-facing mirror.
+func (s *Store) MaxUpdatedAt(ctx context.Context) (int64, error) {
 	var max sql.NullInt64
 	err := s.db.QueryRowContext(ctx,
-		"SELECT MAX(last_modified) FROM tasks WHERE is_deleted = 'N'").Scan(&max)
+		"SELECT MAX(updated_at) FROM tasks WHERE is_deleted = 'N'").Scan(&max)
 	if err != nil {
-		return 0, fmt.Errorf("max last_modified: %w", err)
+		return 0, fmt.Errorf("max updated_at: %w", err)
 	}
 	if !max.Valid {
 		return 0, nil

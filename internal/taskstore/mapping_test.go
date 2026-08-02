@@ -50,6 +50,7 @@ func TestComputeETag(t *testing.T) {
 		Status:       sql.NullString{String: "needsAction", Valid: true},
 		DueTime:      1000,
 		LastModified: sql.NullInt64{Int64: 5000, Valid: true},
+		UpdatedAt:    5000,
 	}
 
 	baseETag := ComputeETag(baseTask)
@@ -81,11 +82,23 @@ func TestComputeETag(t *testing.T) {
 			wantDiff: true,
 		},
 		{
-			name: "last_modified change",
+			// updated_at is the store-owned modification watermark and the only
+			// field guaranteed to move on every write, so it carries the ETag.
+			name: "updated_at change",
+			modifyFn: func(task *Task) {
+				task.UpdatedAt = 6000
+			},
+			wantDiff: true,
+		},
+		{
+			// last_modified is now only an SPC-facing mirror. It must not feed the
+			// ETag: once completion time moved to its own column, this field stops
+			// tracking "did anything change" and starts meaning something else.
+			name: "last_modified change alone",
 			modifyFn: func(task *Task) {
 				task.LastModified = sql.NullInt64{Int64: 6000, Valid: true}
 			},
-			wantDiff: true,
+			wantDiff: false,
 		},
 		{
 			name: "no change",

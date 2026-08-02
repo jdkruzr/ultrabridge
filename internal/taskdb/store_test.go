@@ -205,12 +205,12 @@ func TestStore_Delete_SoftDeletesAndHides(t *testing.T) {
 	}
 }
 
-// TestStore_MaxLastModified_TracksChanges verifies AC1.6: Create a task,
-// note MaxLastModified() value; update the task, verify MaxLastModified()
-// increased; delete the task with a fresh timestamp, verify MaxLastModified()
+// TestStore_MaxUpdatedAt_TracksChanges verifies AC1.6: Create a task,
+// note MaxUpdatedAt() value; update the task, verify MaxUpdatedAt()
+// increased; delete the task with a fresh timestamp, verify MaxUpdatedAt()
 // reflects the deleted task's bumped timestamp is excluded (deleted tasks
 // filtered from MAX query).
-func TestStore_MaxLastModified_TracksChanges(t *testing.T) {
+func TestStore_MaxUpdatedAt_TracksChanges(t *testing.T) {
 	store := openTestStore(t)
 
 	task := &taskstore.Task{
@@ -222,9 +222,9 @@ func TestStore_MaxLastModified_TracksChanges(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	maxAfterCreate, err := store.MaxLastModified(context.Background())
+	maxAfterCreate, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after create: %v", err)
+		t.Fatalf("MaxUpdatedAt after create: %v", err)
 	}
 
 	time.Sleep(2 * time.Millisecond)
@@ -235,13 +235,13 @@ func TestStore_MaxLastModified_TracksChanges(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	maxAfterUpdate, err := store.MaxLastModified(context.Background())
+	maxAfterUpdate, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after update: %v", err)
+		t.Fatalf("MaxUpdatedAt after update: %v", err)
 	}
 
 	if maxAfterUpdate <= maxAfterCreate {
-		t.Errorf("MaxLastModified should increase after update: %d <= %d", maxAfterUpdate, maxAfterCreate)
+		t.Errorf("MaxUpdatedAt should increase after update: %d <= %d", maxAfterUpdate, maxAfterCreate)
 	}
 
 	time.Sleep(2 * time.Millisecond)
@@ -263,30 +263,30 @@ func TestStore_MaxLastModified_TracksChanges(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	maxAfterDelete, err := store.MaxLastModified(context.Background())
+	maxAfterDelete, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after delete: %v", err)
+		t.Fatalf("MaxUpdatedAt after delete: %v", err)
 	}
 
-	// After deleting task1, MaxLastModified returns task2's last_modified
+	// After deleting task1, MaxUpdatedAt returns task2's last_modified
 	// (the only remaining non-deleted task), which is newer than maxAfterUpdate.
 	if maxAfterDelete <= maxAfterUpdate {
-		t.Errorf("MaxLastModified after delete should reflect surviving task2: got %d, want > %d", maxAfterDelete, maxAfterUpdate)
+		t.Errorf("MaxUpdatedAt after delete should reflect surviving task2: got %d, want > %d", maxAfterDelete, maxAfterUpdate)
 	}
 }
 
-// TestStore_MaxLastModified_EmptyStore verifies AC1.7: On empty store,
-// MaxLastModified() returns 0.
-func TestStore_MaxLastModified_EmptyStore(t *testing.T) {
+// TestStore_MaxUpdatedAt_EmptyStore verifies AC1.7: On empty store,
+// MaxUpdatedAt() returns 0.
+func TestStore_MaxUpdatedAt_EmptyStore(t *testing.T) {
 	store := openTestStore(t)
 
-	max, err := store.MaxLastModified(context.Background())
+	max, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified on empty store: %v", err)
+		t.Fatalf("MaxUpdatedAt on empty store: %v", err)
 	}
 
 	if max != 0 {
-		t.Errorf("MaxLastModified on empty store should be 0, got %d", max)
+		t.Errorf("MaxUpdatedAt on empty store should be 0, got %d", max)
 	}
 }
 
@@ -296,12 +296,12 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 	store := openTestStore(t)
 
 	// Initial CTag on empty store
-	ctagEmpty, err := store.MaxLastModified(context.Background())
+	ctagEmpty, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified on empty store: %v", err)
+		t.Fatalf("MaxUpdatedAt on empty store: %v", err)
 	}
 	if ctagEmpty != 0 {
-		t.Errorf("CTag (MaxLastModified) on empty store should be 0, got %d", ctagEmpty)
+		t.Errorf("CTag (MaxUpdatedAt) on empty store should be 0, got %d", ctagEmpty)
 	}
 
 	// Create first task
@@ -313,9 +313,9 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 		t.Fatalf("Create task1: %v", err)
 	}
 
-	ctagAfterCreate1, err := store.MaxLastModified(context.Background())
+	ctagAfterCreate1, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after create1: %v", err)
+		t.Fatalf("MaxUpdatedAt after create1: %v", err)
 	}
 
 	if ctagAfterCreate1 <= ctagEmpty {
@@ -333,9 +333,9 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 		t.Fatalf("Create task2: %v", err)
 	}
 
-	ctagAfterCreate2, err := store.MaxLastModified(context.Background())
+	ctagAfterCreate2, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after create2: %v", err)
+		t.Fatalf("MaxUpdatedAt after create2: %v", err)
 	}
 
 	if ctagAfterCreate2 <= ctagAfterCreate1 {
@@ -350,9 +350,9 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 		t.Fatalf("Update task1: %v", err)
 	}
 
-	ctagAfterUpdate, err := store.MaxLastModified(context.Background())
+	ctagAfterUpdate, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after update: %v", err)
+		t.Fatalf("MaxUpdatedAt after update: %v", err)
 	}
 
 	if ctagAfterUpdate <= ctagAfterCreate2 {
@@ -366,12 +366,12 @@ func TestStore_CTag_IncrementsOnChanges(t *testing.T) {
 		t.Fatalf("Delete task2: %v", err)
 	}
 
-	ctagAfterDelete, err := store.MaxLastModified(context.Background())
+	ctagAfterDelete, err := store.MaxUpdatedAt(context.Background())
 	if err != nil {
-		t.Fatalf("MaxLastModified after delete: %v", err)
+		t.Fatalf("MaxUpdatedAt after delete: %v", err)
 	}
 
-	// After deleting task2, MaxLastModified reflects only non-deleted tasks.
+	// After deleting task2, MaxUpdatedAt reflects only non-deleted tasks.
 	// task1 (updated) is the sole survivor, so CTag equals ctagAfterUpdate.
 	if ctagAfterDelete != ctagAfterUpdate {
 		t.Errorf("CTag after delete should equal surviving task's CTag: got %d, want %d", ctagAfterDelete, ctagAfterUpdate)
@@ -661,10 +661,12 @@ func TestStore_HardDeleteOlderThan_RespectsAgeAndDeletedFlag(t *testing.T) {
 	//   (b) live + ancient         → must survive (live)
 	//   (c) deleted + recent       → must survive (within window)
 	//   (d) deleted + ancient      → must be removed
+	// Age is carried by updated_at — the store-owned modification watermark the
+	// purge predicate reads. last_modified mirrors it (SPC-facing only).
 	rows := []struct {
-		id           string
-		isDeleted    string
-		lastModified int64
+		id        string
+		isDeleted string
+		updatedAt int64
 	}{
 		{"a-live-recent", "N", now - 1*dayMs},
 		{"b-live-ancient", "N", now - 90*dayMs},
@@ -675,7 +677,7 @@ func TestStore_HardDeleteOlderThan_RespectsAgeAndDeletedFlag(t *testing.T) {
 		_, err := store.db.ExecContext(ctx, `INSERT INTO tasks
 			(task_id, title, status, is_deleted, last_modified, created_at, updated_at, is_reminder_on)
 			VALUES (?, ?, 'needsAction', ?, ?, ?, ?, 'N')`,
-			r.id, "row "+r.id, r.isDeleted, r.lastModified, now, now)
+			r.id, "row "+r.id, r.isDeleted, r.updatedAt, now, r.updatedAt)
 		if err != nil {
 			t.Fatalf("insert %s: %v", r.id, err)
 		}

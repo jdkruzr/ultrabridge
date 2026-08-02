@@ -28,7 +28,7 @@ type TaskStore interface {
 	Create(ctx context.Context, t *taskstore.Task) error
 	Update(ctx context.Context, t *taskstore.Task) error
 	Delete(ctx context.Context, taskID string) error
-	MaxLastModified(ctx context.Context) (int64, error)
+	MaxUpdatedAt(ctx context.Context) (int64, error)
 }
 
 // ScheduleHandler serves the device-facing task group/task/sort endpoints,
@@ -102,7 +102,7 @@ func (h *ScheduleHandler) TaskAll(w http.ResponseWriter, r *http.Request) {
 	if end < len(all) {
 		next = strconv.Itoa(end)
 	}
-	syncToken, _ := h.Store.MaxLastModified(r.Context())
+	syncToken, _ := h.Store.MaxUpdatedAt(r.Context())
 
 	envelope.WriteJSON(w, dto.ScheduleTaskAllVO{
 		BaseVO:        envelope.OK(),

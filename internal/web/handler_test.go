@@ -146,7 +146,7 @@ func (m *mockTaskStore) Delete(ctx context.Context, taskID string) error {
 	return fmt.Errorf("task not found")
 }
 
-func (m *mockTaskStore) MaxLastModified(ctx context.Context) (int64, error) {
+func (m *mockTaskStore) MaxUpdatedAt(ctx context.Context) (int64, error) {
 	var max int64
 	for _, t := range m.tasks {
 		if t.LastModified.Valid && t.LastModified.Int64 > max {

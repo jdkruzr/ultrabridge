@@ -16,12 +16,18 @@ func GenerateTaskID(title string, createdAtMs int64) string {
 }
 
 // ComputeETag generates an ETag for a task based on its mutable fields.
+//
+// updated_at is the entropy that matters: it is the store-owned watermark
+// stamped on every write, so any change to any field moves it — including
+// fields not named here (description, priority, categories, ical_blob).
+// It replaced last_modified, which stopped being a reliable "something
+// changed" signal once completion time moved to its own column.
 func ComputeETag(t *Task) string {
 	data := t.TaskID +
 		NullStr(t.Title) +
 		NullStr(t.Status) +
 		strconv.FormatInt(t.DueTime, 10) +
-		nullInt64Str(t.LastModified)
+		strconv.FormatInt(t.UpdatedAt, 10)
 	return fmt.Sprintf("%x", md5.Sum([]byte(data)))
 }
 
