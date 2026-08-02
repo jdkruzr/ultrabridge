@@ -1487,3 +1487,49 @@ func buildCal(props map[string]string) *ical.Calendar {
 	cal.Children = append(cal.Children, todo)
 	return cal
 }
+
+// TestStatusRoundTripsAllFourStates pins the widened status model. UB's store
+// previously held Supernote's two states, so IN-PROCESS and CANCELLED were
+// flattened to NEEDS-ACTION on the way in — and because the emit path overlays
+// STATUS from the DB after decoding the blob, the blob couldn't preserve them
+// either. A Cfait task with a running timer stopped, and a cancelled task
+// un-cancelled itself, on the next sync.
+func TestStatusRoundTripsAllFourStates(t *testing.T) {
+	for _, tc := range []struct {
+		vtodoStatus string
+		stored      string
+	}{
+		{"NEEDS-ACTION", "needsAction"},
+		{"IN-PROCESS", "inProcess"},
+		{"COMPLETED", "completed"},
+		{"CANCELLED", "cancelled"},
+	} {
+		t.Run(tc.vtodoStatus, func(t *testing.T) {
+			cal := buildCal(map[string]string{
+				"UID":     "status-task",
+				"SUMMARY": "Status carrier",
+				"DTSTAMP": "20260801T120000Z",
+				"STATUS":  tc.vtodoStatus,
+			})
+
+			task, err := VTODOToTask(cal, "preserve")
+			if err != nil {
+				t.Fatalf("VTODOToTask: %v", err)
+			}
+			if got := taskstore.NullStr(task.Status); got != tc.stored {
+				t.Errorf("stored status: got %q, want %q", got, tc.stored)
+			}
+
+			// And back out again, through the blob-overlay path — the one that
+			// rewrites STATUS from the DB column.
+			task.UpdatedAt = taskstore.TimeToMs(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
+			todo, err := FindVTODO(TaskToVTODO(task, "preserve"))
+			if err != nil {
+				t.Fatalf("FindVTODO: %v", err)
+			}
+			if got := todo.Props.Get("STATUS").Value; got != tc.vtodoStatus {
+				t.Errorf("emitted STATUS: got %q, want %q", got, tc.vtodoStatus)
+			}
+		})
+	}
+}

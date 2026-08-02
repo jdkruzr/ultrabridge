@@ -14,7 +14,9 @@ type TaskStatus string
 
 const (
 	StatusNeedsAction TaskStatus = "needsAction"
+	StatusInProcess   TaskStatus = "inProcess"
 	StatusCompleted   TaskStatus = "completed"
+	StatusCancelled   TaskStatus = "cancelled"
 )
 
 // Task represents a unified task entity.

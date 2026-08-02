@@ -184,7 +184,7 @@ func VTODOToTask(cal *ical.Calendar, dueTimeMode string) (*taskstore.Task, error
 		}
 	}
 	if status := todo.Props.Get("STATUS"); status != nil {
-		t.Status = taskstore.SqlStr(taskstore.SupernoteStatus(status.Value))
+		t.Status = taskstore.SqlStr(taskstore.FromCalDAVStatus(status.Value))
 	}
 	if due := todo.Props.Get("DUE"); due != nil {
 		dueTime, err := due.DateTime(time.UTC)

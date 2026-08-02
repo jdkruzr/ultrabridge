@@ -394,29 +394,44 @@ func TestSuperNoteStatus(t *testing.T) {
 			status: "unknown",
 			want:   "needsAction",
 		},
+		{
+			// Previously collapsed to needsAction, stopping Cfait's running timer.
+			name:   "in process",
+			status: "IN-PROCESS",
+			want:   "inProcess",
+		},
+		{
+			// Previously collapsed to needsAction, so cancelled tasks un-cancelled
+			// themselves on the next sync.
+			name:   "cancelled",
+			status: "CANCELLED",
+			want:   "cancelled",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := SupernoteStatus(tt.status)
+			got := FromCalDAVStatus(tt.status)
 			if got != tt.want {
-				t.Errorf("SupernoteStatus(%q) = %q, want %q", tt.status, got, tt.want)
+				t.Errorf("FromCalDAVStatus(%q) = %q, want %q", tt.status, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestCalDAVStatusSuperNoteStatusRoundTrip(t *testing.T) {
+func TestCalDAVStatusRoundTrip(t *testing.T) {
 	testCases := []string{
 		"completed",
 		"needsAction",
+		"inProcess",
+		"cancelled",
 		"",
 	}
 
 	for _, status := range testCases {
 		t.Run(status, func(t *testing.T) {
 			caldav := CalDAVStatus(status)
-			got := SupernoteStatus(caldav)
+			got := FromCalDAVStatus(caldav)
 			expected := status
 			if status == "" {
 				expected = "needsAction"
