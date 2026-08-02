@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 )
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -86,6 +87,31 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
+	// Idempotent ALTER for `completed_at` — the real completion instant, added
+	// 2026-08-02 when task timestamps moved to native semantics. Same
+	// pragma_table_info guard as the ForestNote columns above. Nullable with no
+	// default: NULL means "not completed", which is distinguishable from the 0
+	// that `last_modified` used to carry for never-synced rows.
+	var completedAtCol int
+	_ = db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='completed_at'`).Scan(&completedAtCol)
+	if completedAtCol == 0 {
+		if _, err := db.ExecContext(ctx,
+			`ALTER TABLE tasks ADD COLUMN completed_at INTEGER`); err != nil {
+			return fmt.Errorf("add completed_at column: %w", err)
+		}
+		total, suspect, err := backfillCompletedAt(ctx, db)
+		if err != nil {
+			return err
+		}
+		if total > 0 {
+			slog.Info("backfilled completed_at from last_modified",
+				"rows", total,
+				"suspect", suspect,
+				"note", "suspect rows were last written by Update, so their completion time may be an edit time")
+		}
+	}
+
 	// Partial index on the now-guaranteed-to-exist column. Only rows with a ForestNote origin
 	// carry the value, so this stays cheap even on the SPC-dominated row population. Powers the
 	// "list_tasks ?notebook_id=…" filter. Must run AFTER the ALTERs above (see note in stmts).
@@ -96,4 +122,39 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// backfillCompletedAt seeds the new completed_at column from last_modified for
+// already-completed tasks. Runs exactly once, immediately after the ALTER that
+// creates the column.
+//
+// last_modified is the best available source: under the Supernote convention it
+// held the completion instant. But UB's Update stamped it on *every* write, so
+// for any task edited after it was completed the stored value is the edit time,
+// not the completion time — and the true value is unrecoverable.
+//
+// Rather than guess, we report. A row whose last_modified exactly equals its
+// updated_at was written by Update (both are stamped from the same `now`), so
+// its backfilled completion time is suspect. A row where they differ was last
+// touched by Create, which preserves the caller's value, so it is trustworthy.
+// Returns the number of rows backfilled and how many of those are suspect;
+// the caller logs. Nothing is skipped or altered on the strength of the
+// heuristic — it only informs the operator.
+func backfillCompletedAt(ctx context.Context, db *sql.DB) (total, suspect int64, err error) {
+	const eligible = `status = 'completed' AND completed_at IS NULL AND last_modified > 0`
+
+	if err = db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE `+eligible).Scan(&total); err != nil {
+		return 0, 0, fmt.Errorf("count completed_at backfill candidates: %w", err)
+	}
+	if err = db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE `+eligible+` AND last_modified = updated_at`).Scan(&suspect); err != nil {
+		return 0, 0, fmt.Errorf("count suspect completed_at candidates: %w", err)
+	}
+
+	if _, err = db.ExecContext(ctx,
+		`UPDATE tasks SET completed_at = last_modified WHERE `+eligible); err != nil {
+		return 0, 0, fmt.Errorf("backfill completed_at: %w", err)
+	}
+	return total, suspect, nil
 }

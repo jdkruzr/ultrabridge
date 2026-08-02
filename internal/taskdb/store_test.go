@@ -755,3 +755,137 @@ func TestStore_HardDeleteOlderThan_NoMatchesReturnsZero(t *testing.T) {
 }
 
 
+
+// TestStore_RoundTripsCompletedAtAndUpdatedAt pins the native timestamp
+// columns: completed_at is caller-owned and survives an unrelated Update,
+// and updated_at is store-owned and advances on every write. Before the
+// native-semantics fix, completion time lived in last_modified — which
+// Update overwrote — so editing a completed task moved its completion date.
+func TestStore_RoundTripsCompletedAtAndUpdatedAt(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	// A task completed a month ago.
+	completedAt := time.Now().Add(-30 * 24 * time.Hour).UnixMilli()
+	task := &taskstore.Task{
+		TaskID:      "completed-last-month",
+		Title:       sql.NullString{String: "Finished last month", Valid: true},
+		Status:      sql.NullString{String: "completed", Valid: true},
+		CompletedAt: sql.NullInt64{Int64: completedAt, Valid: true},
+		IsDeleted:   "N",
+	}
+	if err := store.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := store.Get(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("Get after create: %v", err)
+	}
+	if !got.CompletedAt.Valid || got.CompletedAt.Int64 != completedAt {
+		t.Errorf("completed_at after create: got %v, want %d", got.CompletedAt, completedAt)
+	}
+	if got.UpdatedAt == 0 {
+		t.Error("updated_at after create: got 0, want a timestamp")
+	}
+	createUpdatedAt := got.UpdatedAt
+
+	// Edit something unrelated. Completion time must not move.
+	time.Sleep(2 * time.Millisecond)
+	got.Title = sql.NullString{String: "Finished last month (edited)", Valid: true}
+	if err := store.Update(ctx, got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	after, err := store.Get(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if !after.CompletedAt.Valid || after.CompletedAt.Int64 != completedAt {
+		t.Errorf("completed_at after unrelated edit: got %v, want %d (unchanged)",
+			after.CompletedAt, completedAt)
+	}
+	if after.UpdatedAt <= createUpdatedAt {
+		t.Errorf("updated_at after edit: got %d, want > %d", after.UpdatedAt, createUpdatedAt)
+	}
+}
+
+// TestBackfillCompletedAt covers the one-time migration that seeds completed_at
+// from last_modified, including the suspect-row heuristic. A row whose
+// last_modified equals its updated_at was last written by Update (which stamped
+// both from the same instant), so its completion time may really be an edit
+// time; a row where they differ was last written by Create, which preserves the
+// caller's value.
+func TestBackfillCompletedAt(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	insert := func(id, status string, lastModified, updatedAt int64) {
+		t.Helper()
+		_, err := store.db.ExecContext(ctx, `INSERT INTO tasks
+			(task_id, title, status, is_deleted, last_modified, created_at, updated_at,
+			 is_reminder_on, completed_at)
+			VALUES (?, ?, ?, 'N', ?, ?, ?, 'N', NULL)`,
+			id, id, status, lastModified, updatedAt, updatedAt)
+		if err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+
+	const (
+		completedInstant = int64(1_750_000_000_000)
+		editInstant      = int64(1_760_000_000_000)
+	)
+
+	// Completed, last written by Create → last_modified is a real completion time.
+	insert("trustworthy", "completed", completedInstant, editInstant)
+	// Completed, last written by Update → both stamps match; value is suspect.
+	insert("suspect", "completed", editInstant, editInstant)
+	// Not completed → must stay NULL.
+	insert("active", "needsAction", editInstant, editInstant)
+	// Completed but never synced (last_modified 0) → nothing usable to copy.
+	insert("no-timestamp", "completed", 0, editInstant)
+
+	total, suspect, err := backfillCompletedAt(ctx, store.db)
+	if err != nil {
+		t.Fatalf("backfillCompletedAt: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total backfilled: got %d, want 2 (trustworthy + suspect)", total)
+	}
+	if suspect != 1 {
+		t.Errorf("suspect: got %d, want 1", suspect)
+	}
+
+	got := func(id string) sql.NullInt64 {
+		t.Helper()
+		var v sql.NullInt64
+		if err := store.db.QueryRowContext(ctx,
+			`SELECT completed_at FROM tasks WHERE task_id = ?`, id).Scan(&v); err != nil {
+			t.Fatalf("select %s: %v", id, err)
+		}
+		return v
+	}
+
+	if v := got("trustworthy"); !v.Valid || v.Int64 != completedInstant {
+		t.Errorf("trustworthy completed_at: got %v, want %d", v, completedInstant)
+	}
+	if v := got("suspect"); !v.Valid || v.Int64 != editInstant {
+		t.Errorf("suspect completed_at: got %v, want %d (best available)", v, editInstant)
+	}
+	if v := got("active"); v.Valid {
+		t.Errorf("active completed_at: got %v, want NULL (task is not completed)", v)
+	}
+	if v := got("no-timestamp"); v.Valid {
+		t.Errorf("no-timestamp completed_at: got %v, want NULL (no usable source)", v)
+	}
+
+	// Idempotent: a second run finds nothing left to do.
+	total2, _, err := backfillCompletedAt(ctx, store.db)
+	if err != nil {
+		t.Fatalf("second backfillCompletedAt: %v", err)
+	}
+	if total2 != 0 {
+		t.Errorf("second run total: got %d, want 0 (idempotent)", total2)
+	}
+}

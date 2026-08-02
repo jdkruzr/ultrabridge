@@ -23,7 +23,8 @@ func NewStore(db *sql.DB) *Store {
 
 const taskColumns = `task_id, title, detail, status, importance, due_time,
 	completed_time, last_modified, recurrence, is_reminder_on, links, is_deleted,
-	ical_blob, created_at, forestnote_notebook_id, forestnote_page_id,
+	ical_blob, created_at, updated_at, completed_at,
+	forestnote_notebook_id, forestnote_page_id,
 	forestnote_notebook_name, forestnote_source`
 
 func (s *Store) List(ctx context.Context) ([]taskstore.Task, error) {
@@ -94,12 +95,12 @@ func (s *Store) Create(ctx context.Context, t *taskstore.Task) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO tasks
 		(task_id, title, detail, status, importance, due_time,
 		 completed_time, last_modified, recurrence, is_reminder_on,
-		 links, is_deleted, ical_blob, created_at, updated_at,
+		 links, is_deleted, ical_blob, created_at, updated_at, completed_at,
 		 forestnote_notebook_id, forestnote_page_id, forestnote_notebook_name, forestnote_source)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.TaskID, t.Title, t.Detail, t.Status, t.Importance, t.DueTime,
 		t.CompletedTime, t.LastModified, t.Recurrence, t.IsReminderOn,
-		t.Links, t.IsDeleted, t.ICalBlob, now, now,
+		t.Links, t.IsDeleted, t.ICalBlob, now, now, t.CompletedAt,
 		t.ForestNoteNotebookID, t.ForestNotePageID, t.ForestNoteNotebookName, t.ForestNoteSource)
 	if err != nil {
 		return fmt.Errorf("create task: %w", err)
@@ -115,12 +116,13 @@ func (s *Store) Update(ctx context.Context, t *taskstore.Task) error {
 		title = ?, detail = ?, status = ?, importance = ?, due_time = ?,
 		completed_time = ?, last_modified = ?, recurrence = ?,
 		is_reminder_on = ?, links = ?, ical_blob = ?, updated_at = ?,
+		completed_at = ?,
 		forestnote_notebook_id = ?, forestnote_page_id = ?,
 		forestnote_notebook_name = ?, forestnote_source = ?
 		WHERE task_id = ?`,
 		t.Title, t.Detail, t.Status, t.Importance, t.DueTime,
 		t.CompletedTime, t.LastModified, t.Recurrence,
-		t.IsReminderOn, t.Links, t.ICalBlob, now,
+		t.IsReminderOn, t.Links, t.ICalBlob, now, t.CompletedAt,
 		t.ForestNoteNotebookID, t.ForestNotePageID,
 		t.ForestNoteNotebookName, t.ForestNoteSource,
 		t.TaskID)
@@ -258,7 +260,7 @@ func scanTask(s scanner) (taskstore.Task, error) {
 		&t.TaskID, &t.Title, &t.Detail, &t.Status, &t.Importance,
 		&t.DueTime, &t.CompletedTime, &t.LastModified, &t.Recurrence,
 		&t.IsReminderOn, &t.Links, &t.IsDeleted, &t.ICalBlob,
-		&t.CreatedAt,
+		&t.CreatedAt, &t.UpdatedAt, &t.CompletedAt,
 		&t.ForestNoteNotebookID, &t.ForestNotePageID,
 		&t.ForestNoteNotebookName, &t.ForestNoteSource,
 	)
