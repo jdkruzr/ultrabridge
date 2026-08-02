@@ -184,3 +184,99 @@ func getWithPath(t *testing.T, fn http.HandlerFunc, key, val string) *httptest.R
 	fn(rec, req)
 	return rec
 }
+
+// cfaitBlob is a VTODO carrying properties UB has no columns for. Blob
+// passthrough is the only reason a rich CalDAV client (Cfait) works against
+// UltraBridge at all.
+const cfaitBlob = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Cfait//EN\r\n" +
+	"BEGIN:VTODO\r\nUID:rich-task\r\nDTSTAMP:20260801T120000Z\r\n" +
+	"SUMMARY:Recurring parent\r\nSTATUS:NEEDS-ACTION\r\n" +
+	"RRULE:FREQ=WEEKLY;INTERVAL=2\r\n" +
+	"RELATED-TO;RELTYPE=PARENT:parent-uid-123\r\n" +
+	"X-CFAIT-BLOCKED:TRUE\r\n" +
+	"BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nDESCRIPTION:Reminder\r\nEND:VALARM\r\n" +
+	"END:VTODO\r\nEND:VCALENDAR\r\n"
+
+// seedRichTask creates the kind of row a CalDAV PUT produces: structured
+// columns plus an ical blob and ForestNote provenance.
+func seedRichTask(t *testing.T, store TaskStore, id string) {
+	t.Helper()
+	tk := &taskstore.Task{
+		TaskID:               id,
+		Title:                sql.NullString{String: "Recurring parent", Valid: true},
+		Status:               sql.NullString{String: taskstore.StatusNeedsAction, Valid: true},
+		ICalBlob:             sql.NullString{String: cfaitBlob, Valid: true},
+		ForestNoteNotebookID: sql.NullString{String: "NB-1", Valid: true},
+		ForestNotePageID:     sql.NullString{String: "PG-1", Valid: true},
+		IsDeleted:            "N",
+	}
+	if err := store.Create(context.Background(), tk); err != nil {
+		t.Fatalf("seed rich task: %v", err)
+	}
+}
+
+// TestDeviceWriteDoesNotWipeBlob is the regression guard for the most damaging
+// leak of the vendor wire format into the store: the SPC write handlers built a
+// Task from wire fields only and handed it to Store.Update, whose SQL writes
+// ical_blob unconditionally. Completing a Cfait task *on the Supernote*
+// therefore nulled its blob and ForestNote columns, destroying RRULE, VALARM,
+// RELATED-TO hierarchy and every X-CFAIT-* property.
+//
+// The device knows nothing about those fields, so it can never send them. The
+// boundary must merge into stored state rather than overwrite it.
+func TestDeviceWriteDoesNotWipeBlob(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		invoke func(h *ScheduleHandler, body string) *httptest.ResponseRecorder
+		body   string
+	}{
+		{
+			name: "TaskUpdate",
+			invoke: func(h *ScheduleHandler, body string) *httptest.ResponseRecorder {
+				return postJSON(t, h.TaskUpdate, body)
+			},
+			body: `{"taskId":"rich-task","title":"Recurring parent","status":"completed","lastModified":1754000000000}`,
+		},
+		{
+			name: "TaskListUpdate (the path a device completion takes)",
+			invoke: func(h *ScheduleHandler, body string) *httptest.ResponseRecorder {
+				return postJSON(t, h.TaskListUpdate, body)
+			},
+			body: `{"updateScheduleTaskList":[{"taskId":"rich-task","title":"Recurring parent","status":"completed","lastModified":1754000000000}]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, store := newScheduleHandler(t)
+			seedRichTask(t, store, "rich-task")
+
+			if rec := tc.invoke(h, tc.body); !decodeSuccess(t, rec) {
+				t.Fatalf("handler did not succeed: %s", rec.Body.String())
+			}
+
+			got, err := store.Get(context.Background(), "rich-task")
+			if err != nil {
+				t.Fatalf("get after device write: %v", err)
+			}
+
+			if !got.ICalBlob.Valid || got.ICalBlob.String == "" {
+				t.Fatal("ical_blob was wiped by a device write")
+			}
+			for _, want := range []string{"RRULE:FREQ=WEEKLY", "RELATED-TO;RELTYPE=PARENT", "X-CFAIT-BLOCKED", "BEGIN:VALARM"} {
+				if !strings.Contains(got.ICalBlob.String, want) {
+					t.Errorf("ical_blob lost %q", want)
+				}
+			}
+			if !got.ForestNoteNotebookID.Valid || got.ForestNoteNotebookID.String != "NB-1" {
+				t.Errorf("forestnote_notebook_id: got %v, want NB-1", got.ForestNoteNotebookID)
+			}
+			if got.CreatedAt == 0 {
+				t.Error("created_at was zeroed by a device write")
+			}
+			// The device's actual intent must still land.
+			if taskstore.NullStr(got.Status) != taskstore.StatusCompleted {
+				t.Errorf("status: got %q, want completed", taskstore.NullStr(got.Status))
+			}
+		})
+	}
+}
+
