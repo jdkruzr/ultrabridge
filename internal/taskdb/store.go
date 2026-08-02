@@ -110,7 +110,12 @@ func (s *Store) Create(ctx context.Context, t *taskstore.Task) error {
 
 func (s *Store) Update(ctx context.Context, t *taskstore.Task) error {
 	now := time.Now().UnixMilli()
+	// last_modified mirrors updated_at: it is an SPC-facing field only, and the
+	// device requires it to be non-zero to show the task at all. It deliberately
+	// no longer carries the completion time — that lives in completed_at, which
+	// this method persists verbatim from the caller.
 	t.LastModified = sql.NullInt64{Int64: now, Valid: true}
+	t.UpdatedAt = now
 
 	result, err := s.db.ExecContext(ctx, `UPDATE tasks SET
 		title = ?, detail = ?, status = ?, importance = ?, due_time = ?,

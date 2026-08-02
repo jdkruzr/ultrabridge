@@ -699,9 +699,11 @@ func TestPostCompleteTaskUpdatesStatus(t *testing.T) {
 		t.Errorf("Task status is %q, want 'completed'", taskstore.NullStr(completedTask.Status))
 	}
 
-	// Verify completedTime is set
-	if !completedTask.CompletedTime.Valid || completedTask.CompletedTime.Int64 == 0 {
-		t.Errorf("Task CompletedTime should be set")
+	// Verify the completion instant is recorded. This is completed_at, not
+	// completed_time — the latter is SPC's creation-time field despite the name,
+	// and Complete() no longer touches it.
+	if !completedTask.CompletedAt.Valid || completedTask.CompletedAt.Int64 == 0 {
+		t.Errorf("Task CompletedAt should be set")
 	}
 
 	// Verify notifier was called

@@ -44,16 +44,20 @@ func ComputeCTag(tasks []Task) string {
 }
 
 // CompletionTime returns the actual completion timestamp for a completed task.
-// Per Supernote quirk: completed_time holds creation time, last_modified holds
-// the real completion time.
+//
+// Reads the dedicated completed_at column. It previously read last_modified,
+// following the Supernote convention where that field doubles as the completion
+// time — but that convention only holds for a client that never edits a task
+// after completing it. UB does, and its own Update stamped last_modified on
+// every write, so the completion time drifted to the last edit.
 func CompletionTime(t *Task) (time.Time, bool) {
 	if NullStr(t.Status) != "completed" {
 		return time.Time{}, false
 	}
-	if !t.LastModified.Valid {
+	if !t.CompletedAt.Valid || t.CompletedAt.Int64 == 0 {
 		return time.Time{}, false
 	}
-	return MsToTime(t.LastModified.Int64), true
+	return MsToTime(t.CompletedAt.Int64), true
 }
 
 // MsToTime converts a millisecond UTC timestamp to time.Time.

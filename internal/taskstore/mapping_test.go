@@ -191,8 +191,8 @@ func TestCompletionTime(t *testing.T) {
 		{
 			name: "completed task",
 			task: &Task{
-				Status:       sql.NullString{String: "completed", Valid: true},
-				LastModified: sql.NullInt64{Int64: 1704067200000, Valid: true}, // 2024-01-01 00:00:00 UTC
+				Status:      sql.NullString{String: "completed", Valid: true},
+				CompletedAt: sql.NullInt64{Int64: 1704067200000, Valid: true}, // 2024-01-01 00:00:00 UTC
 			},
 			wantTime:  time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 			wantValid: true,
@@ -200,29 +200,34 @@ func TestCompletionTime(t *testing.T) {
 		{
 			name: "not completed task",
 			task: &Task{
-				Status:       sql.NullString{String: "needsAction", Valid: true},
-				LastModified: sql.NullInt64{Int64: 1704067200000, Valid: true},
+				Status:      sql.NullString{String: "needsAction", Valid: true},
+				CompletedAt: sql.NullInt64{Int64: 1704067200000, Valid: true},
 			},
 			wantTime:  time.Time{},
 			wantValid: false,
 		},
 		{
-			name: "completed but no last_modified",
+			name: "completed but no completed_at",
 			task: &Task{
-				Status:       sql.NullString{String: "completed", Valid: true},
-				LastModified: sql.NullInt64{Valid: false},
+				Status:      sql.NullString{String: "completed", Valid: true},
+				CompletedAt: sql.NullInt64{Valid: false},
 			},
 			wantTime:  time.Time{},
 			wantValid: false,
 		},
 		{
-			name: "completed_time and last_modified differ",
+			// The whole point of the native column: neither of the two
+			// Supernote-shaped fields is the completion time. completed_time is
+			// the creation time (device convention) and last_modified is the
+			// write watermark. Only completed_at is authoritative.
+			name: "ignores completed_time and last_modified",
 			task: &Task{
 				Status:        sql.NullString{String: "completed", Valid: true},
 				CompletedTime: sql.NullInt64{Int64: 1704067200000, Valid: true}, // creation time
-				LastModified:  sql.NullInt64{Int64: 1704153600000, Valid: true}, // completion time (24h later)
+				LastModified:  sql.NullInt64{Int64: 1735689600000, Valid: true}, // a much later write
+				CompletedAt:   sql.NullInt64{Int64: 1704153600000, Valid: true}, // 2024-01-02
 			},
-			wantTime:  time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), // should be last_modified, not completed_time
+			wantTime:  time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
 			wantValid: true,
 		},
 	}

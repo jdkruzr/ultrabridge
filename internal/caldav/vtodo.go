@@ -38,9 +38,11 @@ func taskToVTODOFromFields(t *taskstore.Task, dueTimeMode string) *ical.Calendar
 	todo := ical.NewComponent("VTODO")
 	todo.Props.SetText("UID", t.TaskID)
 
-	// DTSTAMP is required by RFC 5545
-	if t.LastModified.Valid {
-		todo.Props.SetDateTime("DTSTAMP", taskstore.MsToTime(t.LastModified.Int64))
+	// DTSTAMP is required by RFC 5545. It tracks when this representation was
+	// written, which is updated_at — not last_modified, whose value is now
+	// reconstructed for the SPC wire rather than owned by the CalDAV layer.
+	if t.UpdatedAt > 0 {
+		todo.Props.SetDateTime("DTSTAMP", taskstore.MsToTime(t.UpdatedAt))
 	} else {
 		todo.Props.SetDateTime("DTSTAMP", time.Now().UTC())
 	}
@@ -59,12 +61,11 @@ func taskToVTODOFromFields(t *taskstore.Task, dueTimeMode string) *ical.Calendar
 		setDueOnTodo(todo, taskstore.MsToTime(t.DueTime), dueTimeMode)
 	}
 
-	if t.LastModified.Valid {
-		lm := taskstore.MsToTime(t.LastModified.Int64)
-		todo.Props.SetDateTime("LAST-MODIFIED", lm)
+	if t.UpdatedAt > 0 {
+		todo.Props.SetDateTime("LAST-MODIFIED", taskstore.MsToTime(t.UpdatedAt))
 	}
 
-	// Completion time: use last_modified (NOT completed_time) per Supernote quirk
+	// Completion time comes from the dedicated completed_at column.
 	if ct, ok := taskstore.CompletionTime(t); ok {
 		todo.Props.SetDateTime("COMPLETED", ct)
 	}
@@ -126,8 +127,8 @@ func taskToVTODOFromBlob(t *taskstore.Task, dueTimeMode string) *ical.Calendar {
 		delete(todo.Props, "DUE")
 	}
 
-	if t.LastModified.Valid {
-		lm := taskstore.MsToTime(t.LastModified.Int64)
+	if t.UpdatedAt > 0 {
+		lm := taskstore.MsToTime(t.UpdatedAt)
 		todo.Props.SetDateTime("DTSTAMP", lm)
 		todo.Props.SetDateTime("LAST-MODIFIED", lm)
 	}
@@ -223,19 +224,18 @@ func VTODOToTask(cal *ical.Calendar, dueTimeMode string) (*taskstore.Task, error
 		}
 	}
 
-	// Handle completion time mapping (Supernote quirk: last_modified = actual completion time)
+	// Completion time lands in the dedicated completed_at column. A completed
+	// VTODO that omits COMPLETED (RFC 5545 permits it) is stamped with now —
+	// the task demonstrably completed at some point at or before this write, and
+	// "now" is the tightest bound available.
 	if taskstore.NullStr(t.Status) == "completed" {
-		now := time.Now().UnixMilli()
+		completedAt := time.Now().UnixMilli()
 		if completed := todo.Props.Get("COMPLETED"); completed != nil {
-			ct, err := completed.DateTime(time.UTC)
-			if err == nil {
-				t.LastModified = sql.NullInt64{Int64: taskstore.TimeToMs(ct), Valid: true}
-			} else {
-				t.LastModified = sql.NullInt64{Int64: now, Valid: true}
+			if ct, err := completed.DateTime(time.UTC); err == nil {
+				completedAt = taskstore.TimeToMs(ct)
 			}
-		} else {
-			t.LastModified = sql.NullInt64{Int64: now, Valid: true}
 		}
+		t.CompletedAt = sql.NullInt64{Int64: completedAt, Valid: true}
 	}
 
 	// Extract ForestNote provenance (X-FORESTNOTE-*) into structured columns so
