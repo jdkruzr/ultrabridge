@@ -622,7 +622,16 @@ func main() {
 			logger.Warn(fmt.Sprintf(format, args...))
 		},
 	})
-	mux.Handle("/caldav/", authMW.Wrap(caldavWithProppatch))
+	// Collection-level change detection (RFC 6578), layered on the same way the
+	// PROPPATCH and GET stubs are: go-webdav implements neither the
+	// sync-collection REPORT nor the properties that advertise it, and offers no
+	// Backend hook for either. Without these every client re-enumerates the whole
+	// collection on every sync. Both are method-scoped and pass everything else
+	// straight through.
+	caldavWithSync := ubcaldav.SyncPropsStub(
+		ubcaldav.SyncCollectionStub(caldavWithProppatch, store, backend),
+		store, backend)
+	mux.Handle("/caldav/", authMW.Wrap(caldavWithSync))
 	// Register both trailing-slash variants because Go's net/http ServeMux
 	// treats "/.well-known/caldav" (exact) and "/.well-known/caldav/" (prefix)
 	// as distinct patterns. RFC 6764 uses the no-slash form but some clients

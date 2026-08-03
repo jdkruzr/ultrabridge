@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- **Collection-level change detection (RFC 6578).** Every CalDAV client was re-enumerating the whole task collection on every sync, because UltraBridge served no way to ask "did anything change?". `PROPFIND` for `CS:getctag` or `DAV:sync-token` came back 404, and a `sync-collection` REPORT came back `400 unsupported REPORT root`.
+
+  Now: an empty token returns the live set and a token to resume from; a subsequent token returns only what changed, with deletions reported as removals; `DAV:limit` truncates and the token resumes at the boundary; `calendar-data` can be requested inline, rendered through the same path as a `GET` so attachments behave identically. `DAV:supported-report-set` is served too — go-webdav never emitted it, so clients had no way to discover that *any* report was supported.
+
+  The token is `MAX(updated_at)` across all rows **including tombstones**. Soft deletes stamp `updated_at`, so it moves on delete; a live-only maximum does not, because deleting any task except the most recent leaves it unchanged and the client never finds out. That is the trap that makes naive ctags wrong, and it is why the long-dead `ComputeCTag` (`MAX(last_modified)` over non-deleted rows) was retired rather than wired up.
+
+  `CS:getctag` is served alongside, carrying the same value, so clients that ask for it first — Cfait does — get their fast path without a wasted round trip.
+
 ### Fixed
 
 - **Editing a completed task moved its completion date.** Verified against a live instance: a title-only edit shifted `COMPLETED` from `20260701T120000Z` to the moment of the write, discarding the client's correct value even though it was re-sent. Completion time was read from `last_modified`, following the Supernote convention documented in `docs/PRIVATE_CLOUD_REFERENCE.md` ("use as COMPLETED when status=completed") — but that convention only holds for a client that never edits a task after completing it. The device doesn't; UltraBridge does, and its own `Update` stamped that column on every write. Completion now lives in a dedicated `completed_at` column, end to end.

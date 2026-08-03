@@ -899,3 +899,181 @@ func TestBackfillCompletedAt(t *testing.T) {
 		t.Errorf("second run: got (%d, %d), want (0, 0) — not idempotent", b2, w2)
 	}
 }
+
+// TestMaxUpdatedAtAll_MovesOnDeletion is the reason a CalDAV sync token can't
+// reuse MaxUpdatedAt. A collection token must change when anything changes,
+// deletions included — a token that holds steady across a delete leaves the
+// client believing nothing happened. MaxUpdatedAt excludes tombstones (it feeds
+// the SPC sync token and must keep doing so); MaxUpdatedAtAll does not.
+func TestMaxUpdatedAtAll_MovesOnDeletion(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	older := &taskstore.Task{TaskID: "older", Title: sql.NullString{String: "older", Valid: true}, IsDeleted: "N"}
+	if err := store.Create(ctx, older); err != nil {
+		t.Fatalf("create older: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	newer := &taskstore.Task{TaskID: "newer", Title: sql.NullString{String: "newer", Valid: true}, IsDeleted: "N"}
+	if err := store.Create(ctx, newer); err != nil {
+		t.Fatalf("create newer: %v", err)
+	}
+
+	liveBefore, err := store.MaxUpdatedAt(ctx)
+	if err != nil {
+		t.Fatalf("MaxUpdatedAt: %v", err)
+	}
+
+	// Delete the OLDER task. Its tombstone gets a fresh updated_at, but it no
+	// longer counts toward the live max — so the live watermark cannot move.
+	time.Sleep(2 * time.Millisecond)
+	if err := store.Delete(ctx, "older"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	liveAfter, err := store.MaxUpdatedAt(ctx)
+	if err != nil {
+		t.Fatalf("MaxUpdatedAt after delete: %v", err)
+	}
+	if liveAfter != liveBefore {
+		t.Errorf("precondition failed: MaxUpdatedAt moved (%d -> %d); this test relies on it not moving",
+			liveBefore, liveAfter)
+	}
+
+	allAfter, err := store.MaxUpdatedAtAll(ctx)
+	if err != nil {
+		t.Fatalf("MaxUpdatedAtAll: %v", err)
+	}
+	if allAfter <= liveAfter {
+		t.Errorf("MaxUpdatedAtAll did not move on deletion: got %d, want > %d", allAfter, liveAfter)
+	}
+}
+
+// TestListChangedSince_IncludesTombstones covers the query behind the
+// sync-collection REPORT: it must surface deleted rows so they can be reported
+// as removed, and the bound is inclusive so writes landing in the same
+// millisecond as a token can't slip through.
+func TestListChangedSince_IncludesTombstones(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	insert := func(id, isDeleted string, updatedAt int64) {
+		t.Helper()
+		_, err := store.db.ExecContext(ctx, `INSERT INTO tasks
+			(task_id, title, status, is_deleted, last_modified, created_at, updated_at, is_reminder_on)
+			VALUES (?, ?, 'needsAction', ?, ?, ?, ?, 'N')`,
+			id, id, isDeleted, updatedAt, updatedAt, updatedAt)
+		if err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+
+	const token = int64(2000)
+	insert("before", "N", token-1000)
+	insert("at-boundary", "N", token) // inclusive bound must catch this
+	insert("after", "N", token+1000)
+	insert("deleted-after", "Y", token+2000)
+
+	got, err := store.ListChangedSince(ctx, token)
+	if err != nil {
+		t.Fatalf("ListChangedSince: %v", err)
+	}
+	ids := map[string]string{}
+	for _, tk := range got {
+		ids[tk.TaskID] = tk.IsDeleted
+	}
+	if _, ok := ids["before"]; ok {
+		t.Error("returned a row older than the token")
+	}
+	for _, want := range []string{"at-boundary", "after", "deleted-after"} {
+		if _, ok := ids[want]; !ok {
+			t.Errorf("missing %q from changed set", want)
+		}
+	}
+	if ids["deleted-after"] != "Y" {
+		t.Errorf("tombstone lost its is_deleted flag: got %q", ids["deleted-after"])
+	}
+}
+
+// TestSyncFloor_RecordedOnlyWhenRowsArePurged pins token expiry. Hard-purging
+// tombstones destroys the evidence a client needs to learn about those
+// deletions, so any token older than the purge cutoff can no longer be answered
+// honestly and must be rejected. A purge that removes nothing changes nothing.
+func TestSyncFloor_RecordedOnlyWhenRowsArePurged(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UnixMilli()
+	dayMs := int64(24 * 60 * 60 * 1000)
+
+	floor, err := store.SyncFloor(ctx)
+	if err != nil {
+		t.Fatalf("SyncFloor on fresh store: %v", err)
+	}
+	if floor != 0 {
+		t.Errorf("fresh store floor: got %d, want 0 (every token is answerable)", floor)
+	}
+
+	// Nothing eligible → no purge → floor unchanged.
+	if _, _, err := store.HardDeleteOlderThan(ctx, now-90*dayMs); err != nil {
+		t.Fatalf("HardDeleteOlderThan (no matches): %v", err)
+	}
+	if floor, _ = store.SyncFloor(ctx); floor != 0 {
+		t.Errorf("floor moved on a purge that removed nothing: got %d, want 0", floor)
+	}
+
+	// An ancient tombstone that really gets purged → floor records the cutoff.
+	_, err = store.db.ExecContext(ctx, `INSERT INTO tasks
+		(task_id, title, status, is_deleted, last_modified, created_at, updated_at, is_reminder_on)
+		VALUES ('ancient', 'ancient', 'needsAction', 'Y', ?, ?, ?, 'N')`,
+		now-60*dayMs, now-60*dayMs, now-60*dayMs)
+	if err != nil {
+		t.Fatalf("insert ancient: %v", err)
+	}
+	cutoff := now - 30*dayMs
+	purged, _, err := store.HardDeleteOlderThan(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("HardDeleteOlderThan: %v", err)
+	}
+	if purged != 1 {
+		t.Fatalf("purged: got %d, want 1", purged)
+	}
+	floor, err = store.SyncFloor(ctx)
+	if err != nil {
+		t.Fatalf("SyncFloor after purge: %v", err)
+	}
+	if floor != cutoff {
+		t.Errorf("floor after purge: got %d, want the cutoff %d", floor, cutoff)
+	}
+}
+
+// TestMaxUpdatedAtAll_MovesOnUpdate keeps the coverage that
+// TestPutCalendarObjectCreateAndUpdateCTag used to provide against the removed
+// ComputeCTag helper: a collection change token has to move when a task is
+// edited, not only when one is added or removed.
+func TestMaxUpdatedAtAll_MovesOnUpdate(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	task := &taskstore.Task{TaskID: "edited", Title: sql.NullString{String: "before", Valid: true}, IsDeleted: "N"}
+	if err := store.Create(ctx, task); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	before, err := store.MaxUpdatedAtAll(ctx)
+	if err != nil {
+		t.Fatalf("MaxUpdatedAtAll: %v", err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	task.Title = sql.NullString{String: "after", Valid: true}
+	if err := store.Update(ctx, task); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	after, err := store.MaxUpdatedAtAll(ctx)
+	if err != nil {
+		t.Fatalf("MaxUpdatedAtAll after update: %v", err)
+	}
+	if after <= before {
+		t.Errorf("token did not move on update: got %d, want > %d", after, before)
+	}
+}

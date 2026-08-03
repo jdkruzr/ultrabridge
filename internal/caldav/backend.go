@@ -273,7 +273,12 @@ func (b *Backend) collection() gocaldav.Calendar {
 	}
 }
 
-func (b *Backend) taskToCalendarObject(t *taskstore.Task) *gocaldav.CalendarObject {
+// RenderCalendar builds the VCALENDAR a client should receive for a task,
+// including the serve-time attachment work. Exported because the
+// sync-collection report renders calendar-data through the same path — sharing
+// it is what keeps de-bloated attachments and the synthesized ForestNote render
+// identical whether the client GETs the resource or receives it inline.
+func (b *Backend) RenderCalendar(t *taskstore.Task) *ical.Calendar {
 	cal := TaskToVTODO(t, b.dueTimeMode)
 	// Restore any de-bloated inline-binary ATTACH from the content store so the
 	// client receives byte-equivalent content (no-op when unwired / none).
@@ -284,11 +289,21 @@ func (b *Backend) taskToCalendarObject(t *taskstore.Task) *gocaldav.CalendarObje
 	// third-party clients can open the handwriting page (serve-time only, never
 	// stored). No-op without a signer + base URL or for non-FN tasks.
 	AddFNRenderAttach(cal, t, b.attach)
+	return cal
+}
+
+// ObjectPath is the href of a task resource within the collection. Shared with
+// the sync-collection report so both surfaces address resources identically.
+func (b *Backend) ObjectPath(taskID string) string {
+	return b.prefix + "/user/calendars/tasks/" + taskID + ".ics"
+}
+
+func (b *Backend) taskToCalendarObject(t *taskstore.Task) *gocaldav.CalendarObject {
 	return &gocaldav.CalendarObject{
-		Path:    b.prefix + "/user/calendars/tasks/" + t.TaskID + ".ics",
+		Path:    b.ObjectPath(t.TaskID),
 		ModTime: taskstore.MsToTime(t.LastModified.Int64),
 		ETag:    taskstore.ComputeETag(t),
-		Data:    cal,
+		Data:    b.RenderCalendar(t),
 	}
 }
 
