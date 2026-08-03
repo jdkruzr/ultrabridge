@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/sysop/ultrabridge/internal/taskstore"
@@ -228,6 +230,24 @@ func (s *Store) HardDeleteOlderThan(ctx context.Context, cutoffMs int64) (purged
 	if err = tx.Commit(); err != nil {
 		return 0, 0, fmt.Errorf("commit hard delete tx: %w", err)
 	}
+
+	// Purging destroys the tombstones a CalDAV client would need to learn about
+	// those deletions, so any sync token older than this cutoff can no longer be
+	// answered honestly. Record it; the sync-collection handler rejects such
+	// tokens and the client falls back to a full resync. Only on a purge that
+	// actually removed something — a no-op purge invalidates nothing.
+	//
+	// Deliberately outside the transaction: the rows are already gone, and
+	// failing to record the floor must not roll that back. The consequence of a
+	// missed floor is a client that keeps a token it should have been asked to
+	// refresh, so it is logged rather than swallowed.
+	if purged > 0 {
+		if ferr := s.raiseSyncFloor(ctx, cutoffMs); ferr != nil {
+			slog.Warn("purged tombstones but failed to raise the sync floor; "+
+				"clients holding older sync tokens may miss those deletions",
+				"cutoff_ms", cutoffMs, "purged", purged, "err", ferr)
+		}
+	}
 	return purged, skipped, nil
 }
 
@@ -257,6 +277,92 @@ func (s *Store) MaxUpdatedAt(ctx context.Context) (int64, error) {
 		return 0, nil
 	}
 	return max.Int64, nil
+}
+
+// syncFloorAdapterID is the sync_state row holding the CalDAV sync-token floor:
+// the purge cutoff below which tokens can no longer be answered. sync_state was
+// created for outbound device adapters and never used; this is its first
+// occupant.
+const syncFloorAdapterID = "caldav-sync-floor"
+
+// MaxUpdatedAtAll returns the highest updated_at across **every** row,
+// tombstones included. This is the CalDAV collection change token.
+//
+// Distinct from MaxUpdatedAt, which excludes soft-deleted rows and feeds the SPC
+// sync token. A collection token must move when anything changes, and deleting
+// any task other than the most recent one leaves the live-only maximum exactly
+// where it was — so a client polling that value would never learn about the
+// deletion. Delete() stamps updated_at before flipping is_deleted, so counting
+// tombstones makes the token move.
+func (s *Store) MaxUpdatedAtAll(ctx context.Context) (int64, error) {
+	var max sql.NullInt64
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT MAX(updated_at) FROM tasks").Scan(&max); err != nil {
+		return 0, fmt.Errorf("max updated_at (all rows): %w", err)
+	}
+	if !max.Valid {
+		return 0, nil
+	}
+	return max.Int64, nil
+}
+
+// ListChangedSince returns every row written at or after sinceMs, tombstones
+// included — callers split on IsDeleted to decide between reporting a resource
+// and reporting its removal.
+//
+// The bound is deliberately **inclusive**. Timestamps are milliseconds and a
+// bulk device sync writes several rows inside one, so an exclusive comparison
+// against a token equal to one of those stamps would silently drop the rest.
+// Inclusive re-reports the boundary rows; the client compares ETags, finds them
+// unchanged, and does nothing. Over-reporting costs a little bandwidth,
+// under-reporting costs silent divergence.
+func (s *Store) ListChangedSince(ctx context.Context, sinceMs int64) ([]taskstore.Task, error) {
+	return s.listRows(ctx,
+		fmt.Sprintf("SELECT %s FROM tasks WHERE updated_at >= %d", taskColumns, sinceMs))
+}
+
+// SyncFloor returns the oldest still-answerable sync token, or 0 when every
+// token is answerable (nothing has ever been hard-purged).
+func (s *Store) SyncFloor(ctx context.Context) (int64, error) {
+	var floor sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT last_sync_token FROM sync_state WHERE adapter_id = ?`, syncFloorAdapterID).Scan(&floor)
+	if err == sql.ErrNoRows || !floor.Valid {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read sync floor: %w", err)
+	}
+	ms, convErr := strconv.ParseInt(floor.String, 10, 64)
+	if convErr != nil {
+		// Unparseable floor is treated as "no floor" rather than as a hard
+		// error: rejecting every sync token is a far worse failure than
+		// occasionally answering one we could have refused.
+		return 0, nil
+	}
+	return ms, nil
+}
+
+// raiseSyncFloor records a purge cutoff, keeping the highest seen. Called only
+// when a purge actually removed rows.
+func (s *Store) raiseSyncFloor(ctx context.Context, cutoffMs int64) error {
+	current, err := s.SyncFloor(ctx)
+	if err != nil {
+		return err
+	}
+	if cutoffMs <= current {
+		return nil
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO sync_state (adapter_id, last_sync_token, last_sync_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(adapter_id) DO UPDATE SET last_sync_token = excluded.last_sync_token,
+		                                       last_sync_at = excluded.last_sync_at`,
+		syncFloorAdapterID, strconv.FormatInt(cutoffMs, 10), time.Now().UnixMilli())
+	if err != nil {
+		return fmt.Errorf("record sync floor: %w", err)
+	}
+	return nil
 }
 
 type scanner interface {
