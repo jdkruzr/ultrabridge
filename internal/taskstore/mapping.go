@@ -31,17 +31,6 @@ func ComputeETag(t *Task) string {
 	return fmt.Sprintf("%x", md5.Sum([]byte(data)))
 }
 
-// ComputeCTag returns the max last_modified value as a string,
-// suitable for use as a CalDAV collection CTag.
-func ComputeCTag(tasks []Task) string {
-	var max int64
-	for _, t := range tasks {
-		if t.LastModified.Valid && t.LastModified.Int64 > max {
-			max = t.LastModified.Int64
-		}
-	}
-	return strconv.FormatInt(max, 10)
-}
 
 // CompletionTime returns the actual completion timestamp for a completed task.
 //

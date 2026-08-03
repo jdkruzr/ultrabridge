@@ -125,61 +125,6 @@ func TestComputeETag(t *testing.T) {
 	}
 }
 
-func TestComputeCTag(t *testing.T) {
-	tests := []struct {
-		name  string
-		tasks []Task
-		want  string
-	}{
-		{
-			name:  "empty list",
-			tasks: []Task{},
-			want:  "0",
-		},
-		{
-			name: "single task",
-			tasks: []Task{
-				{LastModified: sql.NullInt64{Int64: 1000, Valid: true}},
-			},
-			want: "1000",
-		},
-		{
-			name: "multiple tasks",
-			tasks: []Task{
-				{LastModified: sql.NullInt64{Int64: 1000, Valid: true}},
-				{LastModified: sql.NullInt64{Int64: 5000, Valid: true}},
-				{LastModified: sql.NullInt64{Int64: 3000, Valid: true}},
-			},
-			want: "5000",
-		},
-		{
-			name: "some tasks without last_modified",
-			tasks: []Task{
-				{LastModified: sql.NullInt64{Int64: 1000, Valid: true}},
-				{LastModified: sql.NullInt64{Valid: false}},
-				{LastModified: sql.NullInt64{Int64: 2000, Valid: true}},
-			},
-			want: "2000",
-		},
-		{
-			name: "all tasks without last_modified",
-			tasks: []Task{
-				{LastModified: sql.NullInt64{Valid: false}},
-				{LastModified: sql.NullInt64{Valid: false}},
-			},
-			want: "0",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ComputeCTag(tt.tasks)
-			if got != tt.want {
-				t.Errorf("ComputeCTag() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestCompletionTime(t *testing.T) {
 	tests := []struct {

@@ -1045,3 +1045,35 @@ func TestSyncFloor_RecordedOnlyWhenRowsArePurged(t *testing.T) {
 		t.Errorf("floor after purge: got %d, want the cutoff %d", floor, cutoff)
 	}
 }
+
+// TestMaxUpdatedAtAll_MovesOnUpdate keeps the coverage that
+// TestPutCalendarObjectCreateAndUpdateCTag used to provide against the removed
+// ComputeCTag helper: a collection change token has to move when a task is
+// edited, not only when one is added or removed.
+func TestMaxUpdatedAtAll_MovesOnUpdate(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+
+	task := &taskstore.Task{TaskID: "edited", Title: sql.NullString{String: "before", Valid: true}, IsDeleted: "N"}
+	if err := store.Create(ctx, task); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	before, err := store.MaxUpdatedAtAll(ctx)
+	if err != nil {
+		t.Fatalf("MaxUpdatedAtAll: %v", err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	task.Title = sql.NullString{String: "after", Valid: true}
+	if err := store.Update(ctx, task); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	after, err := store.MaxUpdatedAtAll(ctx)
+	if err != nil {
+		t.Fatalf("MaxUpdatedAtAll after update: %v", err)
+	}
+	if after <= before {
+		t.Errorf("token did not move on update: got %d, want > %d", after, before)
+	}
+}

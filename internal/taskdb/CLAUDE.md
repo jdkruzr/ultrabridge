@@ -1,6 +1,6 @@
 # Task Database
 
-Last verified: 2026-08-02 (completed_at column + backfill; watermarks moved to updated_at)
+Last verified: 2026-08-03 (CalDAV sync-token support: MaxUpdatedAtAll, ListChangedSince, sync floor)
 
 ## Purpose
 Opens and migrates the SQLite database used for task storage.
@@ -33,6 +33,8 @@ Implements the `caldav.TaskStore` interface for CalDAV and web UI task operation
 - Timestamps are always millisecond UTC unix (0 = unset)
 - `completed_at` (nullable) holds the real completion instant; `completed_time` still holds **creation** time and `last_modified` mirrors `updated_at`, both kept only for SPC wire compatibility
 - `updated_at` is the write watermark: `MaxUpdatedAt`, `ComputeETag`, and the hard-purge predicate all key off it
+- Two maxima, deliberately: `MaxUpdatedAt` excludes tombstones and feeds the **SPC** sync token; `MaxUpdatedAtAll` includes them and is the **CalDAV** collection token. Only the second moves when a task is deleted, which a collection token must
+- `sync_state` holds the CalDAV sync floor under `adapter_id = 'caldav-sync-floor'` — the purge cutoff below which sync tokens can no longer be answered. Recorded by `HardDeleteOlderThan` only when it actually removed rows
 - `is_deleted` is "Y" or "N", never NULL
 - Soft deletes only: Delete sets is_deleted='Y', never removes rows
 - `ical_blob` column exists but is unused until Phase 2

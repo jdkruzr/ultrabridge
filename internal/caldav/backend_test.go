@@ -200,59 +200,6 @@ func TestListCalendarsName(t *testing.T) {
 	}
 }
 
-// TestPutCalendarObjectCreateAndUpdateCTag verifies AC2.4: CTag changes on write operations
-func TestPutCalendarObjectCreateAndUpdateCTag(t *testing.T) {
-	store := newMockTaskStore()
-	backend := NewBackend(store, "/caldav", "Test Collection", "preserve", nil)
-	ctx := context.Background()
-
-	// Create a task via VTODO
-	cal := ical.NewCalendar()
-	cal.Props.SetText("PRODID", "-//Test//Test//EN")
-	cal.Props.SetText("VERSION", "2.0")
-
-	todo := ical.NewComponent("VTODO")
-	todo.Props.SetText("UID", "test-task-1")
-	todo.Props.SetText("SUMMARY", "Test Task")
-	todo.Props.SetText("STATUS", "NEEDS-ACTION")
-	cal.Children = append(cal.Children, todo)
-
-	_, err := backend.PutCalendarObject(ctx, "/caldav/user/calendars/tasks/test-task-1.ics", cal, nil)
-	if err != nil {
-		t.Fatalf("PutCalendarObject (create) failed: %v", err)
-	}
-
-	// Get initial CTag
-	tasks1, _ := store.List(ctx)
-	ctag1 := taskstore.ComputeCTag(tasks1)
-
-	// Update the task (change status)
-	todo2 := ical.NewComponent("VTODO")
-	todo2.Props.SetText("UID", "test-task-1")
-	todo2.Props.SetText("SUMMARY", "Test Task Updated")
-	todo2.Props.SetText("STATUS", "COMPLETED")
-	cal2 := ical.NewCalendar()
-	cal2.Props.SetText("PRODID", "-//Test//Test//EN")
-	cal2.Props.SetText("VERSION", "2.0")
-	cal2.Children = append(cal2.Children, todo2)
-
-	// Sleep 1ms to ensure the updated task's last_modified timestamp differs from the original.
-	// Since Create sets LastModified to time.Now().UnixMilli(), we need a visible time difference
-	// before Update runs to get a different millisecond value for CTag computation.
-	time.Sleep(1 * time.Millisecond)
-	_, err = backend.PutCalendarObject(ctx, "/caldav/user/calendars/tasks/test-task-1.ics", cal2, nil)
-	if err != nil {
-		t.Fatalf("PutCalendarObject (update) failed: %v", err)
-	}
-
-	// Get updated CTag
-	tasks2, _ := store.List(ctx)
-	ctag2 := taskstore.ComputeCTag(tasks2)
-
-	if ctag1 == ctag2 {
-		t.Errorf("CTag did not change after update: ctag1=%s, ctag2=%s", ctag1, ctag2)
-	}
-}
 
 // TestPutCalendarObjectRejectVEVENT verifies AC2.5: VEVENTs are rejected
 func TestPutCalendarObjectRejectVEVENT(t *testing.T) {

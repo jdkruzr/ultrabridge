@@ -1,14 +1,14 @@
 # CalDAV Backend
 
-Last verified: 2026-08-02 (COMPLETED sourced from completed_at; STATUS carries all four VTODO states)
+Last verified: 2026-08-03 (sync-collection REPORT + sync-token/getctag/supported-report-set on PROPFIND)
 
 ## Purpose
 Exposes tasks as a standard CalDAV VTODO collection so any CalDAV client
 (Apple Reminders, Thunderbird, DAVx5, 2Do, Tasks.org) can read and write tasks.
 
 ## Contracts
-- **Exposes**: `Backend` (implements `gocaldav.Backend`), `TaskStore` interface, `SyncNotifier` interface, `ProppatchStub` http middleware. Plus the metadata helpers: `BlobMetadata`, `ParseBlobMetadata(blob) BlobMetadata`, `BuildBlobWithMetadata(taskID, meta) string`, `BlobMetadataPatch`, `MergeBlobMetadataPatch(taskID, existingBlob, patch) string`.
-- **Guarantees**: Single fixed collection at `{prefix}/tasks/`. Only VTODO supported (VEVENT rejected). Writes trigger sync notification (graceful degradation if notifier down). ETags computed from mutable fields (via `updated_at`). All four RFC 5545 STATUS values round-trip (`NEEDS-ACTION`, `IN-PROCESS`, `COMPLETED`, `CANCELLED`); `COMPLETED` is sourced from and written to `completed_at`, while `LAST-MODIFIED`/`DTSTAMP` track `updated_at`. Collection display name is mutable at runtime via client PROPPATCH of `DAV:displayname`. `VTODOToTask` populates the four `Task.ForestNote*` columns from `X-FORESTNOTE-*` properties via `extractForestNoteMetadata` (defensive: missing props leave the columns NULL). `ParseBlobMetadata` and the merge helpers never error — corrupt/blank blobs degrade to zero-value output.
+- **Exposes**: `Backend` (implements `gocaldav.Backend`), `TaskStore` interface, `SyncNotifier` interface, `SyncStore` interface, the `ProppatchStub` / `GetOnCollectionStub` / `SyncCollectionStub` / `SyncPropsStub` http middlewares, and `Backend.RenderCalendar` / `Backend.ObjectPath` (shared with the sync report so inline and fetched bodies are identical). Plus the metadata helpers: `BlobMetadata`, `ParseBlobMetadata(blob) BlobMetadata`, `BuildBlobWithMetadata(taskID, meta) string`, `BlobMetadataPatch`, `MergeBlobMetadataPatch(taskID, existingBlob, patch) string`.
+- **Guarantees**: Single fixed collection at `{prefix}/tasks/`. Only VTODO supported (VEVENT rejected). Collection-level change detection via RFC 6578 `sync-collection` plus the `DAV:sync-token` / `CS:getctag` / `DAV:supported-report-set` properties — all four implemented as middleware because go-webdav supports none of them and exposes no Backend hook (see Gotchas). Writes trigger sync notification (graceful degradation if notifier down). ETags computed from mutable fields (via `updated_at`). All four RFC 5545 STATUS values round-trip (`NEEDS-ACTION`, `IN-PROCESS`, `COMPLETED`, `CANCELLED`); `COMPLETED` is sourced from and written to `completed_at`, while `LAST-MODIFIED`/`DTSTAMP` track `updated_at`. Collection display name is mutable at runtime via client PROPPATCH of `DAV:displayname`. `VTODOToTask` populates the four `Task.ForestNote*` columns from `X-FORESTNOTE-*` properties via `extractForestNoteMetadata` (defensive: missing props leave the columns NULL). `ParseBlobMetadata` and the merge helpers never error — corrupt/blank blobs degrade to zero-value output.
 - **Expects**: A `TaskStore` implementation and a `SyncNotifier`. Caller sets HTTP prefix. Caller wraps the CalDAV `http.Handler` with `ProppatchStub` if PROPPATCH acceptance is desired (it is — see Gotchas).
 
 ## Dependencies
@@ -60,3 +60,36 @@ Exposes tasks as a standard CalDAV VTODO collection so any CalDAV client
 ### CalDAV sync is intrinsically pull-based
 
 There is no RFC-standard way for UltraBridge to push "something changed" to a CalDAV client. The server's `STARTSYNC` socket.io event is a UB-internal mechanism for the device-pipeline side, not something any CalDAV client speaks. Any real-time-feeling behavior in a CalDAV client is just that client polling aggressively (DAVx5 push sync, Apple Reminders' short polling interval, etc.).
+
+## sync-collection (RFC 6578)
+
+go-webdav dispatches only `calendar-query` and `calendar-multiget`, answers any
+other REPORT with "unsupported REPORT root", returns `sync-token`/`getctag`
+inside its 404 propstat, and never emits `supported-report-set` at all. None of
+that is reachable through `Backend`, so `SyncCollectionStub` and
+`SyncPropsStub` intercept by method and pass everything else through — the same
+tactic `ProppatchStub` already uses.
+
+- **Token** is `urn:ultrabridge:sync:<ms>`, carrying `MaxUpdatedAtAll` — the
+  newest write across *all* rows, tombstones included. Soft deletes stamp
+  `updated_at`, so the token moves on delete. A live-only maximum would not:
+  deleting any task except the most recent leaves it unchanged, and the client
+  never learns. That is why the old `ComputeCTag` could not be reused, and why
+  it was retired rather than wired up.
+- **`getctag` and `sync-token` carry the same value.** Keep it that way; a
+  client seeing them disagree could bootstrap against the wrong one.
+- **The changed-since query is inclusive.** Milliseconds are coarse enough that
+  a bulk device sync writes several rows inside one, so an exclusive bound
+  would drop rows. Boundary rows get re-reported and the client's ETag
+  comparison discards them. Over-reporting is cheap; under-reporting is silent
+  divergence.
+- **`SyncPropsStub` splices rather than re-encodes.** When a request mixes our
+  properties with the library's, ours are stripped from the request and a
+  propstat is inserted at a byte offset in the library's response. Round-
+  tripping the multistatus through `encoding/xml` would be tidier but can
+  disturb namespace prefixes. If the response element can't be located, the
+  library's output is emitted unchanged — our properties are lost, the document
+  stays valid.
+- **Purge invalidates tokens.** `HardDeleteOlderThan` records its cutoff as the
+  sync floor; older tokens get 403 + `DAV:valid-sync-token` and the client
+  resyncs in full.
