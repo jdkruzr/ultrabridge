@@ -316,9 +316,12 @@ func (s *Store) MaxUpdatedAtAll(ctx context.Context) (int64, error) {
 // Inclusive re-reports the boundary rows; the client compares ETags, finds them
 // unchanged, and does nothing. Over-reporting costs a little bandwidth,
 // under-reporting costs silent divergence.
+// Ordered by updated_at so a caller applying DAV:limit/nresults can truncate at
+// a well-defined point and hand back a token that resumes there.
 func (s *Store) ListChangedSince(ctx context.Context, sinceMs int64) ([]taskstore.Task, error) {
 	return s.listRows(ctx,
-		fmt.Sprintf("SELECT %s FROM tasks WHERE updated_at >= %d", taskColumns, sinceMs))
+		fmt.Sprintf("SELECT %s FROM tasks WHERE updated_at >= %d ORDER BY updated_at ASC",
+			taskColumns, sinceMs))
 }
 
 // SyncFloor returns the oldest still-answerable sync token, or 0 when every
