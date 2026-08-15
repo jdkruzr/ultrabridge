@@ -3,6 +3,7 @@ package remarkable
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -104,5 +105,82 @@ func TestPutBlobConcurrentSameBlob(t *testing.T) {
 	}
 	if max != writes {
 		t.Fatalf("final generation = %d, want %d (one per write)", max, writes)
+	}
+}
+
+// TestMutateTreeConcurrentPooled runs server-authored tree commits under the
+// production connection pool (concurrentDB, unlike testDB's single pinned
+// connection) while a device-sim hammers ordinary blob writes on the side.
+// Every commit must either land or report ErrTreeConflict, and the final root
+// must be the composite hash of exactly the successful commits — the
+// clobbered-root-payload failure mode putBlobCAS exists to prevent.
+func TestMutateTreeConcurrentPooled(t *testing.T) {
+	st := newStore(concurrentDB(t), t.TempDir())
+	if err := st.ensurePaths(); err != nil {
+		t.Fatalf("ensurePaths: %v", err)
+	}
+	seedEmptyRoot(t, st)
+
+	stop := make(chan struct{})
+	deviceDone := make(chan struct{})
+	go func() {
+		defer close(deviceDone)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			id := fmt.Sprintf("device-blob-%d", i)
+			if _, err := st.putBlob(context.Background(), id, strings.NewReader(id), 0); err != nil {
+				t.Errorf("device putBlob: %v", err)
+				return
+			}
+		}
+	}()
+
+	const writers = 6
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = st.createFolder(context.Background(), fmt.Sprintf("pooled-folder-%d", i), fmt.Sprintf("PF%d", i), "")
+		}(i)
+	}
+	wg.Wait()
+	close(stop)
+	<-deviceDone
+
+	succeeded := 0
+	for i, err := range errs {
+		if err == nil {
+			succeeded++
+		} else if !errors.Is(err, ErrTreeConflict) {
+			t.Fatalf("writer %d: %v", i, err)
+		}
+	}
+	if succeeded == 0 {
+		t.Fatal("no pooled concurrent commit succeeded")
+	}
+	_, entries := readTopIndex(t, st)
+	if len(entries) != succeeded {
+		t.Fatalf("top index has %d entries, want %d (successful commits)", len(entries), succeeded)
+	}
+	wantRoot, err := hashOfEntries(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := st.getBlob(context.Background(), rootBlobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := osReadFile(rec.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(raw)) != wantRoot {
+		t.Fatalf("root payload %s != composite of top entries %s", strings.TrimSpace(string(raw)), wantRoot)
 	}
 }

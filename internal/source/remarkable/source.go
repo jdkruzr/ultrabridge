@@ -152,9 +152,10 @@ func (s *Source) UploadDocument(ctx context.Context, filename, parentID string, 
 	if s.store == nil {
 		return Document{}, fmt.Errorf("remarkable source not started")
 	}
-	ext := strings.ToLower(filepath.Ext(filename))
+	base := filepath.Base(filename)
+	ext := filepath.Ext(base) // original case; matched case-insensitively
 	var fileType string
-	switch ext {
+	switch strings.ToLower(ext) {
 	case ".pdf":
 		fileType = "pdf"
 	case ".epub":
@@ -162,7 +163,7 @@ func (s *Source) UploadDocument(ctx context.Context, filename, parentID string, 
 	default:
 		return Document{}, fmt.Errorf("%w: %q", ErrUnsupportedFile, ext)
 	}
-	name := strings.TrimSpace(strings.TrimSuffix(filepath.Base(filename), ext))
+	name := strings.TrimSpace(strings.TrimSuffix(base, ext))
 	if name == "" {
 		return Document{}, fmt.Errorf("%w: empty document name", ErrUnsupportedFile)
 	}
