@@ -1,6 +1,6 @@
 # Source Abstraction Package
 
-Last verified: 2026-06-12 (added `SyncModel` — typed per-source-type sync-semantics descriptor)
+Last verified: 2026-08-14 (documented the `remarkable/` sub-package — it predated this file's last pass — and corrected the SyncModel wording: the descriptor set covers four source types, not three. Prior: added `SyncModel` — typed per-source-type sync-semantics descriptor)
 
 ## Purpose
 
@@ -39,10 +39,10 @@ type SyncModel struct {
     Blurb            string    `json:"blurb"`
 }
 
-func SyncModelFor(sourceType string) SyncModel // exhaustive over the 3 types; anything else → Unmanaged (a named non-zero fallback)
+func SyncModelFor(sourceType string) SyncModel // exhaustive over the 4 types (supernote, boox, forestnote, remarkable); anything else → Unmanaged (a named non-zero fallback)
 ```
 
-Descriptors: supernote = "Two-way sync"/TwoWay/deletes propagate; forestnote = "Live mirror"/TwoWay/deletes propagate; boox = "Receive-only"/OneWayIn/`DeletesPropagate: false` (the only one — device deletes/renames never reach UB). The exact wording is pinned by `syncmodel_test.go`; user-facing copy changes must update that test.
+Descriptors: supernote = "Two-way sync"/TwoWay/deletes propagate; forestnote = "Live mirror"/TwoWay/deletes propagate; remarkable = "Two-way sync"/TwoWay/deletes propagate (true in both directions since the file-management work: UB-authored uploads/deletes/moves commit root generations the tablet pulls); boox = "Receive-only"/OneWayIn/`DeletesPropagate: false` (the only one — device deletes/renames never reach UB). The exact wording is pinned by `syncmodel_test.go`; user-facing copy changes must update that test.
 
 ### Registry
 
@@ -83,6 +83,23 @@ Boox source adapter. Parses `Config` from `config_json` (NotesPath, ImportPath).
 
 ### forestnote/
 ForestNote source adapter — UB's own roll-our-own device sync (no vendor protocol). A *virtual* source: no filesystem root. `Config` from `config_json` is just `{batch_limit}`. On `Start()` it migrates the syncstore mirror and constructs the `syncstore` mirror + `syncbridge` (render→OCR→index→embed) + `syncsvc` relay; `main.go` mounts the device endpoint `/sync/v1` against `Source.SyncService()` and wires `Source.Store()` into the note service for the Files tab + on-the-fly page rendering (accessor pattern mirrors `boox.Source.Processor()`). FN-specific deps (`Indexer`, `EmbedStore` — the Delete-capable concretes the bridge needs but `SharedDeps` omits) are captured in the factory closure. Legacy back-compat: `main.go` auto-seeds a `forestnote` source row once from the old global `sync_enabled` setting.
+
+### remarkable/
+reMarkable source adapter — UB *is* the tablet's cloud (rmfakecloud-style
+protocol reimplementation: pairing/tokens, legacy document-storage v2 +
+modern sync15 blob hashtree, websocket notifications, search compat, MyScript
+HWR proxy). `Config` from `config_json`: `DataPath` (required), `PairingCode`,
+HWR credentials. Routes register UNWRAPPED on the main mux via
+`Source.RegisterRoutes` (device auth is protocol-internal). Beyond the
+read/OCR surface (`ListDocuments`, `RenderDocument`, `ReprocessDocument`,
+`OCRStatus`, `Devices`/`SetDeviceLabel`), the source authors its own hashtree
+mutations (`treewrite.go`): `UploadDocument` (PDF/EPUB), `DownloadDocument`
+(raw payload), `DeleteDocument` (move to tablet trash), `CreateFolder`,
+`MoveNode`, `RenameNode` — each commits a new root generation through the
+same CAS the device uses and fans a SyncComplete to all connected tablets.
+Index serialization and composite hashing are byte-exact to the device
+algorithm (hash vectors pinned in `treewrite_test.go`); mutations are refused
+until a device has completed a modern (sync-v3) sync.
 
 ## Key Decisions
 
