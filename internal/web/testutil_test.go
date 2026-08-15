@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"io"
@@ -209,6 +210,19 @@ type mockNoteService struct {
 	rmCrumbs          []service.RemarkableCrumb
 	rmDetail          service.RemarkableDocumentDetail
 	rmReprocessed     []string
+
+	// reMarkable file-management fixtures
+	rmFileManager     bool
+	rmUploaded        []string // "<filename>-><parent>"
+	rmUploadPayload   []byte
+	rmDownloadPayload []byte
+	rmDownloadName    string
+	rmDownloadType    string
+	rmDeleted         []string
+	rmFoldersCreated  []string // "<name>-><parent>"
+	rmMoved           []string // "<id>-><parent>"
+	rmRenamed         []string // "<id>-><name>"
+	rmFileErr         error    // returned by every file-management call when set
 }
 
 func (m *mockNoteService) ListFiles(ctx context.Context, path, sort, order string, page, perPage int) ([]service.NoteFile, int, error) {
@@ -353,6 +367,54 @@ func (m *mockNoteService) GetRemarkableDocumentDetail(ctx context.Context, docum
 }
 func (m *mockNoteService) ReprocessRemarkableDocument(ctx context.Context, documentID string) error {
 	m.rmReprocessed = append(m.rmReprocessed, documentID)
+	return nil
+}
+func (m *mockNoteService) SetRemarkableFileManager(mgr service.RemarkableFileManager) {}
+func (m *mockNoteService) HasRemarkableFileManager() bool                             { return m.rmFileManager }
+func (m *mockNoteService) UploadRemarkableDocument(ctx context.Context, filename, parentID string, payload io.Reader) (service.RemarkableDocument, error) {
+	if m.rmFileErr != nil {
+		return service.RemarkableDocument{}, m.rmFileErr
+	}
+	data, err := io.ReadAll(payload)
+	if err != nil {
+		return service.RemarkableDocument{}, err
+	}
+	m.rmUploadPayload = data
+	m.rmUploaded = append(m.rmUploaded, filename+"->"+parentID)
+	return service.RemarkableDocument{ID: "new-doc", Name: filename, Type: "document", Parent: parentID}, nil
+}
+func (m *mockNoteService) DownloadRemarkableDocument(ctx context.Context, documentID string) (io.ReadCloser, string, string, error) {
+	if m.rmFileErr != nil {
+		return nil, "", "", m.rmFileErr
+	}
+	return io.NopCloser(bytes.NewReader(m.rmDownloadPayload)), m.rmDownloadName, m.rmDownloadType, nil
+}
+func (m *mockNoteService) DeleteRemarkableDocument(ctx context.Context, documentID string) error {
+	if m.rmFileErr != nil {
+		return m.rmFileErr
+	}
+	m.rmDeleted = append(m.rmDeleted, documentID)
+	return nil
+}
+func (m *mockNoteService) CreateRemarkableFolder(ctx context.Context, name, parentID string) (service.RemarkableDocument, error) {
+	if m.rmFileErr != nil {
+		return service.RemarkableDocument{}, m.rmFileErr
+	}
+	m.rmFoldersCreated = append(m.rmFoldersCreated, name+"->"+parentID)
+	return service.RemarkableDocument{ID: "new-folder", Name: name, Type: "folder", Parent: parentID}, nil
+}
+func (m *mockNoteService) MoveRemarkableNode(ctx context.Context, documentID, newParentID string) error {
+	if m.rmFileErr != nil {
+		return m.rmFileErr
+	}
+	m.rmMoved = append(m.rmMoved, documentID+"->"+newParentID)
+	return nil
+}
+func (m *mockNoteService) RenameRemarkableNode(ctx context.Context, documentID, newName string) error {
+	if m.rmFileErr != nil {
+		return m.rmFileErr
+	}
+	m.rmRenamed = append(m.rmRenamed, documentID+"->"+newName)
 	return nil
 }
 func (m *mockNoteService) ListForestNoteTree(ctx context.Context) ([]service.ForestNoteTreeNode, []service.ForestNoteNotebook, error) {

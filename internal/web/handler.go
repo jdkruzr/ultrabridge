@@ -333,6 +333,12 @@ func NewHandler(
 	h.mux.HandleFunc("POST /files/forestnote/delete", h.handleForestNoteDelete)
 	h.mux.HandleFunc("POST /files/forestnote/reprocess", h.handleForestNoteReprocess)
 	h.mux.HandleFunc("POST /files/remarkable/reprocess", h.handleRemarkableReprocess)
+	h.mux.HandleFunc("POST /files/remarkable/upload", h.handleRemarkableUpload)
+	h.mux.HandleFunc("GET /files/remarkable/download", h.handleRemarkableDownload)
+	h.mux.HandleFunc("POST /files/remarkable/delete", h.handleRemarkableDelete)
+	h.mux.HandleFunc("POST /files/remarkable/rename", h.handleRemarkableRename)
+	h.mux.HandleFunc("POST /files/remarkable/move", h.handleRemarkableMove)
+	h.mux.HandleFunc("POST /files/remarkable/new-folder", h.handleRemarkableNewFolder)
 	h.mux.HandleFunc("GET /files/forestnote/export", h.handleForestNoteExport)
 	h.mux.HandleFunc("GET /digests", h.handleDigests)
 	h.mux.HandleFunc("GET /digests/{id}", h.handleDigestDetail)
@@ -751,8 +757,9 @@ func (h *Handler) handleFilesRemarkable(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		data["detail"] = detail
+		data["rmFileMgmt"] = h.notes.HasRemarkableFileManager()
 		if detail.RenderAvailable {
-			data["detailGrid"] = remarkableDetailView(detail)
+			data["detailGrid"] = remarkableDetailView(detail, h.notes.HasRemarkableFileManager())
 		}
 		data["syncModel"] = source.SyncModelFor("remarkable")
 		h.renderTemplate(w, r, "files_remarkable", data)
@@ -773,6 +780,19 @@ func (h *Handler) handleFilesRemarkable(w http.ResponseWriter, r *http.Request) 
 	data["rmEntries"], data["rmCrumbs"], data["rmFolderID"] = entries, crumbs, folderID
 	data["filesSort"], data["filesOrder"] = sortField, sortOrder
 	data["syncModel"] = source.SyncModelFor("remarkable")
+	if h.notes.HasRemarkableFileManager() {
+		data["rmFileMgmt"] = true
+		// All folders in the tree feed the per-row Move pickers.
+		if docs, err := h.notes.ListRemarkableDocuments(ctx); err == nil {
+			folders := make([]service.RemarkableDocument, 0)
+			for _, d := range docs {
+				if d.Type == "folder" {
+					folders = append(folders, d)
+				}
+			}
+			data["rmFolders"] = folders
+		}
+	}
 	h.renderTemplate(w, r, "files_remarkable", data)
 }
 
@@ -819,6 +839,168 @@ func (h *Handler) handleRemarkableReprocess(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	h.respondEmptyOrRedirect(w, r, "/files/remarkable?document="+url.QueryEscape(docID))
+}
+
+// remarkableMaxUploadBytes caps a single PDF/EPUB upload — comfortably above
+// real books, far below the device protocol's ~7 GB ceiling.
+const remarkableMaxUploadBytes = 512 << 20
+
+// remarkableFileError maps the reMarkable write-path sentinels onto HTTP
+// statuses. 4xx bodies carry the sentinel text (our own copy, safe to show);
+// unknown errors stay generic 500s.
+func (h *Handler) remarkableFileError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrRemarkableNotFound),
+		errors.Is(err, service.ErrRemarkableNoPayload),
+		errors.Is(err, service.ErrRemarkableParentNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, service.ErrRemarkableUnsupportedFile),
+		errors.Is(err, service.ErrRemarkableNotAFolder):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, service.ErrRemarkableFolderNotEmpty),
+		errors.Is(err, service.ErrRemarkableNoHashTree),
+		errors.Is(err, service.ErrRemarkableTreeConflict):
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		h.logger.Error("remarkable file operation failed", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// remarkableFolderURL builds the folder-browse URL for a (possibly empty)
+// folder, mirroring forestNoteFolderURL.
+func remarkableFolderURL(folderID string) string {
+	if folderID == "" {
+		return "/files/remarkable"
+	}
+	return "/files/remarkable?folder=" + url.QueryEscape(folderID)
+}
+
+// handleRemarkableUpload accepts a PDF/EPUB multipart upload and authors it
+// into the synced tree under the folder being browsed.
+func (h *Handler) handleRemarkableUpload(w http.ResponseWriter, r *http.Request) {
+	if !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, remarkableMaxUploadBytes)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "file too large (512 MiB max)", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "invalid upload", http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	folder := r.FormValue("folder")
+	if _, err := h.notes.UploadRemarkableDocument(r.Context(), header.Filename, folder, file); err != nil {
+		h.remarkableFileError(w, err)
+		return
+	}
+	h.respondEmptyOrRedirect(w, r, remarkableFolderURL(folder))
+}
+
+// handleRemarkableDownload streams a document's original PDF/EPUB payload.
+func (h *Handler) handleRemarkableDownload(w http.ResponseWriter, r *http.Request) {
+	if !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	docID := r.URL.Query().Get("document")
+	if docID == "" {
+		http.Error(w, "missing document", http.StatusBadRequest)
+		return
+	}
+	stream, filename, contentType, err := h.notes.DownloadRemarkableDocument(r.Context(), docID)
+	if err != nil {
+		h.remarkableFileError(w, err)
+		return
+	}
+	defer stream.Close()
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+sanitizeFilename(filename)+"\"")
+	io.Copy(w, stream)
+}
+
+// handleRemarkableDelete moves a document or empty folder to the tablet's
+// trash (restorable on-device).
+func (h *Handler) handleRemarkableDelete(w http.ResponseWriter, r *http.Request) {
+	if !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	docID := r.FormValue("document")
+	if docID == "" {
+		http.Error(w, "missing document", http.StatusBadRequest)
+		return
+	}
+	if err := h.notes.DeleteRemarkableDocument(r.Context(), docID); err != nil {
+		h.remarkableFileError(w, err)
+		return
+	}
+	h.respondEmptyOrRedirect(w, r, remarkableFolderURL(r.FormValue("back")))
+}
+
+// handleRemarkableRename sets a document or folder's visible name.
+func (h *Handler) handleRemarkableRename(w http.ResponseWriter, r *http.Request) {
+	if !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	docID, name := r.FormValue("document"), r.FormValue("name")
+	if docID == "" || strings.TrimSpace(name) == "" {
+		http.Error(w, "missing document or name", http.StatusBadRequest)
+		return
+	}
+	if err := h.notes.RenameRemarkableNode(r.Context(), docID, name); err != nil {
+		h.remarkableFileError(w, err)
+		return
+	}
+	h.respondEmptyOrRedirect(w, r, remarkableFolderURL(r.FormValue("back")))
+}
+
+// handleRemarkableMove re-parents a document or folder ("" target = My files).
+func (h *Handler) handleRemarkableMove(w http.ResponseWriter, r *http.Request) {
+	if !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	docID := r.FormValue("document")
+	if docID == "" {
+		http.Error(w, "missing document", http.StatusBadRequest)
+		return
+	}
+	if err := h.notes.MoveRemarkableNode(r.Context(), docID, r.FormValue("folder")); err != nil {
+		h.remarkableFileError(w, err)
+		return
+	}
+	h.respondEmptyOrRedirect(w, r, remarkableFolderURL(r.FormValue("back")))
+}
+
+// handleRemarkableNewFolder creates a folder under the folder being browsed.
+func (h *Handler) handleRemarkableNewFolder(w http.ResponseWriter, r *http.Request) {
+	if !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	name := r.FormValue("name")
+	if strings.TrimSpace(name) == "" {
+		http.Error(w, "missing name", http.StatusBadRequest)
+		return
+	}
+	folder := r.FormValue("folder")
+	if _, err := h.notes.CreateRemarkableFolder(r.Context(), name, folder); err != nil {
+		h.remarkableFileError(w, err)
+		return
+	}
+	h.respondEmptyOrRedirect(w, r, remarkableFolderURL(folder))
 }
 
 // handleForestNoteExport streams a notebook's pages as a single PDF.
@@ -2442,7 +2624,7 @@ func forestNoteDetailView(d service.ForestNoteNotebookDetail, targetPageID strin
 	}
 }
 
-func remarkableDetailView(d service.RemarkableDocumentDetail) detailView {
+func remarkableDetailView(d service.RemarkableDocumentDetail, fileMgmt bool) detailView {
 	folder := "Home"
 	if len(d.FolderPath) > 0 {
 		folder = strings.Join(d.FolderPath, " / ")
@@ -2462,12 +2644,28 @@ func remarkableDetailView(d service.RemarkableDocumentDetail) detailView {
 		})
 	}
 	actions := []detailAction{}
+	if fileMgmt && d.DownloadAvailable {
+		actions = append(actions, detailAction{
+			Label: "⬇ Download",
+			Href:  "/files/remarkable/download?document=" + url.QueryEscape(d.ID),
+		})
+	}
 	if d.OCRAvailable && d.RenderAvailable {
 		actions = append(actions, detailAction{
 			Label:   "Re-OCR",
 			HxPost:  "/files/remarkable/reprocess",
 			Vals:    mustJSON(map[string]string{"document": d.ID}),
 			OnAfter: "if(event.detail.successful){setTimeout(updateProcessorStatus,250);}",
+		})
+	}
+	if fileMgmt {
+		actions = append(actions, detailAction{
+			Label:   "Delete",
+			HxPost:  "/files/remarkable/delete",
+			Vals:    mustJSON(map[string]string{"document": d.ID}),
+			Confirm: "Delete “" + d.Name + "”? This moves it to the tablet's trash — restore it from the device if needed.",
+			OnAfter: "if(event.detail.successful){window.location='/files/remarkable';}",
+			Danger:  true,
 		})
 	}
 	return detailView{

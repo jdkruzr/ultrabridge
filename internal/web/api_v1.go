@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -75,11 +76,18 @@ func (h *Handler) RegisterAPIv1() {
 	h.mux.HandleFunc("PATCH /api/v1/sync/devices/{id}", h.handleV1RenameSyncDevice)
 	h.mux.HandleFunc("POST /api/v1/sync/compact", h.handleV1SyncCompact)
 
-	// reMarkable device management. Read-only in phase 1.
+	// reMarkable device management + file management. Document/folder
+	// mutations 404 when no file manager is wired (no reMarkable source, or
+	// source not started).
 	h.mux.HandleFunc("GET /api/v1/remarkable/devices", h.handleV1ListRemarkableDevices)
 	h.mux.HandleFunc("PATCH /api/v1/remarkable/devices/{id}", h.handleV1RenameRemarkableDevice)
 	h.mux.HandleFunc("GET /api/v1/remarkable/documents", h.handleV1ListRemarkableDocuments)
+	h.mux.HandleFunc("POST /api/v1/remarkable/documents", h.handleV1UploadRemarkableDocument)
 	h.mux.HandleFunc("GET /api/v1/remarkable/documents/{id}", h.handleV1GetRemarkableDocument)
+	h.mux.HandleFunc("GET /api/v1/remarkable/documents/{id}/file", h.handleV1DownloadRemarkableDocument)
+	h.mux.HandleFunc("PATCH /api/v1/remarkable/documents/{id}", h.handleV1UpdateRemarkableDocument)
+	h.mux.HandleFunc("DELETE /api/v1/remarkable/documents/{id}", h.handleV1DeleteRemarkableDocument)
+	h.mux.HandleFunc("POST /api/v1/remarkable/folders", h.handleV1CreateRemarkableFolder)
 }
 
 // --- Tasks ---
@@ -433,6 +441,174 @@ func (h *Handler) handleV1GetRemarkableDocument(w http.ResponseWriter, r *http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(detail)
+}
+
+// apiRemarkableFileError maps the reMarkable write-path sentinels onto JSON
+// API statuses; the JSON sibling of Handler.remarkableFileError.
+func (h *Handler) apiRemarkableFileError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrRemarkableNotFound),
+		errors.Is(err, service.ErrRemarkableNoPayload),
+		errors.Is(err, service.ErrRemarkableParentNotFound):
+		apiError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrRemarkableUnsupportedFile),
+		errors.Is(err, service.ErrRemarkableNotAFolder):
+		apiError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrRemarkableFolderNotEmpty),
+		errors.Is(err, service.ErrRemarkableNoHashTree),
+		errors.Is(err, service.ErrRemarkableTreeConflict):
+		apiError(w, http.StatusConflict, err.Error())
+	default:
+		h.logger.Error("remarkable file operation failed", "error", err)
+		apiError(w, http.StatusInternalServerError, "internal error")
+	}
+}
+
+// handleV1UploadRemarkableDocument accepts a multipart PDF/EPUB upload
+// (fields: file, optional parent) and authors it into the synced tree.
+func (h *Handler) handleV1UploadRemarkableDocument(w http.ResponseWriter, r *http.Request) {
+	if h.notes == nil || !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, remarkableMaxUploadBytes)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			apiError(w, http.StatusRequestEntityTooLarge, "file too large (512 MiB max)")
+			return
+		}
+		apiError(w, http.StatusBadRequest, "invalid multipart upload")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "missing file field")
+		return
+	}
+	defer file.Close()
+	parent := r.FormValue("parent")
+	doc, err := h.notes.UploadRemarkableDocument(r.Context(), header.Filename, parent, file)
+	if err != nil {
+		h.apiRemarkableFileError(w, err)
+		return
+	}
+	h.auditMutation(r, "remarkable_document_upload", "id", doc.ID, "name", doc.Name, "parent", parent)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(doc)
+}
+
+// handleV1DownloadRemarkableDocument streams a document's original PDF/EPUB
+// payload. Notebooks (no payload) 404.
+func (h *Handler) handleV1DownloadRemarkableDocument(w http.ResponseWriter, r *http.Request) {
+	if h.notes == nil || !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	stream, filename, contentType, err := h.notes.DownloadRemarkableDocument(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.apiRemarkableFileError(w, err)
+		return
+	}
+	defer stream.Close()
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+sanitizeFilename(filename)+"\"")
+	io.Copy(w, stream)
+}
+
+// remarkableDocPatch distinguishes omitted fields from empty ones: an omitted
+// name/parent is left unchanged, "" parent moves to My files, "" name is a 400.
+type remarkableDocPatch struct {
+	Name   *string `json:"name"`
+	Parent *string `json:"parent"`
+}
+
+// handleV1UpdateRemarkableDocument renames and/or moves a document or folder.
+func (h *Handler) handleV1UpdateRemarkableDocument(w http.ResponseWriter, r *http.Request) {
+	if h.notes == nil || !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	var patch remarkableDocPatch
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&patch); err != nil {
+		apiError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if patch.Name == nil && patch.Parent == nil {
+		apiError(w, http.StatusBadRequest, "provide name and/or parent")
+		return
+	}
+	if patch.Name != nil && strings.TrimSpace(*patch.Name) == "" {
+		apiError(w, http.StatusBadRequest, "name must not be empty")
+		return
+	}
+	id := r.PathValue("id")
+	if patch.Name != nil {
+		if err := h.notes.RenameRemarkableNode(r.Context(), id, *patch.Name); err != nil {
+			h.apiRemarkableFileError(w, err)
+			return
+		}
+		h.auditMutation(r, "remarkable_document_rename", "id", id, "name", *patch.Name)
+	}
+	if patch.Parent != nil {
+		if err := h.notes.MoveRemarkableNode(r.Context(), id, *patch.Parent); err != nil {
+			h.apiRemarkableFileError(w, err)
+			return
+		}
+		h.auditMutation(r, "remarkable_document_move", "id", id, "parent", *patch.Parent)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleV1DeleteRemarkableDocument moves a document or empty folder to the
+// tablet's trash (restorable on-device).
+func (h *Handler) handleV1DeleteRemarkableDocument(w http.ResponseWriter, r *http.Request) {
+	if h.notes == nil || !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	id := r.PathValue("id")
+	if err := h.notes.DeleteRemarkableDocument(r.Context(), id); err != nil {
+		h.apiRemarkableFileError(w, err)
+		return
+	}
+	h.auditMutation(r, "remarkable_document_delete", "id", id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleV1CreateRemarkableFolder creates a folder; body {"name": "...",
+// "parent": "..."} (parent optional, "" = My files).
+func (h *Handler) handleV1CreateRemarkableFolder(w http.ResponseWriter, r *http.Request) {
+	if h.notes == nil || !h.notes.HasRemarkableFileManager() {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct {
+		Name   string `json:"name"`
+		Parent string `json:"parent"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		apiError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		apiError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	doc, err := h.notes.CreateRemarkableFolder(r.Context(), req.Name, req.Parent)
+	if err != nil {
+		h.apiRemarkableFileError(w, err)
+		return
+	}
+	h.auditMutation(r, "remarkable_folder_create", "id", doc.ID, "name", doc.Name, "parent", req.Parent)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(doc)
 }
 
 // handleV1PruneSyncDevice deletes a device's sync registry row (spec §4.3
