@@ -137,6 +137,34 @@ type RemarkableReprocessor interface {
 	OCRStatus(ctx context.Context) (rmsource.OCRQueueStatus, error)
 }
 
+// RemarkableFileManager is the source-level write seam for server-authored
+// hashtree mutations (upload/download/delete/folders). *remarkable.Source
+// satisfies it after Start. Every mutation commits a new root generation and
+// notifies connected tablets; the source refuses mutations until the device
+// has completed a modern (sync-v3) sync.
+type RemarkableFileManager interface {
+	UploadDocument(ctx context.Context, filename, parentID string, payload io.Reader) (rmsource.Document, error)
+	DownloadDocument(ctx context.Context, documentID string) (io.ReadCloser, string, string, error)
+	DeleteDocument(ctx context.Context, documentID string) error
+	CreateFolder(ctx context.Context, name, parentID string) (rmsource.Document, error)
+	MoveNode(ctx context.Context, documentID, newParentID string) error
+	RenameNode(ctx context.Context, documentID, newName string) error
+}
+
+// reMarkable write-path sentinels, aliased from the source package so web
+// handlers can errors.Is against the service boundary without importing the
+// source adapter.
+var (
+	ErrRemarkableNotFound        = rmsource.ErrNotFound
+	ErrRemarkableNoPayload       = rmsource.ErrNoPayload
+	ErrRemarkableUnsupportedFile = rmsource.ErrUnsupportedFile
+	ErrRemarkableParentNotFound  = rmsource.ErrParentNotFound
+	ErrRemarkableNotAFolder      = rmsource.ErrNotAFolder
+	ErrRemarkableFolderNotEmpty  = rmsource.ErrFolderNotEmpty
+	ErrRemarkableNoHashTree      = rmsource.ErrNoHashTree
+	ErrRemarkableTreeConflict    = rmsource.ErrTreeConflict
+)
+
 const RemarkablePathPrefix = "remarkable://"
 
 func RemarkablePath(documentID string) string {
@@ -155,6 +183,7 @@ type noteService struct {
 	fnReprocessor ForestNoteReprocessor // optional; set via SetForestNoteReprocessor
 	rmReader      RemarkableReader      // optional; set via SetRemarkableReader
 	rmReprocessor RemarkableReprocessor // optional; set via SetRemarkableReprocessor
+	rmFiles       RemarkableFileManager // optional; set via SetRemarkableFileManager
 	scanner       FileScanner
 	noteDB        *sql.DB // for settings
 	booxCachePath string
@@ -218,7 +247,14 @@ func (s *noteService) SetRemarkableReprocessor(r RemarkableReprocessor) {
 	s.rmReprocessor = r
 }
 
+// SetRemarkableFileManager wires the server-authored write path
+// (upload/download/delete/folders). Nil-safe in the same way as the reader
+// seams; nil means the feature is absent and web/API surfaces gate on it.
+func (s *noteService) SetRemarkableFileManager(m RemarkableFileManager) { s.rmFiles = m }
+
 func (s *noteService) HasRemarkableSource() bool { return s.rmReader != nil }
+
+func (s *noteService) HasRemarkableFileManager() bool { return s.rmFiles != nil }
 
 func (s *noteService) ListFiles(ctx context.Context, path string, sortField, order string, page, perPage int) ([]NoteFile, int, error) {
 	var files []NoteFile
@@ -1030,9 +1066,7 @@ func (s *noteService) ListRemarkableDocuments(ctx context.Context) ([]Remarkable
 	}
 	out := make([]RemarkableDocument, 0, len(docs))
 	for _, d := range docs {
-		out = append(out, RemarkableDocument{
-			ID: d.ID, Name: displayRemarkableName(d), Type: d.Type, Parent: d.Parent, PageCount: d.PageCount,
-		})
+		out = append(out, mapRemarkableDocument(d))
 	}
 	return out, nil
 }
@@ -1079,15 +1113,21 @@ func (s *noteService) GetRemarkableDocumentDetail(ctx context.Context, documentI
 		return RemarkableDocumentDetail{}, sql.ErrNoRows
 	}
 	detail := RemarkableDocumentDetail{
-		ID:              d.ID,
-		Name:            displayRemarkableName(d),
-		Type:            d.Type,
-		Parent:          d.Parent,
-		Path:            RemarkablePath(d.ID),
-		PageCount:       d.PageCount,
-		FolderPath:      remarkableFolderPath(d.Parent, byID),
-		RenderAvailable: s.remarkableRenderAvailable(ctx, d.ID),
-		OCRAvailable:    s.rmReprocessor != nil,
+		ID:           d.ID,
+		Name:         displayRemarkableName(d),
+		Type:         d.Type,
+		Parent:       d.Parent,
+		Path:         RemarkablePath(d.ID),
+		PageCount:    d.PageCount,
+		FileType:     d.FileType,
+		FolderPath:   remarkableFolderPath(d.Parent, byID),
+		OCRAvailable: s.rmReprocessor != nil,
+	}
+	if d.Type == "document" {
+		if rd, err := s.rmReader.RenderDocument(ctx, d.ID); err == nil {
+			detail.RenderAvailable = rd.Renderable
+			detail.DownloadAvailable = rd.PDFPath != "" || rd.EPUBPath != ""
+		}
 	}
 	if detail.PageCount > 0 {
 		detail.Pages = make([]RemarkablePage, detail.PageCount)
@@ -1112,19 +1152,94 @@ func (s *noteService) GetRemarkableDocumentDetail(ctx context.Context, documentI
 	return detail, nil
 }
 
-func (s *noteService) remarkableRenderAvailable(ctx context.Context, documentID string) bool {
-	if s.rmReader == nil {
-		return false
-	}
-	doc, err := s.rmReader.RenderDocument(ctx, documentID)
-	return err == nil && doc.Renderable
-}
-
 func (s *noteService) ReprocessRemarkableDocument(ctx context.Context, documentID string) error {
 	if s.rmReprocessor == nil {
 		return fmt.Errorf("remarkable OCR is not configured")
 	}
 	return s.rmReprocessor.ReprocessDocument(ctx, documentID)
+}
+
+var errRemarkableFilesUnavailable = fmt.Errorf("remarkable file management not available")
+
+// UploadRemarkableDocument authors a new document from a PDF/EPUB payload,
+// placing it under parentID ("" = My files).
+func (s *noteService) UploadRemarkableDocument(ctx context.Context, filename, parentID string, payload io.Reader) (RemarkableDocument, error) {
+	if s.rmFiles == nil {
+		return RemarkableDocument{}, errRemarkableFilesUnavailable
+	}
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return RemarkableDocument{}, fmt.Errorf("%w: missing filename", ErrRemarkableUnsupportedFile)
+	}
+	doc, err := s.rmFiles.UploadDocument(ctx, filename, parentID, payload)
+	if err != nil {
+		return RemarkableDocument{}, err
+	}
+	return mapRemarkableDocument(doc), nil
+}
+
+// DownloadRemarkableDocument streams a document's original PDF/EPUB payload.
+func (s *noteService) DownloadRemarkableDocument(ctx context.Context, documentID string) (io.ReadCloser, string, string, error) {
+	if s.rmFiles == nil {
+		return nil, "", "", errRemarkableFilesUnavailable
+	}
+	stream, name, contentType, err := s.rmFiles.DownloadDocument(ctx, documentID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return stream, sanitizeFilename(name, documentID+filepath.Ext(name)), contentType, nil
+}
+
+// DeleteRemarkableDocument moves a document or empty folder to the tablet's
+// trash.
+func (s *noteService) DeleteRemarkableDocument(ctx context.Context, documentID string) error {
+	if s.rmFiles == nil {
+		return errRemarkableFilesUnavailable
+	}
+	return s.rmFiles.DeleteDocument(ctx, documentID)
+}
+
+// CreateRemarkableFolder authors a folder under parentID ("" = My files).
+func (s *noteService) CreateRemarkableFolder(ctx context.Context, name, parentID string) (RemarkableDocument, error) {
+	if s.rmFiles == nil {
+		return RemarkableDocument{}, errRemarkableFilesUnavailable
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return RemarkableDocument{}, fmt.Errorf("folder name is required")
+	}
+	doc, err := s.rmFiles.CreateFolder(ctx, name, parentID)
+	if err != nil {
+		return RemarkableDocument{}, err
+	}
+	return mapRemarkableDocument(doc), nil
+}
+
+// MoveRemarkableNode re-parents a document or folder ("" = My files).
+func (s *noteService) MoveRemarkableNode(ctx context.Context, documentID, newParentID string) error {
+	if s.rmFiles == nil {
+		return errRemarkableFilesUnavailable
+	}
+	return s.rmFiles.MoveNode(ctx, documentID, newParentID)
+}
+
+// RenameRemarkableNode sets a document or folder's visible name.
+func (s *noteService) RenameRemarkableNode(ctx context.Context, documentID, newName string) error {
+	if s.rmFiles == nil {
+		return errRemarkableFilesUnavailable
+	}
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return fmt.Errorf("name is required")
+	}
+	return s.rmFiles.RenameNode(ctx, documentID, newName)
+}
+
+func mapRemarkableDocument(d rmsource.Document) RemarkableDocument {
+	return RemarkableDocument{
+		ID: d.ID, Name: displayRemarkableName(d), Type: d.Type, Parent: d.Parent,
+		PageCount: d.PageCount, FileType: d.FileType,
+	}
 }
 
 // sanitizeFilename keeps a notebook name safe for a Content-Disposition filename,
@@ -1813,13 +1928,15 @@ func indexRemarkableDocuments(docs []rmsource.Document) (map[string]rmsource.Doc
 
 func mapRemarkableEntry(d rmsource.Document) RemarkableEntry {
 	return RemarkableEntry{
-		IsFolder:  d.Type == "folder",
-		ID:        d.ID,
-		Name:      displayRemarkableName(d),
-		Type:      d.Type,
-		Parent:    d.Parent,
-		Path:      RemarkablePath(d.ID),
-		PageCount: d.PageCount,
+		IsFolder:    d.Type == "folder",
+		ID:          d.ID,
+		Name:        displayRemarkableName(d),
+		Type:        d.Type,
+		Parent:      d.Parent,
+		Path:        RemarkablePath(d.ID),
+		PageCount:   d.PageCount,
+		FileType:    d.FileType,
+		CanDownload: d.FileType == "pdf" || d.FileType == "epub",
 	}
 }
 

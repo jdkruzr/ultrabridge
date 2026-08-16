@@ -17,22 +17,57 @@
   {{template "_detail_page_grid" .detailGrid}}
   {{else if .detail}}
   <div class="card">
-    <h2>{{.detail.Name}}</h2>
+    <div class="toolbar">
+      <h2>{{.detail.Name}}</h2>
+      <div class="flex-spacer"></div>
+      {{if .rmFileMgmt}}
+      {{if .detail.DownloadAvailable}}
+      <a class="btn-small" href="/files/remarkable/download?document={{.detail.ID | urlquery}}">⬇ Download</a>
+      {{end}}
+      <button type="button" class="btn-small" onclick="rmRename('{{.detail.ID}}', '{{.detail.Name}}', '/files/remarkable?document={{.detail.ID | urlquery}}')">Rename</button>
+      <button type="button" class="btn-small" style="background: var(--status-text-failed);"
+              hx-post="/files/remarkable/delete"
+              hx-vals='{"document": "{{.detail.ID}}"}'
+              hx-swap="none"
+              hx-confirm="Delete “{{.detail.Name}}”? This moves it to the tablet's trash — restore it from the device if needed."
+              hx-on:htmx:after-request="if(event.detail.successful){window.location='/files/remarkable';}">Delete</button>
+      {{end}}
+    </div>
     <div class="table-container">
       <table>
         <tbody>
           <tr><th>Document ID</th><td><code>{{.detail.ID}}</code></td></tr>
           <tr><th>Path</th><td><code>{{.detail.Path}}</code></td></tr>
-          <tr><th>Type</th><td>{{.detail.Type}}</td></tr>
+          <tr><th>Type</th><td>{{.detail.Type}}{{if .detail.FileType}} ({{.detail.FileType}}){{end}}</td></tr>
           <tr><th>Pages</th><td>{{.detail.PageCount}}</td></tr>
           <tr><th>Folder</th><td>{{if .detail.FolderPath}}{{range $i, $p := .detail.FolderPath}}{{if $i}} / {{end}}{{$p}}{{end}}{{else}}Home{{end}}</td></tr>
-          <tr><th>Rendering</th><td>Rendering is not available yet.</td></tr>
-          <tr><th>OCR</th><td>OCR is not available yet.</td></tr>
+          <tr><th>Rendering</th><td>{{if .detail.RenderAvailable}}Available{{else}}Rendering is not available yet.{{end}}</td></tr>
+          <tr><th>OCR</th><td>{{if .detail.OCRAvailable}}Available{{else}}OCR is not available yet.{{end}}</td></tr>
         </tbody>
       </table>
     </div>
   </div>
   {{else}}
+  {{if .rmFileMgmt}}
+  <div class="card">
+    <div class="toolbar" style="gap: 1rem; flex-wrap: wrap;">
+      <form hx-post="/files/remarkable/upload" hx-encoding="multipart/form-data" hx-swap="none"
+            hx-on:htmx:after-request="if(event.detail.successful){htmx.ajax('GET', rmFolderURL(), {target: '#main-content', swap: 'innerHTML'});}else{alert('Upload failed: ' + event.detail.xhr.responseText);}"
+            style="display: inline-flex; gap: 0.5rem; align-items: center;">
+        <input type="hidden" name="folder" value="{{.rmFolderID}}">
+        <input type="file" name="file" accept=".pdf,.epub" required>
+        <button type="submit" class="btn-small">⬆ Upload PDF/EPUB</button>
+      </form>
+      <form hx-post="/files/remarkable/new-folder" hx-swap="none"
+            hx-on:htmx:after-request="if(event.detail.successful){htmx.ajax('GET', rmFolderURL(), {target: '#main-content', swap: 'innerHTML'});}else{alert('New folder failed: ' + event.detail.xhr.responseText);}"
+            style="display: inline-flex; gap: 0.5rem; align-items: center;">
+        <input type="hidden" name="folder" value="{{.rmFolderID}}">
+        <input type="text" name="name" placeholder="New folder name" required>
+        <button type="submit" class="btn-small">＋ New Folder</button>
+      </form>
+    </div>
+  </div>
+  {{end}}
   <div class="card">
     {{if .rmCrumbs}}
     <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -52,11 +87,14 @@
             <th>Type</th>
             <th>Pages</th>
             <th>Path</th>
+            {{if .rmFileMgmt}}<th>Actions</th>{{end}}
           </tr>
         </thead>
         <tbody>
+          {{$back := .rmFolderID}}
+          {{$mgmt := .rmFileMgmt}}
           {{range .rmEntries}}
-          <tr>
+          <tr id="rm-row-{{.ID}}">
             <td class="text-bold">
               {{if .IsFolder}}
               <a href="/files/remarkable?folder={{.ID | urlquery}}" hx-get="/files/remarkable?folder={{.ID | urlquery}}" hx-target="#main-content" hx-push-url="true">{{.Name}}</a>
@@ -64,9 +102,28 @@
               <a href="/files/remarkable?document={{.ID | urlquery}}" hx-get="/files/remarkable?document={{.ID | urlquery}}" hx-target="#main-content" hx-push-url="true">{{.Name}}</a>
               {{end}}
             </td>
-            <td>{{.Type}}</td>
+            <td>{{.Type}}{{if .FileType}} ({{.FileType}}){{end}}</td>
             <td>{{if .IsFolder}}-{{else}}{{.PageCount}}{{end}}</td>
             <td class="text-small"><code>{{.Path}}</code></td>
+            {{if $mgmt}}
+            <td class="text-small" style="white-space: nowrap;">
+              {{if .CanDownload}}
+              <a class="btn-small" href="/files/remarkable/download?document={{.ID | urlquery}}" title="Download original {{.FileType}}">⬇</a>
+              {{end}}
+              <button type="button" class="btn-small" onclick="rmRename('{{.ID}}', '{{.Name}}', rmFolderURL())">Rename</button>
+              <button type="button" class="btn-small" onclick="rmMoveOpen('rm-row-{{.ID}}')">Move</button>
+              <span id="rmp-rm-row-{{.ID}}" style="display: none; gap: 0.25rem; align-items: center;">
+                <select class="rm-move-folder" data-doc="{{.ID}}"></select>
+                <button type="button" class="btn-small" onclick="rmMoveSubmit('rm-row-{{.ID}}')">OK</button>
+                <button type="button" class="btn-small" onclick="rmMoveCancel('rm-row-{{.ID}}')">✕</button>
+              </span>
+              <button type="button" class="btn-small" style="background: var(--status-text-failed);"
+                      hx-post="/files/remarkable/delete"
+                      hx-vals='{"document": "{{.ID}}", "back": "{{$back}}"}'
+                      hx-target="closest tr" hx-swap="outerHTML"
+                      hx-confirm="Delete “{{.Name}}”? This moves it to the tablet's trash — restore it from the device if needed.">Delete</button>
+            </td>
+            {{end}}
           </tr>
           {{end}}
         </tbody>
@@ -76,5 +133,73 @@
     <div class="empty-state"><p>No reMarkable documents synced yet.</p></div>
     {{end}}
   </div>
+  {{end}}
+
+  {{if .rmFileMgmt}}
+  <!-- Folder options for the per-row Move pickers; cloned client-side. -->
+  <select id="rm-move-folder-tpl" style="display: none;">
+    <option value="">My files</option>
+    {{range .rmFolders}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+  </select>
+  <script>
+      (function() {
+          var run = function() {
+              if (typeof updateProcessorStatus === 'function') updateProcessorStatus();
+          };
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+      })();
+
+      function rmFolderURL() {
+          var folder = {{.rmFolderID}};
+          return folder ? '/files/remarkable?folder=' + encodeURIComponent(folder) : '/files/remarkable';
+      }
+
+      function rmRename(docID, current, backURL) {
+          var name = prompt('New name for “' + current + '”:', current);
+          if (!name || name === current) return;
+          var body = new URLSearchParams();
+          body.append('document', docID);
+          body.append('name', name);
+          fetch('/files/remarkable/rename', {
+              method: 'POST',
+              body: body,
+              headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' },
+          }).then(function(r) {
+              if (r.ok) { htmx.ajax('GET', backURL, {target: '#main-content', swap: 'innerHTML'}); }
+              else { r.text().then(function(t) { alert('Rename failed: ' + t); }); }
+          });
+      }
+
+      function rmMoveOpen(rowId) {
+          var tpl = document.getElementById('rm-move-folder-tpl');
+          var span = document.getElementById('rmp-' + rowId);
+          if (!tpl || !span) return;
+          var sel = span.querySelector('.rm-move-folder');
+          if (!sel.options.length) sel.innerHTML = tpl.innerHTML;
+          span.style.display = 'inline-flex';
+      }
+      function rmMoveCancel(rowId) {
+          var span = document.getElementById('rmp-' + rowId);
+          if (span) span.style.display = 'none';
+      }
+      // URLSearchParams keeps this application/x-www-form-urlencoded so the
+      // server's r.ParseForm() decodes it (FormData would post multipart).
+      function rmMoveSubmit(rowId) {
+          var span = document.getElementById('rmp-' + rowId);
+          if (!span) return;
+          var sel = span.querySelector('.rm-move-folder');
+          var body = new URLSearchParams();
+          body.append('document', sel.dataset.doc);
+          body.append('folder', sel.value);
+          fetch('/files/remarkable/move', {
+              method: 'POST',
+              body: body,
+              headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' },
+          }).then(function(r) {
+              if (r.ok) { htmx.ajax('GET', rmFolderURL(), {target: '#main-content', swap: 'innerHTML'}); }
+              else { r.text().then(function(t) { alert('Move failed: ' + t); }); }
+          });
+      }
+  </script>
   {{end}}
 </div>

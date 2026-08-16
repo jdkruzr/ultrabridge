@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## v1.6.0 - 2026-08-16
 
 ### Added
+
+- **reMarkable file management — the tablet as an e-reader.** UltraBridge could receive everything from a reMarkable and give nothing back: no way to put a book on the device, get a file off it, or delete one. The Files tab (and `/api/v1/remarkable/`) now uploads PDF/EPUB into any folder, downloads the original payload back out, deletes (a move to the tablet's own trash, recoverable on-device), and manages folders — create, rename, move. Server-authored changes commit a new root generation through the same generation-CAS the device uses and push a SyncComplete to every connected tablet, so the device updates within seconds. Index serialization and composite hashing follow the device's own algorithm byte-for-byte (pinned by test vectors), per the rmfakecloud reference.
+
+  A visibility change rides along: documents whose parent is the tablet's trash no longer appear in UltraBridge listing or search — including items trashed on-device before this release.
 
 - **Collection-level change detection (RFC 6578).** Every CalDAV client was re-enumerating the whole task collection on every sync, because UltraBridge served no way to ask "did anything change?". `PROPFIND` for `CS:getctag` or `DAV:sync-token` came back 404, and a `sync-collection` REPORT came back `400 unsupported REPORT root`.
 
@@ -13,6 +17,8 @@
   `CS:getctag` is served alongside, carrying the same value, so clients that ask for it first — Cfait does — get their fast path without a wasted round trip.
 
 ### Fixed
+
+- **A lost root-commit race could corrupt the reMarkable tree.** The generation-checked blob write stored its payload file *before* checking the generation, so a writer that lost the optimistic-concurrency race (a device's 412, or now a server-side commit) still overwrote the root payload on disk while the database kept the winner's generation — the winner's committed tree silently replaced by the loser's. Surfaced by the new concurrent-commit tests; CAS writes now land in uniquely-named files whose path commits transactionally with the generation.
 
 - **Editing a completed task moved its completion date.** Verified against a live instance: a title-only edit shifted `COMPLETED` from `20260701T120000Z` to the moment of the write, discarding the client's correct value even though it was re-sent. Completion time was read from `last_modified`, following the Supernote convention documented in `docs/PRIVATE_CLOUD_REFERENCE.md` ("use as COMPLETED when status=completed") — but that convention only holds for a client that never edits a task after completing it. The device doesn't; UltraBridge does, and its own `Update` stamped that column on every write. Completion now lives in a dedicated `completed_at` column, end to end.
 

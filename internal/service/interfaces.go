@@ -233,6 +233,10 @@ type RemarkableEntry struct {
 	Parent    string `json:"parent"`
 	Path      string `json:"path,omitempty"`
 	PageCount int    `json:"page_count"`
+	FileType  string `json:"file_type,omitempty"` // "pdf" | "epub" | "notebook" | ""
+	// CanDownload marks documents whose original PDF/EPUB payload can be
+	// streamed back out (notebooks have no payload).
+	CanDownload bool `json:"can_download,omitempty"`
 }
 
 // RemarkablePage is one rendered/OCR'd page in a reMarkable detail view.
@@ -251,10 +255,14 @@ type RemarkableDocumentDetail struct {
 	Parent          string           `json:"parent"`
 	Path            string           `json:"path"`
 	PageCount       int              `json:"page_count"`
+	FileType        string           `json:"file_type,omitempty"`
 	FolderPath      []string         `json:"folder_path,omitempty"`
 	RenderAvailable bool             `json:"render_available"`
 	OCRAvailable    bool             `json:"ocr_available"`
-	Pages           []RemarkablePage `json:"pages,omitempty"`
+	// DownloadAvailable reports whether the original PDF/EPUB payload is on
+	// disk and can be streamed back out.
+	DownloadAvailable bool             `json:"download_available"`
+	Pages             []RemarkablePage `json:"pages,omitempty"`
 }
 
 // EmbeddingJobStatus represents the background processing state.
@@ -436,10 +444,20 @@ type NoteService interface {
 	// reMarkable (synced cloud-protocol source)
 	SetRemarkableReader(r RemarkableReader)
 	SetRemarkableReprocessor(r RemarkableReprocessor)
+	SetRemarkableFileManager(m RemarkableFileManager)
 	ListRemarkableDocuments(ctx context.Context) ([]RemarkableDocument, error)
 	ListRemarkableFolder(ctx context.Context, folderID, sortField, order string) (crumbs []RemarkableCrumb, entries []RemarkableEntry, err error)
 	GetRemarkableDocumentDetail(ctx context.Context, documentID string) (RemarkableDocumentDetail, error)
 	ReprocessRemarkableDocument(ctx context.Context, documentID string) error
+	// reMarkable file management (server-authored hashtree mutations; each
+	// commits a new root generation and pushes a sync to connected tablets)
+	UploadRemarkableDocument(ctx context.Context, filename, parentID string, payload io.Reader) (RemarkableDocument, error)
+	DownloadRemarkableDocument(ctx context.Context, documentID string) (stream io.ReadCloser, filename, contentType string, err error)
+	DeleteRemarkableDocument(ctx context.Context, documentID string) error
+	CreateRemarkableFolder(ctx context.Context, name, parentID string) (RemarkableDocument, error)
+	MoveRemarkableNode(ctx context.Context, documentID, newParentID string) error
+	RenameRemarkableNode(ctx context.Context, documentID, newName string) error
+	HasRemarkableFileManager() bool
 
 	// Source Presence
 	HasSupernoteSource() bool
@@ -665,6 +683,7 @@ type RemarkableDocument struct {
 	Type      string `json:"type"` // "folder" | "document"
 	Parent    string `json:"parent"`
 	PageCount int    `json:"page_count"`
+	FileType  string `json:"file_type,omitempty"` // "pdf" | "epub" | "notebook" | ""
 }
 
 type RemarkableDeviceService interface {

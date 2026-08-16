@@ -3,6 +3,7 @@ package remarkable
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"hash/crc32"
 	"net/http"
@@ -25,6 +26,21 @@ func crc32cHeaderValue(b []byte) string {
 	var be [4]byte
 	binary.BigEndian.PutUint32(be[:], crc32.Checksum(b, crc32cTable))
 	return "crc32c=" + base64.StdEncoding.EncodeToString(be[:])
+}
+
+// crc32cHexToHeader converts the store's hex CRC32C column (writeAtomically's
+// on-disk format) into the base64 form the header requires. The device
+// base64-decodes the value and hard-fails the download when it doesn't decode
+// to 4 bytes — serving the hex string verbatim reads as "no expected crc32
+// value provided" on-device and killed the first server-authored sync with
+// "Server index is empty". ok=false for malformed stored values (caller
+// should omit the header rather than emit garbage).
+func crc32cHexToHeader(hexCRC string) (string, bool) {
+	raw, err := hex.DecodeString(hexCRC)
+	if err != nil || len(raw) != 4 {
+		return "", false
+	}
+	return "crc32c=" + base64.StdEncoding.EncodeToString(raw), true
 }
 
 // writeJSONHashed marshals v and writes it with the GCS-style crc32c integrity

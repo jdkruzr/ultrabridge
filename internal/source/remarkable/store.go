@@ -504,6 +504,13 @@ func (s *store) deleteDocument(ctx context.Context, docID string) error {
 }
 
 func (s *store) putBlob(ctx context.Context, blobID string, body io.Reader, matchGeneration int64) (int64, error) {
+	// Optimistic path (root commits, device- or server-authored): delegate to
+	// the CAS variant, which defers the payload-file write until the
+	// generation check has committed.
+	if matchGeneration != 0 {
+		return s.putBlobCAS(ctx, blobID, body, matchGeneration)
+	}
+
 	path := filepath.Join(s.dataPath, "blobs", digestName(blobID))
 	size, crc, err := writeAtomically(path, body)
 	if err != nil {
@@ -519,58 +526,83 @@ func (s *store) putBlob(ctx context.Context, blobID string, body io.Reader, matc
 	// transactions would each hold a read lock and deadlock on the upgrade.
 	// SQLite returns BUSY immediately for that deadlock (busy_timeout cannot
 	// wait it out), which was the ~3.5% of 500s during the bulk first sync.
-	if matchGeneration == 0 {
-		var newGen int64
-		err := retryOnBusy(func() error {
-			return s.db.QueryRowContext(ctx, `
-				INSERT INTO remarkable_blobs(blob_id, generation, size_bytes, crc32c, payload_path, updated_at)
-				VALUES(?, 1, ?, ?, ?, ?)
-				ON CONFLICT(blob_id) DO UPDATE SET
-					generation = remarkable_blobs.generation + 1,
-					size_bytes = excluded.size_bytes,
-					crc32c = excluded.crc32c,
-					payload_path = excluded.payload_path,
-					updated_at = excluded.updated_at
-				RETURNING generation`,
-				blobID, size, crc, path, now).Scan(&newGen)
-		})
-		if err != nil {
-			return 0, err
-		}
-		return newGen, nil
-	}
-
-	// Optimistic path (root commits): verify the caller's expected generation.
-	// Effectively single-writer and low-frequency, but retried for safety.
 	var newGen int64
+	err = retryOnBusy(func() error {
+		return s.db.QueryRowContext(ctx, `
+			INSERT INTO remarkable_blobs(blob_id, generation, size_bytes, crc32c, payload_path, updated_at)
+			VALUES(?, 1, ?, ?, ?, ?)
+			ON CONFLICT(blob_id) DO UPDATE SET
+				generation = remarkable_blobs.generation + 1,
+				size_bytes = excluded.size_bytes,
+				crc32c = excluded.crc32c,
+				payload_path = excluded.payload_path,
+				updated_at = excluded.updated_at
+			RETURNING generation`,
+			blobID, size, crc, path, now).Scan(&newGen)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return newGen, nil
+}
+
+// putBlobCAS is the generation-checked path for blobs whose payload must not
+// be clobbered by a losing writer. The previous implementation reused one
+// on-disk path and wrote it BEFORE the generation check, so a failed CAS (a
+// device's 412, or a server commit losing a race) still overwrote the file
+// while the DB row kept the winner's generation — for the root blob that
+// silently replaced the winner's committed tree with the loser's. Here each
+// write lands in its own uniquely-named file whose path is committed
+// transactionally with the generation, so readers always see a payload
+// matching the generation they fetched. The superseded generation's file is
+// removed best-effort after commit; a failed CAS removes its own file.
+func (s *store) putBlobCAS(ctx context.Context, blobID string, body io.Reader, matchGeneration int64) (int64, error) {
+	dir := filepath.Join(s.dataPath, "blobs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return 0, err
+	}
+	f, err := os.CreateTemp(dir, digestName(blobID)+".cas-*")
+	if err != nil {
+		return 0, err
+	}
+	path := f.Name()
+	h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+	size, err := io.Copy(io.MultiWriter(f, h), body)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(path)
+		return 0, err
+	}
+	sum := h.Sum32()
+	crc := hex.EncodeToString([]byte{byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum)})
+	now := time.Now().UnixMilli()
+
+	var newGen int64
+	var oldPath string
 	err = retryOnBusy(func() error {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
-		var current blobRecord
+		var currentGen int64
 		err = tx.QueryRowContext(ctx, `
-			SELECT generation, size_bytes, crc32c, payload_path
-			FROM remarkable_blobs WHERE blob_id = ?`, blobID).
-			Scan(&current.Generation, &current.Size, &current.CRC32C, &current.Path)
+			SELECT generation, payload_path FROM remarkable_blobs WHERE blob_id = ?`, blobID).
+			Scan(&currentGen, &oldPath)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if errors.Is(err, sql.ErrNoRows) || current.Generation != matchGeneration {
+		if errors.Is(err, sql.ErrNoRows) || currentGen != matchGeneration {
 			return errGenerationMismatch
 		}
-		g := current.Generation + 1
+		g := currentGen + 1
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO remarkable_blobs(blob_id, generation, size_bytes, crc32c, payload_path, updated_at)
-			VALUES(?, ?, ?, ?, ?, ?)
-			ON CONFLICT(blob_id) DO UPDATE SET
-				generation = excluded.generation,
-				size_bytes = excluded.size_bytes,
-				crc32c = excluded.crc32c,
-				payload_path = excluded.payload_path,
-				updated_at = excluded.updated_at`,
-			blobID, g, size, crc, path, now); err != nil {
+			UPDATE remarkable_blobs
+			SET generation = ?, size_bytes = ?, crc32c = ?, payload_path = ?, updated_at = ?
+			WHERE blob_id = ?`,
+			g, size, crc, path, now, blobID); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -580,7 +612,11 @@ func (s *store) putBlob(ctx context.Context, blobID string, body io.Reader, matc
 		return nil
 	})
 	if err != nil {
+		os.Remove(path)
 		return 0, err
+	}
+	if oldPath != "" && oldPath != path {
+		os.Remove(oldPath) // superseded generation's payload; best-effort
 	}
 	return newGen, nil
 }

@@ -24,7 +24,7 @@ require (
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jdkruzr/rhizome/server-go v0.8.0
 	github.com/mattn/go-isatty v0.0.20 // indirect

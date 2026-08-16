@@ -631,7 +631,9 @@ func (p *protocol) serveBlobByID(w http.ResponseWriter, r *http.Request, blobID 
 		return
 	}
 	w.Header().Set("x-goog-generation", fmt.Sprintf("%d", rec.Generation))
-	w.Header().Set("x-goog-hash", "crc32c="+rec.CRC32C)
+	if v, ok := crc32cHexToHeader(rec.CRC32C); ok {
+		w.Header().Set(gcsHashHeader, v)
+	}
 	http.ServeFile(w, r, rec.Path)
 }
 

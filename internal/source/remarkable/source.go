@@ -4,10 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/sysop/ultrabridge/internal/source"
 )
@@ -123,6 +129,152 @@ func (s *Source) RenderDocument(ctx context.Context, documentID string) (RenderD
 		return RenderDocument{}, fmt.Errorf("remarkable source not started")
 	}
 	return s.store.renderDocument(ctx, documentID)
+}
+
+// afterServerMutation runs the same post-commit hooks a device-driven root
+// commit gets — FTS/OCR refresh, then a SyncComplete fan-out with no
+// originating device so every connected tablet pulls the new root. With no
+// devices connected this is a no-op; the next sync reconciles.
+func (s *Source) afterServerMutation(ctx context.Context) {
+	if s.protocol != nil {
+		s.protocol.refreshMetadataIndex(ctx)
+	}
+	if s.hub != nil {
+		s.hub.notifySync("remarkable", "", "UltraBridge")
+	}
+}
+
+// UploadDocument authors a new document from a PDF or EPUB payload and
+// commits it into the synced hashtree. filename supplies both the visible
+// name (extension stripped) and the file type; parentID is "" for My files
+// or a folder's document ID.
+func (s *Source) UploadDocument(ctx context.Context, filename, parentID string, payload io.Reader) (Document, error) {
+	if s.store == nil {
+		return Document{}, fmt.Errorf("remarkable source not started")
+	}
+	base := filepath.Base(filename)
+	ext := filepath.Ext(base) // original case; matched case-insensitively
+	var fileType string
+	switch strings.ToLower(ext) {
+	case ".pdf":
+		fileType = "pdf"
+	case ".epub":
+		fileType = "epub"
+	default:
+		return Document{}, fmt.Errorf("%w: %q", ErrUnsupportedFile, ext)
+	}
+	name := strings.TrimSpace(strings.TrimSuffix(base, ext))
+	if name == "" {
+		return Document{}, fmt.Errorf("%w: empty document name", ErrUnsupportedFile)
+	}
+
+	payloadHash, payloadSize, err := s.store.stageBlobStream(ctx, payload)
+	if err != nil {
+		return Document{}, err
+	}
+	if payloadSize == 0 {
+		return Document{}, fmt.Errorf("%w: empty payload", ErrUnsupportedFile)
+	}
+	docID := uuid.New().String()
+	if err := s.store.createDocument(ctx, docID, name, parentID, fileType, payloadHash, payloadSize); err != nil {
+		return Document{}, err
+	}
+	s.afterServerMutation(ctx)
+	return Document{ID: docID, Name: name, Type: "document", Parent: parentID, FileType: fileType}, nil
+}
+
+// DownloadDocument streams a document's original payload (the PDF or EPUB it
+// was created from — annotations are not baked in). Notebooks have no
+// payload and return ErrNoPayload.
+func (s *Source) DownloadDocument(ctx context.Context, documentID string) (io.ReadCloser, string, string, error) {
+	if s.store == nil {
+		return nil, "", "", fmt.Errorf("remarkable source not started")
+	}
+	doc, err := s.store.renderDocument(ctx, documentID)
+	if errors.Is(err, errDocumentNotFound) {
+		return nil, "", "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", "", err
+	}
+	path, ext, contentType := doc.PDFPath, ".pdf", "application/pdf"
+	if path == "" {
+		path, ext, contentType = doc.EPUBPath, ".epub", "application/epub+zip"
+	}
+	if path == "" {
+		return nil, "", "", ErrNoPayload
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", "", err
+	}
+	name := strings.TrimSpace(doc.Name)
+	if name == "" {
+		name = documentID
+	}
+	return f, name + ext, contentType, nil
+}
+
+// DeleteDocument moves a document or empty folder to the tablet's trash
+// (parent "trash") and drops it from UB's listing and search index. The
+// tablet can restore it from its own trash screen.
+func (s *Source) DeleteDocument(ctx context.Context, documentID string) error {
+	if s.store == nil {
+		return fmt.Errorf("remarkable source not started")
+	}
+	if err := s.store.trashNode(ctx, documentID); err != nil {
+		return err
+	}
+	if s.protocol != nil {
+		s.protocol.deleteMetadataIndex(ctx, documentID)
+	}
+	s.afterServerMutation(ctx)
+	return nil
+}
+
+// CreateFolder authors a new folder under parentID ("" = My files).
+func (s *Source) CreateFolder(ctx context.Context, name, parentID string) (Document, error) {
+	if s.store == nil {
+		return Document{}, fmt.Errorf("remarkable source not started")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Document{}, fmt.Errorf("remarkable: folder name is required")
+	}
+	docID := uuid.New().String()
+	if err := s.store.createFolder(ctx, docID, name, parentID); err != nil {
+		return Document{}, err
+	}
+	s.afterServerMutation(ctx)
+	return Document{ID: docID, Name: name, Type: "folder", Parent: parentID}, nil
+}
+
+// MoveNode re-parents a document or folder ("" = My files).
+func (s *Source) MoveNode(ctx context.Context, documentID, newParentID string) error {
+	if s.store == nil {
+		return fmt.Errorf("remarkable source not started")
+	}
+	if err := s.store.moveNode(ctx, documentID, newParentID); err != nil {
+		return err
+	}
+	s.afterServerMutation(ctx)
+	return nil
+}
+
+// RenameNode sets a document or folder's visible name.
+func (s *Source) RenameNode(ctx context.Context, documentID, newName string) error {
+	if s.store == nil {
+		return fmt.Errorf("remarkable source not started")
+	}
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return fmt.Errorf("remarkable: name is required")
+	}
+	if err := s.store.renameNode(ctx, documentID, newName); err != nil {
+		return err
+	}
+	s.afterServerMutation(ctx)
+	return nil
 }
 
 // ReprocessDocument forces all renderable pages in a document through the

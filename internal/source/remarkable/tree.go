@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/sysop/ultrabridge/internal/pdfrender"
 )
 
 // Document is a single node in the reMarkable document tree — a folder or a
@@ -22,6 +24,7 @@ type Document struct {
 	Type      string `json:"type"` // "folder" | "document"
 	Parent    string `json:"parent"`
 	PageCount int    `json:"page_count"`
+	FileType  string `json:"file_type,omitempty"` // "pdf" | "epub" | "notebook" | "" (folders, legacy)
 }
 
 // indexEntry is one line of a hashtree index file:
@@ -68,6 +71,7 @@ type RenderDocument struct {
 	PageCount     int
 	Revision      string
 	PDFPath       string
+	EPUBPath      string
 	CacheDir      string
 	PageRM        map[string]RenderBlob
 	PageAssets    map[string][]RenderBlob
@@ -86,20 +90,28 @@ type RenderBlob struct {
 // the schema version; v4 carries an extra summary line we skip. Faithful to the
 // rmfakecloud format (internal/storage/models/hashtree.go).
 func parseIndex(r []byte) ([]indexEntry, error) {
+	_, entries, err := parseIndexWithSchema(r)
+	return entries, err
+}
+
+// parseIndexWithSchema is parseIndex plus the schema line, for writers that
+// must preserve the stored schema when they rewrite an index.
+func parseIndexWithSchema(r []byte) (string, []indexEntry, error) {
 	sc := bufio.NewScanner(bytes.NewReader(r))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	if !sc.Scan() {
-		return nil, nil // empty index
+		return docIndexSchema, nil, nil // empty index
 	}
-	switch schema := strings.TrimSpace(sc.Text()); schema {
+	schema := strings.TrimSpace(sc.Text())
+	switch schema {
 	case "4":
 		if !sc.Scan() {
-			return nil, fmt.Errorf("v4 index missing summary line")
+			return "", nil, fmt.Errorf("v4 index missing summary line")
 		}
 	case "3":
 		// no summary line
 	default:
-		return nil, fmt.Errorf("unknown index schema %q", schema)
+		return "", nil, fmt.Errorf("unknown index schema %q", schema)
 	}
 
 	var entries []indexEntry
@@ -110,15 +122,15 @@ func parseIndex(r []byte) ([]indexEntry, error) {
 		}
 		fields := strings.Split(line, ":")
 		if len(fields) != 5 {
-			return nil, fmt.Errorf("index entry has %d fields, want 5: %q", len(fields), line)
+			return "", nil, fmt.Errorf("index entry has %d fields, want 5: %q", len(fields), line)
 		}
 		subfiles, err := strconv.Atoi(fields[3])
 		if err != nil {
-			return nil, fmt.Errorf("index entry subfiles %q: %w", line, err)
+			return "", nil, fmt.Errorf("index entry subfiles %q: %w", line, err)
 		}
 		size, err := strconv.ParseInt(fields[4], 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("index entry size %q: %w", line, err)
+			return "", nil, fmt.Errorf("index entry size %q: %w", line, err)
 		}
 		entries = append(entries, indexEntry{
 			Hash:      fields[0],
@@ -128,7 +140,7 @@ func parseIndex(r []byte) ([]indexEntry, error) {
 			Size:      size,
 		})
 	}
-	return entries, sc.Err()
+	return schema, entries, sc.Err()
 }
 
 // listDocumentTree builds the document/folder listing. It prefers the modern
@@ -205,7 +217,10 @@ func (s *store) documentFromSubtree(ctx context.Context, docEntry indexEntry) (D
 	if err := s.readJSONBlob(ctx, metaHash, &meta); err != nil {
 		return Document{}, false, nil // metadata blob not synced yet — skip
 	}
-	if meta.Deleted {
+	if meta.Deleted || meta.Parent == trashParent {
+		// Trashed nodes stay on the tablet's trash screen but are invisible
+		// to UB listing, search, and the FTS index (pruneStale drops rows for
+		// paths that leave this set).
 		return Document{}, false, nil
 	}
 
@@ -218,6 +233,7 @@ func (s *store) documentFromSubtree(ctx context.Context, docEntry indexEntry) (D
 	if contentHash != "" {
 		var content rmContent
 		if err := s.readJSONBlob(ctx, contentHash, &content); err == nil {
+			doc.FileType = content.FileType
 			doc.PageCount = content.PageCount
 			if doc.PageCount == 0 {
 				doc.PageCount = len(content.Pages)
@@ -289,7 +305,7 @@ func (s *store) renderDocument(ctx context.Context, documentID string) (RenderDo
 	if err := s.readJSONBlob(ctx, metaEntry.Hash, &meta); err != nil {
 		return RenderDocument{}, errDocumentNotFound
 	}
-	if meta.Deleted || mapEntryType(meta.Type) != "document" {
+	if meta.Deleted || meta.Parent == trashParent || mapEntryType(meta.Type) != "document" {
 		return RenderDocument{}, errDocumentNotFound
 	}
 
@@ -318,6 +334,11 @@ func (s *store) renderDocument(ctx context.Context, documentID string) (RenderDo
 	if pdfEntry, ok := filesByName[documentID+".pdf"]; ok {
 		if rec, err := s.getBlob(ctx, pdfEntry.Hash); err == nil {
 			out.PDFPath = rec.Path
+		}
+	}
+	if epubEntry, ok := filesByName[documentID+".epub"]; ok {
+		if rec, err := s.getBlob(ctx, epubEntry.Hash); err == nil {
+			out.EPUBPath = rec.Path
 		}
 	}
 
@@ -355,6 +376,14 @@ func (s *store) renderDocument(ctx context.Context, documentID string) (RenderDo
 	}
 	if out.PageCount == 0 {
 		out.PageCount = len(out.PageOrder)
+	}
+	if out.PageCount == 0 && out.PDFPath != "" && pdfrender.Available() {
+		// A server-uploaded PDF has pageCount 0 in .content until the tablet
+		// opens it and syncs real page metadata back; count the actual PDF
+		// pages so render/OCR can start immediately.
+		if n, err := pdfrender.PageCount(out.PDFPath); err == nil {
+			out.PageCount = n
+		}
 	}
 	out.Renderable = out.PDFPath != "" || len(out.PageRM) > 0
 	if !out.Renderable {
