@@ -205,7 +205,7 @@ services:
     ports:
       - "${UB_PORT}:8443"
       # Supernote device-sync (SPC) server. Only listens when
-      # Settings > UB-as-SPC Device Sync Server > Mode = server.
+      # Settings > UB-as-SPC Device Sync Server > "Enable device sync server".
       - "${UB_SPC_PORT}:8089"
     environment:
       - UB_DB_PATH=/data/ultrabridge.db
@@ -281,7 +281,8 @@ echo
 echo "  Complete configuration in the Settings UI."
 echo
 echo "  Supernote sync (SPC) is exposed on host port ${UB_SPC_PORT} (-> :8089)."
-echo "  Enable it under Settings > UB-as-SPC Device Sync Server (Mode = server),"
+echo "  Enable it under Settings > UB-as-SPC Device Sync Server"
+echo "  (tick \"Enable device sync server\"),"
 echo "  then restart. Behind a reverse proxy it needs its OWN Supernote/SPC hostname"
 echo "  routing to :8089, separate from the web UI host on ${UB_PORT}. For example:"
 echo "    supernote.example.com -> :8089"

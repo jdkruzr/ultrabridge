@@ -963,8 +963,10 @@ func (s *noteService) GetForestNoteNotebookDetail(ctx context.Context, notebookI
 }
 
 // DeleteForestNoteNotebook soft-deletes a notebook (authoritative) and then
-// de-indexes each of its pages from search + embeddings (best-effort). It is a
-// UB-local hide, not a device tombstone — see syncstore.SoftDeleteNotebook.
+// de-indexes each of its pages from search + embeddings (best-effort). The
+// delete authors real tombstone ops that reach devices on their next sync —
+// see syncstore.SoftDeleteNotebook — but LWW means a later device edit wins
+// and resurrects the row.
 func (s *noteService) DeleteForestNoteNotebook(ctx context.Context, notebookID string) error {
 	if s.fnReader == nil {
 		return fmt.Errorf("forestnote source not available")

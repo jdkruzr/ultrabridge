@@ -804,7 +804,7 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 	mcp.AddTool[listTasksInput, any](server, &mcp.Tool{
 		Name: "list_tasks",
 		Description: "List tasks from UltraBridge. Optional filters: " +
-			"status (needs_action / completed / all, default all); " +
+			"status (needs_action / in_process / completed / cancelled / all, default all); " +
 			"due_before / due_after as RFC3339 (tasks with no due date excluded when either is set); " +
 			"notebook_id / notebook_name / source (ForestNote provenance — match tasks created from a specific notebook or input source); " +
 			"category (single VTODO CATEGORIES entry, case-sensitive); " +

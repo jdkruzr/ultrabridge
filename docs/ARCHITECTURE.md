@@ -48,7 +48,9 @@ docs.
   (`:8089` by default). The Supernote connects to UltraBridge directly;
   tasks, files, and digests all sync over SPC. There is no external
   `supernote-service` and no MariaDB. The legacy SPC client was removed
-  in 2026-05. UltraBridge wins on task conflicts.
+  in 2026-05. UltraBridge's task store is authoritative; device writes
+  are merged read-modify-write at the device boundary so fields the
+  device does not model survive its edits.
 - **Two listeners, two hostnames.** The SPC server (`:8089`) and the
   main app (`:8443` for web UI, CalDAV, Boox WebDAV, MCP, ForestNote,
   and reMarkable) are separate ports. Behind a reverse proxy each needs
@@ -56,20 +58,32 @@ docs.
 - **CalDAV is SQLite-backed.** The CalDAV subsystem reads and writes
   `internal/taskdb`. A Supernote completion arrives over SPC, lands in
   that same taskdb, and surfaces to CalDAV clients. A CalDAV completion
-  flows back to the device the same way.
+  flows back to the device the same way. Since v1.6.0 the collection
+  also answers `DAV:sync-token` / `CS:getctag` and the `sync-collection`
+  REPORT (RFC 6578), so clients fetch deltas instead of re-enumerating
+  every task on every sync.
 - **Boox uses WebDAV, not SPC.** Boox devices push `.note` files into
   UltraBridge's embedded WebDAV server on the main listener.
 - **ForestNote uses `/sync/v1`.** ForestNote devices sync through a
   JSON sync endpoint on the main listener. The source owns mirror state,
   relay-log compaction, device pruning, page rendering, and client OCR
   handoff into the shared index.
-- **reMarkable uses a protocol surface on the main listener.** The
-  source owns pairing, tokens, blob/document storage, render/OCR queues,
-  tablet search compatibility, and optional MyScript HWR proxying.
+- **reMarkable is two-way.** Besides pairing, tokens, blob/document
+  storage, render/OCR queues, tablet search compatibility, and optional
+  MyScript HWR proxying, the source authors its own hashtree mutations
+  (`treewrite.go`) — upload, download, delete-to-trash, and folder
+  create/rename/move — each committing a new root generation through
+  the same generation-CAS the device uses, then pushing a SyncComplete
+  to connected tablets.
 - **Unified search.** Source pipelines write into the same
   `note_content` FTS5 table and embedding store, so search and RAG chat
   cross device boundaries transparently even though Files tabs are
-  per-source.
+  per-source. Supernote digests are a fifth searchable surface with
+  their own facet and badge.
+- **One pipeline status bar.** The web layer renders a single
+  persistent pipeline bar in the layout chrome, outside the HTMX swap
+  target, so processing state survives client-side navigation on every
+  page; Supernote and Boox expose start/stop controls there.
 
 ## Supernote Notes Pipeline Flow
 
@@ -117,6 +131,8 @@ Boox device syncs via WebDAV
          +- index page text -> FTS5
          +- if embedding enabled: text -> Ollama -> vector stored
          `- job marked done
+            (empty notebook -> skipped; transient OCR failure -> requeued
+             with backoff, 1m doubling to 30m, 5 attempts; 4xx -> failed)
                   |
                   v
    Unified FTS5 search index + vector cache
@@ -149,13 +165,29 @@ reMarkable device sync/search/HWR routes on :8443
          |
          +- register devices and tokens
          +- store document metadata and blob payloads
-         +- render supported notebook pages
-         +- enqueue OCR for searchable text
+         +- render notebook pages and annotated PDF pages
+         +- enqueue OCR for searchable text (startup + watchdog reclaim)
          +- serve tablet search compatibility payloads
          `- optionally proxy native HWR to MyScript
                   |
                   v
        reMarkable Files tab, Search, RAG chat, and tablet sync/search
+
+UltraBridge is also a writer of the same tree:
+
+   Files tab / /api/v1/remarkable/  (upload, download, trash, folders)
+         |
+         v
+   server-authored hashtree mutation (internal/source/remarkable/treewrite.go)
+         |
+         +- stage content-addressed blobs
+         +- serialize the index byte-exactly to the device's algorithm
+         +- commit a new root generation through the same generation-CAS
+         |    the device uses (lost race -> re-read, re-apply)
+         `- fan a SyncComplete out to every connected tablet
+                  |
+                  v
+       the tablet pulls the new root within seconds
 ```
 
 ## Task Mutation Flow
@@ -175,7 +207,7 @@ Web UI form / MCP tool call / CalDAV client PUT
                   |
                   v
          Device pulls /api/file/schedule/task/all over SPC and sees
-         the change (UltraBridge wins on conflict).
+         the change (device writes are merged, not authoritative).
 
 A Supernote-side change flows the same way in reverse: the device
 PUTs /api/file/schedule/task/list -> taskdb -> CalDAV clients and the
@@ -191,9 +223,17 @@ than individual stores:
   notification.
 - `NoteService` - file listings and detail views for Supernote, Boox,
   ForestNote, and reMarkable; per-file/page fetch; rendering; OCR
-  controls; bulk actions; and source-specific maintenance.
+  controls; bulk actions; source-specific maintenance; and reMarkable
+  file management (upload/download/trash/folder operations), present
+  only when the source is wired.
 - `SearchService` - FTS + hybrid search and chat sessions with
   RAG-augmented streaming responses.
+- `DigestService` - Supernote digest listing, detail, and render
+  surfaces (SPC-server mode only).
+- `SyncDeviceService` - ForestNote device registry: list, prune, rename
+  (operator label), and relay-log compaction.
+- `RemarkableDeviceService` - reMarkable device registry: list and
+  rename.
 - `ConfigService` - runtime config, sources, MCP tokens, sync status,
   and source/device settings.
 

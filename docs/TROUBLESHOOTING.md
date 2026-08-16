@@ -49,11 +49,21 @@ This page covers current user-facing deployments. Historical design and test pla
 2. Some clients require the direct collection URL with a trailing slash:
 
    ```text
-   https://your-host/caldav/tasks/
+   https://your-host/caldav/user/calendars/tasks/
    ```
 
 3. Confirm credentials match your UltraBridge user or bearer-token flow.
 4. If the collection exists but tasks are missing, check the Tasks tab and logs for soft-delete or sync errors.
+
+### Client Keeps Re-Downloading Every Task
+
+1. UltraBridge serves `CS:getctag` and `DAV:sync-token` on the task collection, and the `DAV:sync-collection` REPORT (RFC 6578). If a client still full-syncs every time, confirm your reverse proxy forwards the `REPORT` and `PROPFIND` verbs unaltered.
+2. A `DAV:valid-sync-token` error is normal for a stale or unrecognized token — the client should discard it and re-enumerate once. A hard purge of deleted tasks deliberately invalidates all outstanding tokens.
+3. The token advances on deletes as well as edits, so a client that never sees deletions is caching, not being under-served.
+
+### Task Status Looks Wrong After A Device Sync
+
+All four RFC 5545 statuses (`NEEDS-ACTION`, `IN-PROCESS`, `COMPLETED`, `CANCELLED`) round-trip natively since v1.6.0; before that, `IN-PROCESS` and `CANCELLED` collapsed to `NEEDS-ACTION`. The Supernote itself only understands two states, so on-device an in-process task shows as open and a cancelled one as completed — the real state is preserved server-side and in CalDAV.
 
 ### Attachments Do Not Appear In A Client
 
@@ -68,15 +78,15 @@ This page covers current user-facing deployments. Historical design and test pla
 
 1. Confirm the source exists and is enabled in **Settings -> Devices**.
 2. Check that the container can read/write the configured path.
-3. Watch the Logs tab while pressing Scan, Reprocess, or the source-specific action.
+3. Watch the **Pipeline Status** bar at the top of the page (present on every page, expandable to a per-source breakdown) while pressing Scan, Reprocess, or the source-specific action, and check the Logs tab if nothing moves.
 
 ### Supernote Sync Does Not Start
 
-1. Enable **Settings -> Devices -> UB-as-SPC Device Sync Server -> Mode: server** and restart if prompted.
+1. Tick **Settings -> Devices -> UB-as-SPC Device Sync Server -> Enable device sync server**, save, and restart the container. (There is no longer a "Mode" dropdown; internally the setting is still `spc_mode=server`, and `client` simply means the listener is off.)
 2. Publish the SPC listener port, normally `8089`.
 3. Use a dedicated reverse-proxy hostname for the Supernote device. Do not share the web UI hostname.
 4. Preserve the `Host` header and WebSocket upgrade for `/socket.io/`.
-5. Confirm the SPC file root points at the full Supernote storage root, not only the `Note/` folder.
+5. Confirm the SPC file root is a dedicated, UltraBridge-owned directory (not an existing Supernote Private Cloud data dir), and that the Supernote source's notes path points inside it at `<file root>/NOTE/Note`.
 
 ### Boox Uploads Do Not Arrive
 
@@ -88,7 +98,7 @@ This page covers current user-facing deployments. Historical design and test pla
 
 2. Confirm the Boox source path is mounted into the container.
 3. Uploaded files should land under the configured path, typically below an `onyx/` tree.
-4. Use the Boox maintenance actions in **Settings -> Devices** to scan disk, reconcile dates, or remove auto-named junk notebooks.
+4. Use the **Database Maintenance** actions in **Settings -> Devices -> Boox** to scan disk and enqueue untracked files, reconcile `created_at` with filename dates, or delete auto-named `Notebook-N` files. If you imported files outside the notes tree, **Migrate Imports** (on the Boox Files tab) copies them in.
 
 ### ForestNote Sync Is Not Moving Data
 
@@ -103,6 +113,14 @@ This page covers current user-facing deployments. Historical design and test pla
 2. Check the reMarkable source/device panel in **Settings -> Devices**.
 3. Ensure your reverse proxy forwards the device-facing reMarkable API routes to the main app listener.
 4. If search fails on the tablet, check `/search/v1/error` traffic and UltraBridge logs before changing token or device state.
+
+### reMarkable Uploads, Downloads, Or Deletes Fail
+
+1. Uploads accept `.pdf` and `.epub` only, up to 512 MiB (a larger file is rejected with `413`).
+2. Deleting a non-empty folder is refused deliberately — empty it first.
+3. A deleted item is not gone: it moves to the tablet's own trash (restorable on-device) and disappears from UltraBridge's listing and search. This also applies to items trashed on the device.
+4. Server-authored changes push a sync notification; if the tablet doesn't show the change within seconds, it isn't currently connected — it catches up on its next sync.
+5. File management requires a tablet that has completed at least one modern (`/sync/v3`) sync; until then mutations are refused with a conflict error.
 
 ## OCR, Search, And Chat
 
