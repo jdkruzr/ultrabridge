@@ -1,7 +1,7 @@
 package registry
 
 // ForestNote is ForestNote's synced data shape declared as a Registry — the canonical worked
-// example AND the live-cutover guard: its SchemaHash MUST equal ForestNote's production v3 hash
+// example AND the live-cutover guard: its SchemaHash MUST equal ForestNote's production v5 hash
 // (see registry_test.go and the Kotlin SchemaHashTest). At Phase 8 this declaration moves into
 // ForestNote/UltraBridge; it lives here now so both the registry tests and the conformance runner
 // (which normalizes the migrated UB merge vectors) share one definition.
@@ -34,6 +34,8 @@ func ForestNote() Registry {
 				// Per-notebook page aspect (v4): virtual long-axis captured from the creating
 				// device. Synced so a note keeps its native shape across devices. NULL = legacy.
 				{Name: "aspect_long_axis", Type: Int, Nullable: true},
+				{Name: "page_width", Type: Int, Nullable: true},
+				{Name: "page_height", Type: Int, Nullable: true},
 			},
 		},
 		{
@@ -55,6 +57,10 @@ func ForestNote() Registry {
 				{Name: "pen_width_min", Type: Int},
 				{Name: "pen_width_max", Type: Int},
 				{Name: "points", Type: Blob},
+				{Name: "brush_kind", Type: Text},
+				{Name: "brush_version", Type: Int},
+				{Name: "brush_seed", Type: Int},
+				{Name: "point_dynamics", Type: Blob, Nullable: true},
 				{Name: "z", Type: Int},
 				ts("created_at", false),
 				ts("deleted_at", true),

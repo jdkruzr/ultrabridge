@@ -212,13 +212,18 @@ func (b *Bridge) processPage(ctx context.Context, pagePK string) {
 		b.dropPage(ctx, pagePK, path)
 		return
 	}
+	notebook, err := b.store.NotebookMeta(ctx, notebookID)
+	if err != nil {
+		b.logger.Warn("syncbridge: notebook geometry missing; using legacy page", "notebook", notebookID, "err", err)
+		notebook.PageWidth, notebook.PageHeight = 10000, 13333
+	}
 
 	// Render strokes only for OCR. Text boxes are appended as canonical native UTF-8
 	// further down, so drawing them here too would round-trip them through OCR and
 	// stack each box's text 2-3× in the authored body (which the dialog renders to
 	// the user verbatim). See the body-composition note below. The web-UI render path
 	// in service/note.go keeps drawing text boxes — only the OCR-bound JPEG omits them.
-	img, err := forestrender.RenderPage(MapStrokes(strokes), nil)
+	img, err := forestrender.RenderPageSized(MapStrokes(strokes), nil, notebook.PageWidth, notebook.PageHeight)
 	if err != nil {
 		b.logger.Error("syncbridge: render failed", "page", pagePK, "err", err)
 		return
@@ -328,7 +333,8 @@ func MapStrokes(sd []syncstore.StrokeData) []forestrender.Stroke {
 	for i, s := range sd {
 		out[i] = forestrender.Stroke{
 			Color: s.Color, PenWidthMin: s.PenWidthMin, PenWidthMax: s.PenWidthMax,
-			Points: s.Points, Z: s.Z,
+			Points: s.Points, BrushKind: s.BrushKind, BrushVersion: s.BrushVersion,
+			BrushSeed: s.BrushSeed, PointDynamics: s.PointDynamics, Z: s.Z,
 		}
 	}
 	return out

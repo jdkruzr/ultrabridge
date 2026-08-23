@@ -14,13 +14,14 @@ The route is served from the main app listener, usually:
 https://ub.example.com/sync/v1
 ```
 
-UltraBridge speaks sync schema **v4**. A v3 client is still accepted during the rollout grace window; v2 and older are rejected with HTTP 409 — update the app.
+UltraBridge speaks ForestNote sync schema **v5**. ForestNote 1.8's v4 schema remains accepted for one release; v3 and older are rejected with HTTP 409 — update the app. During the grace window UltraBridge fills v4 strokes as Fountain Pen v1 and uses their legacy page aspect, so an old device never produces malformed v5 rows.
 
 ## What Syncs
 
 - Notebooks, folders, pages, strokes, and tombstones.
 - Text boxes and page templates.
-- Per-notebook page aspect, so a note keeps its native shape across devices instead of being distorted to fit.
+- Exact creator-page width and height, so the usable canvas stays identical across differently shaped devices.
+- Portable brush identity, renderer version, deterministic texture seed, and optional pen tilt/orientation. Viwoods and Boox firmware styles are only live previews; ForestNote's committed renderer is the cross-device authority.
 - Client OCR rows from ForestNote.
 - Server-authored OCR text, which flows back down to devices.
 

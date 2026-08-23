@@ -42,6 +42,8 @@ type NotebookRow struct {
 	PageCount  int
 	CreatedAt  int64 // ms UTC, 0 = unset
 	ModifiedAt int64 // ms UTC, derived
+	PageWidth  int64 // virtual units; legacy defaults to 10000
+	PageHeight int64 // virtual units; legacy defaults to aspect_long_axis / 13333
 }
 
 // notebookModifiedExpr is the SQLite scalar MAX(...) (NOT the aggregate — there
@@ -94,7 +96,8 @@ func (s *Store) ListFolders(ctx context.Context) ([]FolderRow, error) {
 func (s *Store) ListNotebooks(ctx context.Context) ([]NotebookRow, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT n.id, COALESCE(n.name, ''), COALESCE(n.folder_id, ''), COALESCE(n.sort_order, 0),
-		        `+notebookPageCountExpr+`, COALESCE(n.created_at, 0), `+notebookModifiedExpr+`
+		        `+notebookPageCountExpr+`, COALESCE(n.created_at, 0), `+notebookModifiedExpr+`,
+		        COALESCE(n.page_width, 10000), COALESCE(n.page_height, n.aspect_long_axis, 13333)
 		   FROM fn_notebook n WHERE n.deleted_at IS NULL ORDER BY n.sort_order, n.name`)
 	if err != nil {
 		return nil, fmt.Errorf("list notebooks: %w", err)
@@ -103,7 +106,7 @@ func (s *Store) ListNotebooks(ctx context.Context) ([]NotebookRow, error) {
 	var out []NotebookRow
 	for rows.Next() {
 		var n NotebookRow
-		if err := rows.Scan(&n.ID, &n.Name, &n.FolderID, &n.SortOrder, &n.PageCount, &n.CreatedAt, &n.ModifiedAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.Name, &n.FolderID, &n.SortOrder, &n.PageCount, &n.CreatedAt, &n.ModifiedAt, &n.PageWidth, &n.PageHeight); err != nil {
 			return nil, fmt.Errorf("scan notebook: %w", err)
 		}
 		out = append(out, n)
@@ -140,7 +143,8 @@ func (s *Store) ListFolderContents(ctx context.Context, folderID string) ([]Fold
 
 	nrows, err := s.db.QueryContext(ctx,
 		`SELECT n.id, COALESCE(n.name, ''), COALESCE(n.folder_id, ''), COALESCE(n.sort_order, 0),
-		        `+notebookPageCountExpr+`, COALESCE(n.created_at, 0), `+notebookModifiedExpr+`
+		        `+notebookPageCountExpr+`, COALESCE(n.created_at, 0), `+notebookModifiedExpr+`,
+		        COALESCE(n.page_width, 10000), COALESCE(n.page_height, n.aspect_long_axis, 13333)
 		   FROM fn_notebook n
 		  WHERE n.deleted_at IS NULL AND COALESCE(n.folder_id, '') = ?
 		  ORDER BY n.sort_order, n.name`, folderID)
@@ -151,7 +155,7 @@ func (s *Store) ListFolderContents(ctx context.Context, folderID string) ([]Fold
 	var notebooks []NotebookRow
 	for nrows.Next() {
 		var n NotebookRow
-		if err := nrows.Scan(&n.ID, &n.Name, &n.FolderID, &n.SortOrder, &n.PageCount, &n.CreatedAt, &n.ModifiedAt); err != nil {
+		if err := nrows.Scan(&n.ID, &n.Name, &n.FolderID, &n.SortOrder, &n.PageCount, &n.CreatedAt, &n.ModifiedAt, &n.PageWidth, &n.PageHeight); err != nil {
 			return nil, nil, fmt.Errorf("scan notebook: %w", err)
 		}
 		notebooks = append(notebooks, n)
@@ -235,11 +239,11 @@ func (s *Store) SoftDeleteNotebook(ctx context.Context, notebookID string) ([]st
 
 	// Notebook full row → tombstone op. A missing row means nothing to delete.
 	var nbName sql.NullString
-	var nbSort, nbCreated, nbAspect sql.NullInt64
+	var nbSort, nbCreated, nbAspect, nbPageWidth, nbPageHeight sql.NullInt64
 	var nbFolder sql.NullString
 	switch err := s.db.QueryRowContext(ctx,
-		`SELECT name, sort_order, created_at, folder_id, aspect_long_axis FROM fn_notebook WHERE id = ?`, notebookID).
-		Scan(&nbName, &nbSort, &nbCreated, &nbFolder, &nbAspect); err {
+		`SELECT name, sort_order, created_at, folder_id, aspect_long_axis, page_width, page_height FROM fn_notebook WHERE id = ?`, notebookID).
+		Scan(&nbName, &nbSort, &nbCreated, &nbFolder, &nbAspect, &nbPageWidth, &nbPageHeight); err {
 	case nil:
 	case sql.ErrNoRows:
 		return nil, nil
@@ -255,6 +259,8 @@ func (s *Store) SoftDeleteNotebook(ctx context.Context, notebookID string) ([]st
 			"deleted_at":       float64(now),
 			"folder_id":        wireNullStr(nbFolder),
 			"aspect_long_axis": wireNullNum(nbAspect),
+			"page_width":       wireNullNum(nbPageWidth),
+			"page_height":      wireNullNum(nbPageHeight),
 		},
 	}}
 
@@ -295,7 +301,8 @@ func (s *Store) SoftDeleteNotebook(ctx context.Context, notebookID string) ([]st
 
 	// Live strokes of those live pages → tombstones (full row; points re-emitted).
 	srows, err := s.db.QueryContext(ctx,
-		`SELECT id, page_id, color, pen_width_min, pen_width_max, points, z, created_at
+		`SELECT id, page_id, color, pen_width_min, pen_width_max, points,
+		        brush_kind, brush_version, brush_seed, point_dynamics, z, created_at
 		   FROM fn_stroke
 		  WHERE deleted_at IS NULL
 		    AND page_id IN (SELECT id FROM fn_page WHERE notebook_id = ? AND deleted_at IS NULL)`,
@@ -306,23 +313,29 @@ func (s *Store) SoftDeleteNotebook(ctx context.Context, notebookID string) ([]st
 	for srows.Next() {
 		var id string
 		var spage sql.NullString
-		var scolor, swmin, swmax, sz, screated sql.NullInt64
-		var spts []byte
-		if err := srows.Scan(&id, &spage, &scolor, &swmin, &swmax, &spts, &sz, &screated); err != nil {
+		var scolor, swmin, swmax, sbrushVersion, sbrushSeed, sz, screated sql.NullInt64
+		var sbrushKind sql.NullString
+		var spts, sdynamics []byte
+		if err := srows.Scan(&id, &spage, &scolor, &swmin, &swmax, &spts,
+			&sbrushKind, &sbrushVersion, &sbrushSeed, &sdynamics, &sz, &screated); err != nil {
 			srows.Close()
 			return nil, fmt.Errorf("scan stroke: %w", err)
 		}
 		ops = append(ops, Op{
 			Table: "stroke", PK: id,
 			Cols: map[string]any{
-				"page_id":       spage.String,
-				"color":         wireNum(scolor),
-				"pen_width_min": wireNum(swmin),
-				"pen_width_max": wireNum(swmax),
-				"points":        base64.StdEncoding.EncodeToString(spts),
-				"z":             wireNum(sz),
-				"created_at":    wireNum(screated),
-				"deleted_at":    float64(now),
+				"page_id":        spage.String,
+				"color":          wireNum(scolor),
+				"pen_width_min":  wireNum(swmin),
+				"pen_width_max":  wireNum(swmax),
+				"points":         base64.StdEncoding.EncodeToString(spts),
+				"brush_kind":     sbrushKind.String,
+				"brush_version":  wireNum(sbrushVersion),
+				"brush_seed":     wireNum(sbrushSeed),
+				"point_dynamics": wireNullBlob(sdynamics),
+				"z":              wireNum(sz),
+				"created_at":     wireNum(screated),
+				"deleted_at":     float64(now),
 			},
 		})
 	}
@@ -344,6 +357,13 @@ func (s *Store) SoftDeleteNotebook(ctx context.Context, notebookID string) ([]st
 		return nil, fmt.Errorf("author notebook delete: %w", err)
 	}
 	return pageIDs, nil
+}
+
+func wireNullBlob(b []byte) any {
+	if b == nil {
+		return nil
+	}
+	return base64.StdEncoding.EncodeToString(b)
 }
 
 // TextBoxRef identifies a live text box for discovery (e.g. by an MCP agent that
@@ -443,9 +463,10 @@ func (s *Store) NotebookMeta(ctx context.Context, notebookID string) (NotebookRo
 	var n NotebookRow
 	err := s.db.QueryRowContext(ctx,
 		`SELECT n.id, COALESCE(n.name, ''), COALESCE(n.folder_id, ''), COALESCE(n.sort_order, 0),
-		        `+notebookPageCountExpr+`, COALESCE(n.created_at, 0), `+notebookModifiedExpr+`
+		        `+notebookPageCountExpr+`, COALESCE(n.created_at, 0), `+notebookModifiedExpr+`,
+		        COALESCE(n.page_width, 10000), COALESCE(n.page_height, n.aspect_long_axis, 13333)
 		   FROM fn_notebook n WHERE n.id = ? AND n.deleted_at IS NULL`,
-		notebookID).Scan(&n.ID, &n.Name, &n.FolderID, &n.SortOrder, &n.PageCount, &n.CreatedAt, &n.ModifiedAt)
+		notebookID).Scan(&n.ID, &n.Name, &n.FolderID, &n.SortOrder, &n.PageCount, &n.CreatedAt, &n.ModifiedAt, &n.PageWidth, &n.PageHeight)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return NotebookRow{}, err

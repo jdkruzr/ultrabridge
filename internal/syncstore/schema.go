@@ -77,6 +77,8 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			deleted_at       INTEGER,
 			folder_id        TEXT,
 			aspect_long_axis INTEGER,
+			page_width       INTEGER,
+			page_height      INTEGER,
 			lww_wall_ts      INTEGER NOT NULL,
 			lww_op_seq       INTEGER NOT NULL,
 			lww_site_id      TEXT    NOT NULL
@@ -100,6 +102,10 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			pen_width_min INTEGER,
 			pen_width_max INTEGER,
 			points        BLOB,
+			brush_kind    TEXT NOT NULL DEFAULT 'fountain',
+			brush_version INTEGER NOT NULL DEFAULT 1,
+			brush_seed    INTEGER NOT NULL DEFAULT 0,
+			point_dynamics BLOB,
 			z             INTEGER,
 			created_at    INTEGER,
 			deleted_at    INTEGER,
@@ -191,6 +197,12 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		// v4 schema bump: per-notebook page aspect (virtual long-axis, captured from the
 		// creating device). NULL = legacy notebook with no stored aspect.
 		{"fn_notebook", "aspect_long_axis", "INTEGER"},
+		{"fn_notebook", "page_width", "INTEGER"},
+		{"fn_notebook", "page_height", "INTEGER"},
+		{"fn_stroke", "brush_kind", "TEXT NOT NULL DEFAULT 'fountain'"},
+		{"fn_stroke", "brush_version", "INTEGER NOT NULL DEFAULT 1"},
+		{"fn_stroke", "brush_seed", "INTEGER NOT NULL DEFAULT 0"},
+		{"fn_stroke", "point_dynamics", "BLOB"},
 		{"fn_page", "template", "TEXT"},
 		{"fn_page", "template_pitch_mm", "INTEGER"},
 		// Phase 8 cutover: the durable op_ts HLC on the authoring-site row.
@@ -206,6 +218,12 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		if err := ensureColumn(ctx, db, a.table, a.col, a.decl); err != nil {
 			return fmt.Errorf("syncstore migrate: %w", err)
 		}
+	}
+	// The old opaque gray was reserved for ForestNote's highlighter. Existing v4 rows received
+	// the generic fountain default when brush_kind was added; recover their actual identity once.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE fn_stroke SET brush_kind = 'highlighter' WHERE brush_kind = 'fountain' AND color = -2302756`); err != nil {
+		return fmt.Errorf("syncstore migrate: backfill legacy highlighter: %w", err)
 	}
 
 	// Seed the HLC so it never starts below an op_ts already on the wire: on a DB that predates the

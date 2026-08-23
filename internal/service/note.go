@@ -726,7 +726,11 @@ func (s *noteService) renderForestNotePage(ctx context.Context, path string) (io
 	if err != nil {
 		return nil, "", fmt.Errorf("load page text boxes: %w", err)
 	}
-	img, err := forestrender.RenderPage(syncbridge.MapStrokes(strokes), syncbridge.MapTextBoxes(boxes))
+	notebook, err := s.fnReader.NotebookMeta(ctx, fnpath.NotebookID(path))
+	if err != nil {
+		return nil, "", fmt.Errorf("load notebook geometry: %w", err)
+	}
+	img, err := forestrender.RenderPageSized(syncbridge.MapStrokes(strokes), syncbridge.MapTextBoxes(boxes), notebook.PageWidth, notebook.PageHeight)
 	if err != nil {
 		return nil, "", fmt.Errorf("render forestnote page: %w", err)
 	}

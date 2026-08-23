@@ -118,7 +118,8 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 		}
 	}
 
-	for _, op := range ops {
+	for _, incoming := range ops {
+		op := withV5Defaults(incoming)
 		if op.WallTS > maxIncoming {
 			maxIncoming = op.WallTS // observe every op's op_ts, even one we go on to reject
 		}
@@ -252,7 +253,8 @@ func (s *Store) AuthorOps(ctx context.Context, ops []Op) ([]TablePK, error) {
 	clock := hlc.New(lastHlc, func() int64 { return now })
 	seq := lastOpSeq
 	var changedPages []TablePK
-	for _, op := range ops {
+	for _, authored := range ops {
+		op := withV5Defaults(authored)
 		seq++
 		op.SiteID = siteID
 		op.OpSeq = seq
@@ -432,14 +434,22 @@ func upsertNotebook(ctx context.Context, tx *sql.Tx, n Op) error {
 	if err != nil {
 		return err
 	}
+	pageWidth, err := colNullInt(n, "page_width")
+	if err != nil {
+		return err
+	}
+	pageHeight, err := colNullInt(n, "page_height")
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO fn_notebook (id, name, sort_order, created_at, deleted_at, folder_id, aspect_long_axis, lww_wall_ts, lww_op_seq, lww_site_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO fn_notebook (id, name, sort_order, created_at, deleted_at, folder_id, aspect_long_axis, page_width, page_height, lww_wall_ts, lww_op_seq, lww_site_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET name=excluded.name, sort_order=excluded.sort_order,
 		   created_at=excluded.created_at, deleted_at=excluded.deleted_at, folder_id=excluded.folder_id,
-		   aspect_long_axis=excluded.aspect_long_axis,
+		   aspect_long_axis=excluded.aspect_long_axis, page_width=excluded.page_width, page_height=excluded.page_height,
 		   lww_wall_ts=excluded.lww_wall_ts, lww_op_seq=excluded.lww_op_seq, lww_site_id=excluded.lww_site_id`,
-		n.PK, name, sort, created, del, folderID, aspect, n.WallTS, n.OpSeq, n.SiteID)
+		n.PK, name, sort, created, del, folderID, aspect, pageWidth, pageHeight, n.WallTS, n.OpSeq, n.SiteID)
 	return err
 }
 
@@ -531,6 +541,22 @@ func upsertStroke(ctx context.Context, tx *sql.Tx, n Op) (pageID string, err err
 	if err != nil {
 		return "", err
 	}
+	brushKind, err := colString(n, "brush_kind")
+	if err != nil {
+		return "", err
+	}
+	brushVersion, err := colInt(n, "brush_version")
+	if err != nil {
+		return "", err
+	}
+	brushSeed, err := colInt(n, "brush_seed")
+	if err != nil {
+		return "", err
+	}
+	pointDynamics, err := colNullBytes(n, "point_dynamics")
+	if err != nil {
+		return "", err
+	}
 	z, err := colInt(n, "z")
 	if err != nil {
 		return "", err
@@ -544,13 +570,16 @@ func upsertStroke(ctx context.Context, tx *sql.Tx, n Op) (pageID string, err err
 		return "", err
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO fn_stroke (id, page_id, color, pen_width_min, pen_width_max, points, z, created_at, deleted_at, lww_wall_ts, lww_op_seq, lww_site_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO fn_stroke (id, page_id, color, pen_width_min, pen_width_max, points, brush_kind, brush_version, brush_seed, point_dynamics, z, created_at, deleted_at, lww_wall_ts, lww_op_seq, lww_site_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET page_id=excluded.page_id, color=excluded.color,
 		   pen_width_min=excluded.pen_width_min, pen_width_max=excluded.pen_width_max,
-		   points=excluded.points, z=excluded.z, created_at=excluded.created_at, deleted_at=excluded.deleted_at,
+		   points=excluded.points, brush_kind=excluded.brush_kind, brush_version=excluded.brush_version,
+		   brush_seed=excluded.brush_seed, point_dynamics=excluded.point_dynamics,
+		   z=excluded.z, created_at=excluded.created_at, deleted_at=excluded.deleted_at,
 		   lww_wall_ts=excluded.lww_wall_ts, lww_op_seq=excluded.lww_op_seq, lww_site_id=excluded.lww_site_id`,
-		n.PK, pageID, color, wmin, wmax, pts, z, created, del, n.WallTS, n.OpSeq, n.SiteID)
+		n.PK, pageID, color, wmin, wmax, pts, brushKind, brushVersion, brushSeed, pointDynamics,
+		z, created, del, n.WallTS, n.OpSeq, n.SiteID)
 	return pageID, err
 }
 
@@ -694,7 +723,7 @@ func (s *Store) OpsSince(ctx context.Context, cursor int64, excludeSite string, 
 		if err := json.Unmarshal([]byte(payload), &op); err != nil {
 			return nil, cursor, false, fmt.Errorf("unmarshal op seq %d: %w", seq, err)
 		}
-		ops = append(ops, op)
+		ops = append(ops, withV5Defaults(op))
 		newCursor = seq
 	}
 	if err := rows.Err(); err != nil {
@@ -777,4 +806,11 @@ func colBytes(n Op, key string) ([]byte, error) {
 		return nil, fmt.Errorf("column %q is not valid base64: %w", key, err)
 	}
 	return b, nil
+}
+
+func colNullBytes(n Op, key string) ([]byte, error) {
+	if n.Cols[key] == nil {
+		return nil, nil
+	}
+	return colBytes(n, key)
 }

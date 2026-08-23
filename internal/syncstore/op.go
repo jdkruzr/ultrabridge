@@ -51,7 +51,7 @@ func (o *Op) UnmarshalJSON(data []byte) error {
 
 // fnReg is the RhizomeSync registry declaration of ForestNote's synced schema, the single source of
 // truth for the wire schema after the Phase 8 cutover. UB's hand-coded knownCols/tableOrder/SHA were
-// replaced by forwards into it; the parity tests pin that it reproduces the live v3 hash byte-for-byte.
+// replaced by forwards into it; the parity tests pin that it reproduces the live schema byte-for-byte.
 var fnReg = registry.ForestNote()
 
 // knownCols lists the materialized columns per table (spec §3.1), derived from the registry. It
@@ -88,17 +88,49 @@ const schemaHashV2 = "bc1953e2b85e766a572329e7023b4582b768094b4d27e28a632e21bedb
 // v3 client must keep syncing during the rollout grace window. Keep this literal forever.
 const schemaHashV3 = "724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe"
 
-// AcceptsSchemaHash reports whether the server will sync with a client advertising
-// hash h. It accepts the current schema (SchemaHash, now v4 — folder/notebook[+aspect_long_axis]/
-// page/page_text_*/stroke/text_box) AND the frozen prior schema (schemaHashV3), so a not-yet-updated
-// v3 client keeps syncing while the matching client release rolls out — instead of a hard cutover
-// that 409s every old client the instant the server adds aspect_long_axis. A v3 client never sends
-// the new column and silently ignores it on relayed rows, so admitting it is safe; once all clients
-// update, drop schemaHashV3 from this set. v2/v1 are retired (their grace windows closed at the
-// page_text_* and text_box rollouts). Generalizes to every future schema bump: add the new hash,
-// keep the prior one for one release, then retire it.
+// schemaHashV4 is the immediately preceding shape (aspect_long_axis, but no exact geometry or
+// portable brush metadata). It remains accepted for the v5 rollout grace window.
+const schemaHashV4 = "74e6b5d790c919290d0e1fca3462800a5dc4abb288042dda2b48d4eb0482bbf2"
+
+// AcceptsSchemaHash admits current v5 and immediately-prior v4 for one release. v4 clients omit
+// exact geometry and brush metadata; withV5Defaults completes their rows before validation/relay,
+// and their registry ignores unknown v5 columns coming back. v3 and older are retired.
 func AcceptsSchemaHash(h string) bool {
-	return h == SchemaHash() || h == schemaHashV3
+	return h == SchemaHash() || h == schemaHashV4
+}
+
+// Complete a v4 row into v5 before validation, materialization, and relay. Nullable geometry and
+// dynamics remain null; legacy strokes are fountain v1 with seed 0 (renderers derive a stable seed
+// from the stroke id when needed). Copy first so callers' maps are never mutated.
+func withV5Defaults(op Op) Op {
+	cols := make(map[string]any, len(op.Cols)+4)
+	for k, v := range op.Cols {
+		cols[k] = v
+	}
+	if op.Table == "notebook" {
+		if _, ok := cols["page_width"]; !ok {
+			cols["page_width"] = nil
+		}
+		if _, ok := cols["page_height"]; !ok {
+			cols["page_height"] = nil
+		}
+	}
+	if op.Table == "stroke" {
+		if _, ok := cols["brush_kind"]; !ok {
+			cols["brush_kind"] = "fountain"
+		}
+		if _, ok := cols["brush_version"]; !ok {
+			cols["brush_version"] = float64(1)
+		}
+		if _, ok := cols["brush_seed"]; !ok {
+			cols["brush_seed"] = float64(0)
+		}
+		if _, ok := cols["point_dynamics"]; !ok {
+			cols["point_dynamics"] = nil
+		}
+	}
+	op.Cols = cols
+	return op
 }
 
 const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ" // Crockford base32, uppercase (§2.1)

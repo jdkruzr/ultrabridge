@@ -103,6 +103,9 @@ grouping* is a local UX concern that deliberately does not replicate.)
 | `created_at` | int64 ms UTC | |
 | `deleted_at` | int64 ms UTC \| null | `null` = live |
 | `folder_id` | string (ULID) \| null | `null` = root (no folder) |
+| `aspect_long_axis` | int64 \| null | v4 legacy aspect fallback |
+| `page_width` | int64 \| null | exact virtual page width; null = legacy |
+| `page_height` | int64 \| null | exact virtual page height; null = legacy |
 
 **`page`**
 | col | type | notes |
@@ -122,6 +125,10 @@ grouping* is a local UX concern that deliberately does not replicate.)
 | `pen_width_min` | int64 | device units |
 | `pen_width_max` | int64 | device units |
 | `points` | string | base64 of LE int32 array (§2) |
+| `brush_kind` | string | stable ForestNote brush id (`fountain`, `pencil_hb`, etc.) |
+| `brush_version` | int64 | canonical renderer semantics version |
+| `brush_seed` | int64 | deterministic texture seed |
+| `point_dynamics` | string \| null | base64 `FND1` tilt/orientation sidecar aligned to `points` |
 | `z` | int64 | stroke ordering within page |
 | `created_at` | int64 ms UTC | |
 | `deleted_at` | int64 ms UTC \| null | erase = set; un-erase = clear |
@@ -366,21 +373,21 @@ deterministically (no implementation-order dependence):
 - Within each table, column names sorted **ascending ASCII** (alphabetical).
 - Format: `table:col,col,...` per table, tables joined by `;`, no spaces, no trailing newline.
 
-The **v4** canonical string (current — adds `notebook.aspect_long_axis` for per-notebook page
-aspect ratio) is:
+The **v5** canonical string (current — exact page geometry plus portable brush metadata) is:
 
 ```
-folder:created_at,deleted_at,name,parent_folder_id,sort_order;notebook:aspect_long_axis,created_at,deleted_at,folder_id,name,sort_order;page:created_at,deleted_at,notebook_id,sort_order,template,template_pitch_mm;page_text_from_client:created_at,deleted_at,model,ocr_at,text;page_text_from_server:created_at,deleted_at,model,ocr_at,text;stroke:color,created_at,deleted_at,page_id,pen_width_max,pen_width_min,points,z;text_box:border_width,color,created_at,deleted_at,font_name,font_size,height,page_id,text,weight,width,x,y,z
+folder:created_at,deleted_at,name,parent_folder_id,sort_order;notebook:aspect_long_axis,created_at,deleted_at,folder_id,name,page_height,page_width,sort_order;page:created_at,deleted_at,notebook_id,sort_order,template,template_pitch_mm;page_text_from_client:created_at,deleted_at,model,ocr_at,text;page_text_from_server:created_at,deleted_at,model,ocr_at,text;stroke:brush_kind,brush_seed,brush_version,color,created_at,deleted_at,page_id,pen_width_max,pen_width_min,point_dynamics,points,z;text_box:border_width,color,created_at,deleted_at,font_name,font_size,height,page_id,text,weight,width,x,y,z
 ```
 
 ```
-schema_hash (v4) = sha256(utf8(canonical string))
-                 = 74e6b5d790c919290d0e1fca3462800a5dc4abb288042dda2b48d4eb0482bbf2
+schema_hash (v5) = sha256(utf8(canonical string))
+                 = ed367ffd86b24c3b53f7a85b4f46b7f0cb69e0c6fbd0e1048289a659b4c967dd
 ```
 
-The prior **v3** string (no `notebook.aspect_long_axis` — `notebook:created_at,deleted_at,folder_id,name,sort_order`) hashed to
-`724411eb845ad3487393a77cb5559690e69332c35fdb5ee3e85c1767bf71f3fe`; it stays in the server's
-`AcceptsSchemaHash` grace window for one release so not-yet-updated v3 clients keep syncing.
+The prior **v4** string (no exact geometry or brush metadata) hashed to
+`74e6b5d790c919290d0e1fca3462800a5dc4abb288042dda2b48d4eb0482bbf2`; it stays in the server's
+`AcceptsSchemaHash` grace window for one release. Incoming v4 strokes are completed as fountain-v1
+rows before relay so v5 clients always receive a full current row.
 
 The prior **v2** string (no `page_text_*`) hashed to
 `bc1953e2b85e766a572329e7023b4582b768094b4d27e28a632e21bedb776874`; the **v1** string (no
@@ -391,11 +398,9 @@ client on an unknown schema cannot corrupt the mirror. (Only the column **set** 
 identity/envelope fields `pk`, `site_id`, `op_seq`, `wall_ts` are not part of it.)
 
 **Grace window (multi-hash).** The server accepts a *set* of known-good hashes, not a single
-value: during a schema rollout it admits both the new (v3) and the immediately prior (v2)
-hash, so a not-yet-updated client keeps syncing while the matching client release ships. A v2
-client never sends `page_text_*` ops and silently ignores the ones it is relayed (§3.2), so
-admitting it cannot corrupt the v3 mirror. v1 (pre-`text_box`) is **retired** — its grace
-window closed with the text_box rollout. This generalizes to every future bump (add the new
+value: during a schema rollout it admits both the new version and the immediately prior hash,
+so a not-yet-updated client keeps syncing while the matching client release ships. v3 and older
+are now **retired**. This generalizes to every future bump (add the new
 hash, keep the prior one for one release, then drop it).
 
 ---

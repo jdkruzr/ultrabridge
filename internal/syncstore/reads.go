@@ -9,11 +9,15 @@ import (
 // StrokeData is a materialized stroke's render-relevant columns (the bridge maps
 // this onto forestrender.Stroke; syncstore stays render-agnostic).
 type StrokeData struct {
-	Color       int64
-	PenWidthMin int64
-	PenWidthMax int64
-	Points      []byte
-	Z           int64
+	Color         int64
+	PenWidthMin   int64
+	PenWidthMax   int64
+	Points        []byte
+	BrushKind     string
+	BrushVersion  int64
+	BrushSeed     int64
+	PointDynamics []byte
+	Z             int64
 }
 
 // TextBoxData is a materialized text box's render-relevant columns (the bridge
@@ -57,7 +61,7 @@ func (s *Store) LivePage(ctx context.Context, pagePK string) (notebookID string,
 // LivePageStrokes returns a page's non-deleted strokes in z order.
 func (s *Store) LivePageStrokes(ctx context.Context, pagePK string) ([]StrokeData, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT color, pen_width_min, pen_width_max, points, z
+		`SELECT color, pen_width_min, pen_width_max, points, brush_kind, brush_version, brush_seed, point_dynamics, z
 		   FROM fn_stroke WHERE page_id = ? AND deleted_at IS NULL ORDER BY z`, pagePK)
 	if err != nil {
 		return nil, fmt.Errorf("live strokes: %w", err)
@@ -67,7 +71,8 @@ func (s *Store) LivePageStrokes(ctx context.Context, pagePK string) ([]StrokeDat
 	var out []StrokeData
 	for rows.Next() {
 		var d StrokeData
-		if err := rows.Scan(&d.Color, &d.PenWidthMin, &d.PenWidthMax, &d.Points, &d.Z); err != nil {
+		if err := rows.Scan(&d.Color, &d.PenWidthMin, &d.PenWidthMax, &d.Points,
+			&d.BrushKind, &d.BrushVersion, &d.BrushSeed, &d.PointDynamics, &d.Z); err != nil {
 			return nil, fmt.Errorf("scan stroke: %w", err)
 		}
 		out = append(out, d)

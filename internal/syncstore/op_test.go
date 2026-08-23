@@ -5,17 +5,15 @@ import (
 	"time"
 )
 
-// schemaHashV4 is the published CURRENT schema hash (docs/sync/forestnote-sync-protocol.md
-// §6) — folder/notebook[+aspect_long_axis]/page/page_text_from_client/page_text_from_server/
-// stroke/text_box. If this assertion fails, either knownCols changed (a wire-breaking schema
+// schemaHashV5 is the published CURRENT schema hash. If this assertion fails, either knownCols changed (a wire-breaking schema
 // change that needs a coordinated bump + a new vN constant) or the spec doc is stale. The frozen
 // prior values (schemaHashV3, schemaHashV2, schemaHashV1) live in op.go.
-const schemaHashV4 = "74e6b5d790c919290d0e1fca3462800a5dc4abb288042dda2b48d4eb0482bbf2"
+const schemaHashV5 = "ed367ffd86b24c3b53f7a85b4f46b7f0cb69e0c6fbd0e1048289a659b4c967dd"
 
 func TestSchemaHashMatchesSpec(t *testing.T) {
-	if got := SchemaHash(); got != schemaHashV4 {
+	if got := SchemaHash(); got != schemaHashV5 {
 		t.Errorf("schema hash drift:\n got: %s\nwant: %s\ncanonical: %s",
-			got, schemaHashV4, canonicalSchema())
+			got, schemaHashV5, canonicalSchema())
 	}
 }
 
@@ -24,19 +22,33 @@ func TestSchemaHashMatchesSpec(t *testing.T) {
 // v2 (pre-aspect_long_axis... actually pre-page_text_*) and v1, whose grace windows closed.
 func TestAcceptsSchemaHash_GraceWindow(t *testing.T) {
 	if !AcceptsSchemaHash(SchemaHash()) {
-		t.Error("current schema hash (v4) must be accepted")
+		t.Error("current schema hash (v5) must be accepted")
 	}
-	if !AcceptsSchemaHash(schemaHashV3) {
-		t.Error("frozen v3 schema hash must still be accepted during the grace window")
+	if !AcceptsSchemaHash(schemaHashV4) {
+		t.Error("frozen v4 schema hash must still be accepted during the grace window")
 	}
-	if AcceptsSchemaHash(schemaHashV2) {
-		t.Error("retired v2 schema hash must no longer be accepted")
+	if AcceptsSchemaHash(schemaHashV3) {
+		t.Error("retired v3 schema hash must no longer be accepted")
 	}
 	if AcceptsSchemaHash(schemaHashV1) {
 		t.Error("retired v1 schema hash must no longer be accepted")
 	}
 	if AcceptsSchemaHash("0000000000000000000000000000000000000000000000000000000000000000") {
 		t.Error("an unknown schema hash must be rejected")
+	}
+}
+
+func TestWithV5DefaultsCompletesLegacyRowsWithoutMutatingInput(t *testing.T) {
+	legacy := Op{Table: "stroke", PK: "01KTEST", Cols: map[string]any{"color": float64(-16777216)}}
+	completed := withV5Defaults(legacy)
+	if _, leaked := legacy.Cols["brush_kind"]; leaked {
+		t.Fatal("legacy input map was mutated")
+	}
+	if completed.Cols["brush_kind"] != "fountain" || completed.Cols["brush_version"] != float64(1) {
+		t.Fatalf("defaults = %#v", completed.Cols)
+	}
+	if v, ok := completed.Cols["point_dynamics"]; !ok || v != nil {
+		t.Fatalf("point_dynamics = %#v, want present null", v)
 	}
 }
 

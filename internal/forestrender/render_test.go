@@ -56,6 +56,35 @@ func TestRenderPage_Empty(t *testing.T) {
 	}
 }
 
+func TestRenderPageSizedPreservesExactCreatorRectangle(t *testing.T) {
+	img, err := RenderPageSized(nil, nil, 1072, 1307)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got, want := img.Bounds().Dx(), int(float64(1072)*renderScale); got != want {
+		t.Fatalf("width = %d, want %d", got, want)
+	}
+	if got, want := img.Bounds().Dy(), int(math.Floor(float64(1307)*renderScale)); got != want {
+		t.Fatalf("height = %d, want %d", got, want)
+	}
+}
+
+func TestBrushMetadataControlsCommittedServerPreview(t *testing.T) {
+	points := buildPoints([3]int32{100, 100, 0}, [3]int32{900, 100, 0})
+	fountain, err := RenderPageSized([]Stroke{{Color: 0xFF000000, PenWidthMin: 2, PenWidthMax: 30, Points: points}}, nil, 1000, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker, err := RenderPageSized([]Stroke{{Color: 0xFF000000, PenWidthMin: 2, PenWidthMax: 30, Points: points, BrushKind: "marker"}}, nil, 1000, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonWhitePixels(marker) <= nonWhitePixels(fountain) {
+		t.Fatalf("fixed-width marker should cover more pixels than a zero-pressure fountain: marker=%d fountain=%d",
+			nonWhitePixels(marker), nonWhitePixels(fountain))
+	}
+}
+
 func TestRenderPage_SinglePointSkipped(t *testing.T) {
 	img, err := RenderPage([]Stroke{{Color: 4278190080, PenWidthMin: 2, PenWidthMax: 6, Points: buildPoints([3]int32{5, 5, 100})}}, nil)
 	if err != nil {

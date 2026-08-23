@@ -23,11 +23,9 @@ const (
 	bytesPerInt  = 4
 	bytesPerPt   = intsPerPoint * bytesPerInt
 
-	// pressureMax normalizes pressure to 0..1. ForestNote's pressure scale is not
-	// yet confirmed (open item: docs/sync/forestnote-sync-protocol.md §9); 4095 is
-	// the common EMR-digitizer full-scale. Over-estimating only widens strokes
-	// slightly — harmless for the v1 OCR/search payoff.
-	pressureMax = 4095.0
+	// ForestNote stores normalized pressure as millipressure, 0..1000, regardless
+	// of the source digitizer's raw USI/EMR range.
+	pressureMax = 1000.0
 
 	// minVisibleWidth keeps thin/zero-pressure strokes legible for OCR.
 	minVisibleWidth = 1.0
@@ -38,20 +36,15 @@ const (
 	// that by painting highlighter strokes before other strokes.
 	forestNoteHighlighterGray = uint32(0xFFDCDCDC)
 
-	// margin pads the rendered bounding box (px). ForestNote has no page
-	// width/height yet, so v1 renders from the stroke extent (§9 open item).
+	// margin pads the legacy bounding-box renderer. Exact-geometry v5 pages do not use it.
 	margin = 24
 
 	// maxCanvas caps a runaway bounding box (defensive).
 	maxCanvas = 20000
 
-	// renderScale shrinks the final page image. The canvas is built at 1:1 with
-	// the virtual-unit coordinate space (short axis = 10,000), which yields a
-	// ~10000px-tall, ~100-megapixel, multi-MB JPEG — needlessly slow to OCR,
-	// transfer, and display. We render at full resolution, then downscale the
-	// finished image by this factor so strokes AND text-box glyphs shrink
-	// uniformly (scaling gg's draw ops directly does not scale rasterized text).
-	// 0.5 = half each dimension ≈ a quarter of the pixels/bytes. 1.0 disables.
+	// renderScale shrinks output coordinates. Legacy bounding-box pages render at
+	// 1:1 then downscale; exact-geometry pages apply it directly so a normal
+	// 10000x13333 page never allocates a roughly 500 MB intermediate canvas.
 	renderScale = 0.5
 )
 
@@ -78,11 +71,15 @@ func downscale(img image.Image) image.Image {
 // Stroke is one renderable stroke. The bridge maps a fn_stroke mirror row onto
 // this; forestrender does not import syncstore (keeps rendering dependency-free).
 type Stroke struct {
-	Color       int64  // packed ARGB
-	PenWidthMin int64  // device units (treated as px for v1)
-	PenWidthMax int64  // device units
-	Points      []byte // little-endian int32 array, 5 ints/point
-	Z           int64  // draw order within the page
+	Color         int64  // packed ARGB
+	PenWidthMin   int64  // device units (treated as px for v1)
+	PenWidthMax   int64  // device units
+	Points        []byte // little-endian int32 array, 5 ints/point
+	BrushKind     string
+	BrushVersion  int64
+	BrushSeed     int64
+	PointDynamics []byte
+	Z             int64 // draw order within the page
 }
 
 // TextBox is one renderable text box. The bridge maps a fn_text_box mirror row
@@ -128,11 +125,22 @@ func DecodePoints(b []byte) []Point {
 // boxes (z==0), then ink (in Z order), then above-ink boxes (z==1). A page with no
 // strokes and no boxes yields a small blank white image and no error.
 func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
+	return renderPage(strokes, boxes, 0, 0)
+}
+
+// RenderPageSized preserves the creator device's exact page rectangle. Off-page legacy content is
+// clipped rather than expanding the canvas and reintroducing a letterbox-shaped bounding box.
+func RenderPageSized(strokes []Stroke, boxes []TextBox, pageWidth, pageHeight int64) (image.Image, error) {
+	return renderPage(strokes, boxes, pageWidth, pageHeight)
+}
+
+func renderPage(strokes []Stroke, boxes []TextBox, pageWidth, pageHeight int64) (image.Image, error) {
 	type decoded struct {
 		pts      []Point
 		min, max int64
 		r, g, b  float64
 		behind   bool
+		kind     string
 	}
 	// Draw in Z order so later strokes paint over earlier ones. Copy first to
 	// avoid mutating the caller's slice.
@@ -142,8 +150,12 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 	var ds []decoded
 	minX, minY := int32(math.MaxInt32), int32(math.MaxInt32)
 	maxX, maxY := int32(math.MinInt32), int32(math.MinInt32)
-	any := false
+	sized := pageWidth > 0 && pageHeight > 0
+	any := sized
 	grow := func(x, y int32) {
+		if sized {
+			return
+		}
 		any = true
 		if x < minX {
 			minX = x
@@ -165,7 +177,12 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 			continue // a single point draws nothing legible; skip (matches booxrender)
 		}
 		r, g, b, _ := decodeARGB(int32(s.Color))
-		ds = append(ds, decoded{pts: pts, min: s.PenWidthMin, max: s.PenWidthMax, r: r, g: g, b: b, behind: isHighlighterColor(s.Color)})
+		kind := s.BrushKind
+		if kind == "" {
+			kind = "fountain"
+		}
+		ds = append(ds, decoded{pts: pts, min: s.PenWidthMin, max: s.PenWidthMax, r: r, g: g, b: b,
+			behind: kind == "highlighter" || isHighlighterColor(s.Color), kind: kind})
 		for _, p := range pts {
 			grow(p.X, p.Y)
 		}
@@ -188,6 +205,12 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 	w := clampCanvas(int(maxX-minX) + 2*margin)
 	h := clampCanvas(int(maxY-minY) + 2*margin)
 	offX, offY := float64(margin-int(minX)), float64(margin-int(minY))
+	coordScale := 1.0
+	if sized {
+		coordScale = renderScale
+		w, h = clampCanvas(int(float64(pageWidth)*coordScale)), clampCanvas(int(float64(pageHeight)*coordScale))
+		offX, offY = 0, 0
+	}
 
 	dc := gg.NewContext(w, h)
 	dc.SetColor(color.White)
@@ -198,20 +221,27 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 	// Below-ink text boxes first.
 	for _, b := range boxes {
 		if b.Z == 0 {
-			drawBox(dc, b, offX, offY)
+			drawBox(dc, b, offX, offY, coordScale)
 		}
 	}
 
 	drawStroke := func(d decoded) {
-		dc.SetRGB(d.r, d.g, d.b)
+		opacity := brushOpacity(d.kind)
+		dc.SetRGBA(d.r, d.g, d.b, opacity)
+		if d.kind == "dashed" {
+			dc.SetDash(80, 50)
+		} else {
+			dc.SetDash()
+		}
 		for i := 0; i < len(d.pts)-1; i++ {
 			p0, p1 := d.pts[i], d.pts[i+1]
 			pressure := (float64(p0.Pressure) + float64(p1.Pressure)) / 2.0
-			dc.SetLineWidth(pressureToWidth(pressure, d.min, d.max))
-			dc.MoveTo(float64(p0.X)+offX, float64(p0.Y)+offY)
-			dc.LineTo(float64(p1.X)+offX, float64(p1.Y)+offY)
+			dc.SetLineWidth(brushWidth(d.kind, pressure, d.min, d.max) * coordScale)
+			dc.MoveTo((float64(p0.X)+offX)*coordScale, (float64(p0.Y)+offY)*coordScale)
+			dc.LineTo((float64(p1.X)+offX)*coordScale, (float64(p1.Y)+offY)*coordScale)
 			dc.Stroke()
 		}
+		dc.SetDash()
 	}
 
 	for _, d := range ds {
@@ -228,24 +258,59 @@ func RenderPage(strokes []Stroke, boxes []TextBox) (image.Image, error) {
 	// Above-ink text boxes last.
 	for _, b := range boxes {
 		if b.Z != 0 {
-			drawBox(dc, b, offX, offY)
+			drawBox(dc, b, offX, offY, coordScale)
 		}
 	}
+	if sized {
+		return dc.Image(), nil
+	}
 	return downscale(dc.Image()), nil
+}
+
+func brushWidth(kind string, pressure float64, lo, hi int64) float64 {
+	switch kind {
+	case "ballpoint", "fineliner":
+		return math.Max(float64(lo+hi)/2, minVisibleWidth)
+	case "marker", "translucent_marker", "highlighter":
+		return math.Max(float64(hi), minVisibleWidth)
+	default:
+		return pressureToWidth(pressure, lo, hi)
+	}
+}
+
+func brushOpacity(kind string) float64 {
+	switch kind {
+	case "translucent_marker":
+		return 0.31
+	case "marker":
+		return 0.75
+	case "pencil_hb":
+		return 0.90
+	case "pencil_2b":
+		return 0.82
+	case "pencil_4b":
+		return 0.72
+	case "pencil_6b":
+		return 0.62
+	case "pencil_8b":
+		return 0.54
+	default:
+		return 1
+	}
 }
 
 // drawBox paints one text box: an optional border rect, then the wrapped text
 // clipped to the box (overflow is retained in the data, not drawn — matching the
 // client). Colors come from the packed ARGB exactly as strokes decode it.
-func drawBox(dc *gg.Context, b TextBox, offX, offY float64) {
-	x := float64(b.X) + offX
-	y := float64(b.Y) + offY
-	w, h := float64(b.Width), float64(b.Height)
+func drawBox(dc *gg.Context, b TextBox, offX, offY, scale float64) {
+	x := (float64(b.X) + offX) * scale
+	y := (float64(b.Y) + offY) * scale
+	w, h := float64(b.Width)*scale, float64(b.Height)*scale
 	r, g, bl, a := decodeARGB(int32(b.Color))
 
 	if b.BorderWidth > 0 {
 		dc.SetRGBA(r, g, bl, a)
-		dc.SetLineWidth(float64(b.BorderWidth))
+		dc.SetLineWidth(float64(b.BorderWidth) * scale)
 		dc.DrawRectangle(x, y, w, h)
 		dc.Stroke()
 	}
@@ -255,7 +320,7 @@ func drawBox(dc *gg.Context, b TextBox, offX, offY float64) {
 	dc.DrawRectangle(x, y, w, h)
 	dc.Clip()
 	dc.SetRGBA(r, g, bl, a)
-	dc.SetFontFace(faceFor(b.Weight, b.FontSize))
+	dc.SetFontFace(faceFor(b.Weight, int64(float64(b.FontSize)*scale)))
 	dc.DrawStringWrapped(b.Text, x, y, 0, 0, w, lineSpacing, gg.AlignLeft)
 	dc.ResetClip()
 }
