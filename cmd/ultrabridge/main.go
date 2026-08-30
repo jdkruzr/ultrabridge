@@ -669,37 +669,37 @@ func main() {
 
 	// MCP discovery for Claude/OAuth clients
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", func(w http.ResponseWriter, r *http.Request) {
+		baseURL := oauthBaseURL(r)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"mcp_endpoint": "/mcp",
+			"resource":              baseURL + "/mcp",
+			"authorization_servers": []string{baseURL},
 		})
 	})
 
 	// General OAuth discovery probes
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", func(w http.ResponseWriter, r *http.Request) {
+		baseURL := oauthBaseURL(r)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"providers": []string{"/mcp"},
+			"resource":              baseURL + "/mcp",
+			"authorization_servers": []string{baseURL},
 		})
 	})
 
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
-		// Detect host from request
-		host := r.Host
-		scheme := "http"
-		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-			scheme = "https"
-		}
-		baseURL := scheme + "://" + host
+		baseURL := oauthBaseURL(r)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"issuer":                                baseURL,
 			"authorization_endpoint":                baseURL + "/authorize",
 			"token_endpoint":                        baseURL + "/token",
+			"registration_endpoint":                 baseURL + "/register",
 			"response_types_supported":              []string{"code"},
 			"grant_types_supported":                 []string{"authorization_code"},
-			"token_endpoint_auth_methods_supported": []string{"none", "client_secret_post"},
+			"token_endpoint_auth_methods_supported": []string{"none"},
+			"code_challenge_methods_supported":      []string{"S256"},
 		})
 	})
 
@@ -812,6 +812,8 @@ func main() {
 		mux.Handle("/authorize", authMW.Wrap(http.HandlerFunc(webHandler.HandleOAuthAuthorize)))
 		// /token is called by Claude's backend (no browser/user auth)
 		mux.HandleFunc("/token", webHandler.HandleOAuthToken)
+		// /register is public dynamic client registration (RFC 7591).
+		mux.HandleFunc("POST /register", webHandler.HandleOAuthRegister)
 
 		mux.Handle("/", authMW.Wrap(webHandler))
 	}
@@ -885,6 +887,14 @@ func main() {
 			backfillCancel()
 		}
 	}
+}
+
+func oauthBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }
 
 // bootstrapConfig holds the minimal config needed before DB opens.

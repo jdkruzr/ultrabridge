@@ -554,7 +554,7 @@ func registerMCPTools(server *mcp.Server, client *mcpAPIClient) {
 		}
 		params.Set("limit", fmt.Sprintf("%d", limit))
 
-		resp, err := client.get(ctx, "/api/search?"+params.Encode())
+		resp, err := client.get(ctx, "/api/v1/search?"+params.Encode())
 		if err != nil {
 			return nil, nil, fmt.Errorf("API request failed: %w", err)
 		}

@@ -1,12 +1,12 @@
 # MCP Auth
 
-Last verified: 2026-04-09
+Last verified: 2026-08-25
 
 ## Purpose
-Bearer token management for MCP server authentication. Stores SHA-256 hashed tokens in shared SQLite notedb. Provides CRUD operations and validation for token-based auth.
+Bearer token management and dynamic OAuth client registration for MCP server authentication. Stores SHA-256 hashed tokens and registered public-client redirect allowlists in shared SQLite notedb.
 
 ## Contracts
-- **Exposes**: `Migrate(ctx, db)`, `CreateToken(ctx, db, label)`, `ValidateToken(ctx, db, rawToken)`, `ListTokens(ctx, db)`, `RevokeToken(ctx, db, tokenHash)`
+- **Exposes**: `Migrate(ctx, db)`, token CRUD/validation, `RegisterOAuthClient`, and `GetOAuthClient`
 - **Guarantees**: Raw tokens never stored -- only SHA-256 hash persisted. `Migrate` is idempotent (CREATE TABLE IF NOT EXISTS). `RevokeToken` is idempotent. `ValidateToken` updates `last_used` timestamp on success.
 - **Expects**: Opened `*sql.DB` (shared notedb). `Migrate` must be called before other functions (called at ultrabridge startup).
 

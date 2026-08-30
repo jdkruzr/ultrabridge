@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"embed"
 	"encoding/base64"
@@ -81,7 +83,7 @@ type Handler struct {
 	broadcaster     *logging.LogBroadcaster
 
 	oauthCodesMu sync.Mutex
-	oauthCodes   map[string]time.Time // code -> expiry
+	oauthCodes   map[string]oauthCode
 
 	// Task ATTACH serving (optional; nil until SetTaskAttach is called from
 	// main.go). The download/render handlers these back are mounted on the
@@ -90,6 +92,13 @@ type Handler struct {
 	attachSigner  *taskattach.Signer
 	attachStore   *taskattach.BlobStore
 	attachBaseURL string
+}
+
+type oauthCode struct {
+	expiresAt     time.Time
+	clientID      string
+	redirectURI   string
+	codeChallenge string
 }
 
 func formatDueTime(val interface{}) string {
@@ -2344,28 +2353,106 @@ func (h *Handler) handleChatMessages(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(m)
 }
 
+type oauthRegistrationRequest struct {
+	RedirectURIs            []string `json:"redirect_uris"`
+	ClientName              string   `json:"client_name"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	GrantTypes              []string `json:"grant_types"`
+	ResponseTypes           []string `json:"response_types"`
+	Scope                   string   `json:"scope,omitempty"`
+	ApplicationType         string   `json:"application_type,omitempty"`
+}
+
+// HandleOAuthRegister implements RFC 7591 dynamic registration for public
+// MCP clients. Registered redirect URIs are persisted so a container restart
+// does not invalidate Claude's client_id.
+func (h *Handler) HandleOAuthRegister(w http.ResponseWriter, r *http.Request) {
+	if h.noteDB == nil {
+		oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "client registration is unavailable")
+		return
+	}
+	var req oauthRegistrationRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&req); err != nil {
+		oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "invalid registration document")
+		return
+	}
+	if len(req.RedirectURIs) == 0 {
+		oauthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris is required")
+		return
+	}
+	for _, redirectURI := range req.RedirectURIs {
+		if !validOAuthRedirectURI(redirectURI) {
+			oauthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect URI must use HTTPS (HTTP is allowed for loopback hosts)")
+			return
+		}
+	}
+	if req.TokenEndpointAuthMethod == "" {
+		req.TokenEndpointAuthMethod = "none"
+	}
+	if req.TokenEndpointAuthMethod != "none" {
+		oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "only public clients are supported")
+		return
+	}
+	client, err := mcpauth.RegisterOAuthClient(r.Context(), h.noteDB, mcpauth.OAuthClient{
+		ClientName:              strings.TrimSpace(req.ClientName),
+		RedirectURIs:            req.RedirectURIs,
+		TokenEndpointAuthMethod: req.TokenEndpointAuthMethod,
+	})
+	if err != nil {
+		h.logger.Error("OAuth register: store client", "error", err)
+		oauthError(w, http.StatusInternalServerError, "server_error", "client registration failed")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	response := map[string]any{
+		"client_id":                  client.ClientID,
+		"client_id_issued_at":        client.CreatedAt,
+		"client_name":                client.ClientName,
+		"redirect_uris":              client.RedirectURIs,
+		"token_endpoint_auth_method": client.TokenEndpointAuthMethod,
+		"grant_types":                []string{"authorization_code"},
+		"response_types":             []string{"code"},
+	}
+	if req.Scope != "" {
+		response["scope"] = req.Scope
+	}
+	if req.ApplicationType != "" {
+		response["application_type"] = req.ApplicationType
+	}
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
 // HandleOAuthAuthorize handles the first leg of Claude's OAuth flow.
 func (h *Handler) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 	redirectURI := r.URL.Query().Get("redirect_uri")
 	state := r.URL.Query().Get("state")
+	clientID := r.URL.Query().Get("client_id")
+	codeChallenge := r.URL.Query().Get("code_challenge")
 
-	if redirectURI == "" {
-		http.Error(w, "missing redirect_uri", http.StatusBadRequest)
+	if redirectURI == "" || clientID == "" || r.URL.Query().Get("response_type") != "code" {
+		http.Error(w, "invalid authorization request", http.StatusBadRequest)
 		return
 	}
-
-	target, err := url.Parse(redirectURI)
-	if err != nil {
-		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+	client, err := mcpauth.GetOAuthClient(r.Context(), h.noteDB, clientID)
+	if err != nil || !containsString(client.RedirectURIs, redirectURI) {
+		http.Error(w, "invalid client or redirect_uri", http.StatusBadRequest)
 		return
 	}
-	isLocalhost := target.Hostname() == "localhost" || target.Hostname() == "127.0.0.1" || target.Hostname() == "::1"
-	if target.Scheme != "https" && !isLocalhost {
-		http.Error(w, "redirect_uri must use HTTPS", http.StatusBadRequest)
+	if r.URL.Query().Get("code_challenge_method") != "S256" || codeChallenge == "" {
+		http.Error(w, "PKCE S256 is required", http.StatusBadRequest)
 		return
 	}
+	target, _ := url.Parse(redirectURI)
 
-	code := h.generateOAuthCode()
+	code := h.generateOAuthCodeFor(oauthCode{
+		clientID:      clientID,
+		redirectURI:   redirectURI,
+		codeChallenge: codeChallenge,
+	})
 
 	q := target.Query()
 	q.Set("code", code)
@@ -2379,35 +2466,40 @@ func (h *Handler) HandleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) generateOAuthCode() string {
+	return h.generateOAuthCodeFor(oauthCode{})
+}
+
+func (h *Handler) generateOAuthCodeFor(info oauthCode) string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	code := base64.RawURLEncoding.EncodeToString(b)
 
 	h.oauthCodesMu.Lock()
 	defer h.oauthCodesMu.Unlock()
 	if h.oauthCodes == nil {
-		h.oauthCodes = make(map[string]time.Time)
+		h.oauthCodes = make(map[string]oauthCode)
 	}
 	// Purge expired codes while we hold the lock.
 	now := time.Now()
-	for k, exp := range h.oauthCodes {
-		if now.After(exp) {
+	for k, stored := range h.oauthCodes {
+		if now.After(stored.expiresAt) {
 			delete(h.oauthCodes, k)
 		}
 	}
-	h.oauthCodes[code] = now.Add(5 * time.Minute)
+	info.expiresAt = now.Add(5 * time.Minute)
+	h.oauthCodes[code] = info
 	return code
 }
 
-func (h *Handler) consumeOAuthCode(code string) bool {
+func (h *Handler) consumeOAuthCode(code string) (oauthCode, bool) {
 	h.oauthCodesMu.Lock()
 	defer h.oauthCodesMu.Unlock()
-	exp, ok := h.oauthCodes[code]
+	info, ok := h.oauthCodes[code]
 	if !ok {
-		return false
+		return oauthCode{}, false
 	}
 	delete(h.oauthCodes, code)
-	return time.Now().Before(exp)
+	return info, time.Now().Before(info.expiresAt)
 }
 
 // HandleOAuthToken handles the token exchange leg of Claude's OAuth flow.
@@ -2417,10 +2509,19 @@ func (h *Handler) HandleOAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.FormValue("grant_type") != "authorization_code" {
+		oauthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code")
+		return
+	}
 	code := r.FormValue("code")
-	if !h.consumeOAuthCode(code) {
+	info, ok := h.consumeOAuthCode(code)
+	if !ok {
 		h.logger.Warn("OAuth token: invalid or expired code", "remote_ip", r.RemoteAddr)
-		http.Error(w, "invalid_grant", http.StatusBadRequest)
+		oauthError(w, http.StatusBadRequest, "invalid_grant", "invalid or expired authorization code")
+		return
+	}
+	if info.clientID != r.FormValue("client_id") || info.redirectURI != r.FormValue("redirect_uri") || !validPKCEVerifier(r.FormValue("code_verifier"), info.codeChallenge) {
+		oauthError(w, http.StatusBadRequest, "invalid_grant", "authorization code binding or PKCE verification failed")
 		return
 	}
 
@@ -2442,6 +2543,43 @@ func (h *Handler) HandleOAuthToken(w http.ResponseWriter, r *http.Request) {
 		"token_type":   "Bearer",
 		"expires_in":   315360000,
 	})
+}
+
+func validOAuthRedirectURI(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Fragment != "" || u.Host == "" {
+		return false
+	}
+	if u.Scheme == "https" {
+		return true
+	}
+	host := u.Hostname()
+	return u.Scheme == "http" && (host == "localhost" || host == "127.0.0.1" || host == "::1")
+}
+
+func validPKCEVerifier(verifier, challenge string) bool {
+	if verifier == "" || challenge == "" {
+		return false
+	}
+	sum := sha256.Sum256([]byte(verifier))
+	got := base64.RawURLEncoding.EncodeToString(sum[:])
+	return subtle.ConstantTimeCompare([]byte(got), []byte(challenge)) == 1
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func oauthError(w http.ResponseWriter, status int, code, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "error_description": description})
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.mux.ServeHTTP(w, r) }

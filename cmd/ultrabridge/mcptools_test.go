@@ -76,7 +76,7 @@ func TestFormatMCPTask_NoAttachmentNoLine(t *testing.T) {
 func TestMCPSearchNotesForwardsRationalFiltersAndReturnsStructuredOutput(t *testing.T) {
 	var gotQuery url.Values
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/search" && r.Method == "GET" {
+		if r.URL.Path == "/api/v1/search" && r.Method == "GET" {
 			gotQuery = r.URL.Query()
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode([]map[string]any{{

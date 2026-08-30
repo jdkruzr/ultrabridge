@@ -26,8 +26,10 @@ This page covers current user-facing deployments. Historical design and test pla
 
 1. Claude.ai must be able to reach the public `/mcp` URL. `localhost` only works for clients running on the same machine.
 2. Confirm the reverse proxy forwards to the main app listener, normally `:8443`.
-3. Disconnect and reconnect the MCP server in Claude.ai after changing passwords or OAuth-related settings.
-4. Check the Logs tab for OAuth or MCP auth failures.
+3. Confirm the public OAuth discovery endpoints advertise `/register`, `/authorize`, and `/token`, and that the proxy leaves those routes reachable.
+4. Confirm the proxy preserves the original `Host` and `X-Forwarded-Proto: https`; UltraBridge uses them to generate absolute OAuth metadata.
+5. Disconnect and reconnect the MCP server in Claude.ai after changing passwords or OAuth-related settings so Claude performs discovery and dynamic registration again.
+6. Check the Logs tab for OAuth or MCP auth failures.
 
 ### MCP Bearer Token Fails
 

@@ -41,6 +41,30 @@ func TestMigrate_Idempotent(t *testing.T) {
 	}
 }
 
+func TestRegisterAndGetOAuthClient(t *testing.T) {
+	db := openTestDB(t)
+	want := OAuthClient{
+		ClientName:              "Claude",
+		RedirectURIs:            []string{"https://claude.ai/api/mcp/auth_callback"},
+		TokenEndpointAuthMethod: "none",
+	}
+	registered, err := RegisterOAuthClient(context.Background(), db, want)
+	if err != nil {
+		t.Fatalf("RegisterOAuthClient: %v", err)
+	}
+	if registered.ClientID == "" || registered.CreatedAt == 0 {
+		t.Fatalf("registered client missing generated fields: %#v", registered)
+	}
+
+	got, err := GetOAuthClient(context.Background(), db, registered.ClientID)
+	if err != nil {
+		t.Fatalf("GetOAuthClient: %v", err)
+	}
+	if got.ClientName != want.ClientName || got.TokenEndpointAuthMethod != "none" || len(got.RedirectURIs) != 1 || got.RedirectURIs[0] != want.RedirectURIs[0] {
+		t.Fatalf("GetOAuthClient = %#v", got)
+	}
+}
+
 // TestCreateToken verifies mcp-oauth.AC1.1: token generation and storage.
 // - Raw token is 43 chars of URL-safe base64
 // - Token hash is 64-char hex string

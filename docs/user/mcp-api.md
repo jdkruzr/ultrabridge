@@ -12,7 +12,14 @@ https://your-public-host/mcp
 
 Use this for Claude.ai web or any MCP client that speaks Streamable HTTP. Both `/mcp` and `/mcp/` work. Claude.ai must be able to reach the URL publicly.
 
-The endpoint accepts an `Authorization: Bearer <token>` header (MCP tokens) or the UltraBridge username/password. Create tokens in **Settings -> Integrations -> MCP Tokens**.
+Claude.ai can discover UltraBridge's OAuth endpoints, dynamically register a
+public client, and complete an authorization-code flow with PKCE automatically.
+Add the public `/mcp` URL as a custom connector and sign in with the UltraBridge
+username and password when prompted.
+
+The endpoint also accepts an `Authorization: Bearer <token>` header (MCP tokens)
+or the UltraBridge username/password. For clients that do not support automatic
+OAuth registration, create a token in **Settings -> Integrations -> MCP Tokens**.
 
 ## Note Tools
 
