@@ -1330,6 +1330,7 @@
           var type = document.getElementById('source-type').value;
           var backupField = document.getElementById('field-backup-path');
           var notesField = document.getElementById('field-notes-path');
+          var notesInput = document.getElementById('source-notes-path');
           var dataField = document.getElementById('field-data-path');
           var pairingField = document.getElementById('field-pairing-code');
           var accountField = document.getElementById('field-device-account');
@@ -1339,6 +1340,7 @@
           var hwrHostField = document.getElementById('field-hwr-host');
           backupField.style.display = (type === 'supernote') ? 'block' : 'none';
           notesField.style.display = (type === 'supernote' || type === 'boox') ? 'block' : 'none';
+          notesInput.placeholder = type === 'supernote' ? '/data/spc-files/NOTE/Note' : '/data/boox-notes';
           dataField.style.display = (type === 'remarkable') ? 'block' : 'none';
           pairingField.style.display = (type === 'remarkable') ? 'block' : 'none';
           accountField.style.display = (type === 'remarkable') ? 'block' : 'none';

@@ -283,6 +283,7 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("POST /api/file/3/files/upload/confirm", protect(up.FinishConfirm))
 	s.mux.Handle("POST /api/file/upload/finish", protect(up.WebFinish))
 	s.mux.HandleFunc("POST /api/oss/upload", up.UploadStream)
+	s.mux.HandleFunc("POST /api/oss/upload/part", up.UploadPart)
 
 	// File mutations (Phase 4c) — delete (soft, to .recycle/), move, copy. All
 	// JWT-protected business calls operating on the shared registry + FileRoot.

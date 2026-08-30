@@ -3,6 +3,7 @@ package staging
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sysop/ultrabridge/internal/spcserver/mapping"
@@ -20,6 +22,8 @@ import (
 // bytes never appear in the device's browsable tree.
 const stagingDir = ".staging"
 
+const maxUploadChunks = 1024
+
 // Store accepts and finalizes SPC uploads under a single FILE_ROOT, backed by
 // the spc_uploads table for apply→finish correlation and orphan cleanup. Now is
 // an injectable clock for tests; a nil Now uses time.Now.
@@ -27,6 +31,7 @@ type Store struct {
 	Root string
 	DB   *sql.DB
 	Now  func() time.Time
+	mu   sync.Mutex
 }
 
 func (s *Store) now() time.Time {
@@ -64,6 +69,12 @@ func (s *Store) Record(ctx context.Context, innerName, targetPath, fileName stri
 // Stage streams r into .staging/<innerName>, returning the number of bytes
 // written. It overwrites any prior partial stage for the same innerName.
 func (s *Store) Stage(innerName string, r io.Reader) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stage(innerName, r)
+}
+
+func (s *Store) stage(innerName string, r io.Reader) (int64, error) {
 	p, err := s.stagingPath(innerName)
 	if err != nil {
 		return 0, err
@@ -83,7 +94,107 @@ func (s *Store) Stage(innerName string, r io.Reader) (int64, error) {
 	if closeErr != nil {
 		return n, fmt.Errorf("staging close %q: %w", p, closeErr)
 	}
+	_ = os.RemoveAll(filepath.Join(s.Root, stagingDir, ".parts", innerName))
 	return n, nil
+}
+
+// StagePart stores one chunk for an upload and assembles the ordinary staging
+// file as soon as all chunks are present. Chunks may arrive out of order or be
+// retried; a retry replaces only that numbered chunk.
+func (s *Store) StagePart(innerName, uploadID string, partNumber, totalChunks int, r io.Reader) (int64, bool, error) {
+	if uploadID == "" {
+		return 0, false, fmt.Errorf("staging: empty uploadId")
+	}
+	if partNumber < 1 || totalChunks < 1 || totalChunks > maxUploadChunks || partNumber > totalChunks {
+		return 0, false, fmt.Errorf("staging: invalid chunk %d of %d", partNumber, totalChunks)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	staged, err := s.stagingPath(innerName)
+	if err != nil {
+		return 0, false, err
+	}
+	if _, err := os.Stat(staged); err == nil {
+		return 0, true, nil
+	} else if !os.IsNotExist(err) {
+		return 0, false, fmt.Errorf("staging stat %q: %w", innerName, err)
+	}
+
+	idHash := sha256.Sum256([]byte(uploadID))
+	partsDir := filepath.Join(s.Root, stagingDir, ".parts", innerName, hex.EncodeToString(idHash[:]), fmt.Sprintf("%d", totalChunks))
+	if err := os.MkdirAll(partsDir, 0o755); err != nil {
+		return 0, false, fmt.Errorf("staging chunk mkdir: %w", err)
+	}
+	partPath := filepath.Join(partsDir, fmt.Sprintf("%08d", partNumber))
+	tmpPath := partPath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return 0, false, fmt.Errorf("staging chunk create: %w", err)
+	}
+	n, copyErr := io.Copy(f, r)
+	closeErr := f.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmpPath)
+		return n, false, fmt.Errorf("staging chunk write: %w", copyErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmpPath)
+		return n, false, fmt.Errorf("staging chunk close: %w", closeErr)
+	}
+	if err := os.Rename(tmpPath, partPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return n, false, fmt.Errorf("staging chunk commit: %w", err)
+	}
+
+	for i := 1; i <= totalChunks; i++ {
+		if _, err := os.Stat(filepath.Join(partsDir, fmt.Sprintf("%08d", i))); err != nil {
+			if os.IsNotExist(err) {
+				return n, false, nil
+			}
+			return n, false, fmt.Errorf("staging chunk stat: %w", err)
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(staged), 0o755); err != nil {
+		return n, false, fmt.Errorf("staging merge mkdir: %w", err)
+	}
+	mergedPath := staged + ".merge"
+	merged, err := os.Create(mergedPath)
+	if err != nil {
+		return n, false, fmt.Errorf("staging merge create: %w", err)
+	}
+	mergeOK := false
+	defer func() {
+		_ = merged.Close()
+		if !mergeOK {
+			_ = os.Remove(mergedPath)
+		}
+	}()
+	for i := 1; i <= totalChunks; i++ {
+		part, err := os.Open(filepath.Join(partsDir, fmt.Sprintf("%08d", i)))
+		if err != nil {
+			return n, false, fmt.Errorf("staging merge open: %w", err)
+		}
+		_, copyErr := io.Copy(merged, part)
+		closeErr := part.Close()
+		if copyErr != nil {
+			return n, false, fmt.Errorf("staging merge copy: %w", copyErr)
+		}
+		if closeErr != nil {
+			return n, false, fmt.Errorf("staging merge close part: %w", closeErr)
+		}
+	}
+	if err := merged.Close(); err != nil {
+		return n, false, fmt.Errorf("staging merge close: %w", err)
+	}
+	if err := os.Rename(mergedPath, staged); err != nil {
+		return n, false, fmt.Errorf("staging merge commit: %w", err)
+	}
+	mergeOK = true
+	_ = os.RemoveAll(filepath.Join(s.Root, stagingDir, ".parts", innerName))
+	return n, true, nil
 }
 
 // Finalize verifies the staged file's md5 and size against the claimed values
@@ -167,6 +278,7 @@ func (s *Store) Sweep(ctx context.Context) error {
 		if p, err := s.stagingPath(name); err == nil {
 			_ = os.Remove(p)
 		}
+		_ = os.RemoveAll(filepath.Join(s.Root, stagingDir, ".parts", name))
 		if _, err := s.DB.ExecContext(ctx, `DELETE FROM spc_uploads WHERE inner_name = ?`, name); err != nil {
 			return fmt.Errorf("staging Sweep delete %q: %w", name, err)
 		}

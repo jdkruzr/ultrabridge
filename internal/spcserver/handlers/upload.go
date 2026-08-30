@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"path"
@@ -103,12 +106,16 @@ func (h *UploadHandler) Apply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	url := h.signedUploadURL(r, innerName)
+	urls := h.signedUploadURLs(r, innerName)
 	envelope.WriteJSON(w, dto.FileUploadApplyLocalVO{
 		BaseVO:        envelope.OK(),
 		EquipmentNo:   req.EquipmentNo,
+		BucketName:    req.FileName,
 		InnerName:     innerName,
-		FullUploadUrl: url,
+		XAmzDate:      strconv.FormatInt(urls.timestamp, 10),
+		Authorization: urls.signature,
+		FullUploadUrl: urls.full,
+		PartUploadUrl: urls.part,
 	})
 }
 
@@ -134,6 +141,10 @@ func (h *UploadHandler) UploadStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := r.ParseMultipartForm(uploadMaxMemory); err != nil {
+		uploadError(w, msgUploadFailed)
+		return
+	}
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		uploadError(w, msgUploadFailed)
@@ -151,6 +162,65 @@ func (h *UploadHandler) UploadStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, dto.UploadFileVO{BaseVO: envelope.OK()})
+}
+
+// UploadPart accepts one chunk from the device. The final arriving chunk
+// assembles all numbered parts into the same staging file used by Finish.
+func (h *UploadHandler) UploadPart(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	ts, err := strconv.ParseInt(q.Get("timestamp"), 10, 64)
+	if err != nil || !h.Signer.ValidateUpload(q.Get("signature"), ts, q.Get("nonce"), q.Get("path"), 0) {
+		uploadError(w, msgUploadSignatureFailed)
+		return
+	}
+	innerName, err := oss.DecryptPath(q.Get("path"))
+	if err != nil {
+		uploadError(w, msgUploadSignatureFailed)
+		return
+	}
+	partNumber, partErr := strconv.Atoi(q.Get("partNumber"))
+	totalChunks, totalErr := strconv.Atoi(q.Get("totalChunks"))
+	uploadID := q.Get("uploadId")
+	if partErr != nil || totalErr != nil || uploadID == "" {
+		uploadError(w, msgUploadFailed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(uploadMaxMemory); err != nil {
+		uploadError(w, msgUploadFailed)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		uploadError(w, msgUploadFailed)
+		return
+	}
+	defer file.Close()
+	if h.Staging == nil {
+		uploadError(w, msgUploadFailed)
+		return
+	}
+	chunkHash := md5.New()
+	if _, _, err := h.Staging.StagePart(innerName, uploadID, partNumber, totalChunks, io.TeeReader(file, chunkHash)); err != nil {
+		h.log().Error("oss/upload/part StagePart", "innerName", innerName, "uploadId", uploadID, "partNumber", partNumber, "totalChunks", totalChunks, "err", err)
+		uploadError(w, msgUploadFailed)
+		return
+	}
+	// StagePart consumes the body for a new/retried part. A retry received after
+	// assembly is already complete returns early, so drain the remaining body to
+	// produce the same checksum response in both cases.
+	if _, err := io.Copy(chunkHash, file); err != nil {
+		uploadError(w, msgUploadFailed)
+		return
+	}
+	envelope.WriteJSON(w, dto.FileChunkVO{
+		BaseVO:     envelope.OK(),
+		UploadID:   uploadID,
+		PartNumber: partNumber,
+		TotalParts: totalChunks,
+		ChunkMD5:   hex.EncodeToString(chunkHash.Sum(nil)),
+		Status:     "SUCCESS",
+	})
 }
 
 // Finish verifies the staged file's md5/size and promotes it to its target path.
@@ -214,13 +284,26 @@ func (h *UploadHandler) Finish(w http.ResponseWriter, r *http.Request) {
 // server-chosen innerName (not the human target path): bytes always stage under
 // a server-controlled name, and the real path only materializes at finish after
 // verification. fileSize is signed as 0, matching real SPC (O_OssLocalController:80).
-func (h *UploadHandler) signedUploadURL(r *http.Request, innerName string) string {
+type signedUploadURLs struct {
+	full      string
+	part      string
+	signature string
+	timestamp int64
+}
+
+func (h *UploadHandler) signedUploadURLs(r *http.Request, innerName string) signedUploadURLs {
 	encPath := oss.EncryptPath(innerName)
 	ts := h.nowMillis()
 	nonce := newNonce()
 	sig := h.Signer.UploadSignature(encPath, ts, nonce, 0)
-	return requestBaseURL(r) + "/api/oss/upload?signature=" + sig +
-		"&timestamp=" + strconv.FormatInt(ts, 10) + "&nonce=" + nonce + "&path=" + encPath
+	query := "?signature=" + sig + "&timestamp=" + strconv.FormatInt(ts, 10) + "&nonce=" + nonce + "&path=" + encPath
+	base := requestBaseURL(r) + "/api/oss/upload"
+	return signedUploadURLs{
+		full:      base + query,
+		part:      base + "/part" + query,
+		signature: sig,
+		timestamp: ts,
+	}
 }
 
 func (h *UploadHandler) nowMillis() int64 {

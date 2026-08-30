@@ -52,12 +52,13 @@ func (h *UploadHandler) WebApply(w http.ResponseWriter, r *http.Request) {
 			h.log().Error("web upload/apply Record", "innerName", innerName, "err", err)
 		}
 	}
+	urls := h.signedUploadURLs(r, innerName)
 	envelope.WriteJSON(w, struct {
 		envelope.BaseVO
 		InnerName     string `json:"innerName"`
 		FullUploadUrl string `json:"fullUploadUrl"`
 		PartUploadUrl string `json:"partUploadUrl"`
-	}{BaseVO: envelope.OK(), InnerName: innerName, FullUploadUrl: h.signedUploadURL(r, innerName)})
+	}{BaseVO: envelope.OK(), InnerName: innerName, FullUploadUrl: urls.full, PartUploadUrl: urls.part})
 }
 
 // WebFinish handles POST /api/file/upload/finish.

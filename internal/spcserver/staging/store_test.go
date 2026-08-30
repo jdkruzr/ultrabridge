@@ -61,6 +61,52 @@ func TestStageWritesAndRejectsBadInnerName(t *testing.T) {
 	}
 }
 
+func TestStagePartAssemblesOutOfOrderAndAcceptsRetries(t *testing.T) {
+	s, _ := newStore(t, time.Unix(1000, 0))
+
+	if n, complete, err := s.StagePart("inner-parts", "upload/with unsafe chars", 2, 3, strings.NewReader("two")); err != nil || complete || n != 3 {
+		t.Fatalf("part 2: n=%d complete=%v err=%v", n, complete, err)
+	}
+	if n, complete, err := s.StagePart("inner-parts", "upload/with unsafe chars", 1, 3, strings.NewReader("ONE")); err != nil || complete || n != 3 {
+		t.Fatalf("part 1: n=%d complete=%v err=%v", n, complete, err)
+	}
+	if _, complete, err := s.StagePart("inner-parts", "upload/with unsafe chars", 1, 3, strings.NewReader("one")); err != nil || complete {
+		t.Fatalf("part 1 retry: complete=%v err=%v", complete, err)
+	}
+	if n, complete, err := s.StagePart("inner-parts", "upload/with unsafe chars", 3, 3, strings.NewReader("three")); err != nil || !complete || n != 5 {
+		t.Fatalf("part 3: n=%d complete=%v err=%v", n, complete, err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(s.Root, stagingDir, "inner-parts"))
+	if err != nil {
+		t.Fatalf("read assembled stage: %v", err)
+	}
+	if string(got) != "onetwothree" {
+		t.Fatalf("assembled bytes = %q", got)
+	}
+	if _, complete, err := s.StagePart("inner-parts", "upload/with unsafe chars", 3, 3, strings.NewReader("three")); err != nil || !complete {
+		t.Fatalf("completed retry: complete=%v err=%v", complete, err)
+	}
+}
+
+func TestStagePartRejectsInvalidMetadata(t *testing.T) {
+	s, _ := newStore(t, time.Unix(1000, 0))
+	for _, tc := range []struct {
+		uploadID          string
+		part, totalChunks int
+	}{
+		{"", 1, 1},
+		{"upload", 0, 1},
+		{"upload", 2, 1},
+		{"upload", 1, 0},
+		{"upload", 1, maxUploadChunks + 1},
+	} {
+		if _, _, err := s.StagePart("inner", tc.uploadID, tc.part, tc.totalChunks, strings.NewReader("x")); err == nil {
+			t.Fatalf("StagePart(%q, %d, %d) should fail", tc.uploadID, tc.part, tc.totalChunks)
+		}
+	}
+}
+
 // AC1.3 Verify: md5 or size mismatch rejects without promoting.
 func TestFinalizeRejectsMismatch(t *testing.T) {
 	s, ctx := newStore(t, time.Unix(1000, 0))
@@ -145,6 +191,12 @@ func TestSweepRemovesOrphans(t *testing.T) {
 	if _, err := s.Stage("stale", strings.NewReader("o")); err != nil {
 		t.Fatalf("Stage stale: %v", err)
 	}
+	if err := s.Record(ctx, "stale-parts", "/Note", "large.note", 2, time.Second); err != nil {
+		t.Fatalf("Record stale parts: %v", err)
+	}
+	if _, complete, err := s.StagePart("stale-parts", "upload", 1, 2, strings.NewReader("o")); err != nil || complete {
+		t.Fatalf("StagePart stale: complete=%v err=%v", complete, err)
+	}
 
 	// Advance clock past the stale TTL but record a fresh one at the new time.
 	s.Now = func() time.Time { return start.Add(time.Hour) }
@@ -160,6 +212,9 @@ func TestSweepRemovesOrphans(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.Root, stagingDir, "stale")); !os.IsNotExist(err) {
 		t.Fatalf("stale staged file should be swept, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Root, stagingDir, ".parts", "stale-parts")); !os.IsNotExist(err) {
+		t.Fatalf("stale chunks should be swept, err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(s.Root, stagingDir, "fresh")); err != nil {
 		t.Fatalf("fresh staged file should survive sweep: %v", err)

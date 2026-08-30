@@ -221,11 +221,9 @@ type FileUploadApplyLocalDTO struct {
 
 // FileUploadApplyLocalVO is the upload/apply response
 // (com/ratta/file/vo/FileUploadApplyLocalVO.java extends BaseVO). UB fills
-// innerName (a server-chosen UUID) and fullUploadUrl (the presigned
-// /api/oss/upload URL the device then POSTs the bytes to). bucketName/xAmzDate/
-// authorization are for real SPC's AWS-style OSS path and stay empty here;
-// partUploadUrl is empty (UB does not implement chunked upload). The device uses
-// only fullUploadUrl and treats it opaquely (same model as download).
+// innerName (a server-chosen UUID) plus presigned single-shot and chunked upload
+// URLs. The remaining fields mirror the real private-cloud response because
+// current device firmware validates that the upload application is complete.
 type FileUploadApplyLocalVO struct {
 	envelope.BaseVO
 	EquipmentNo   string `json:"equipmentNo"`
@@ -241,6 +239,16 @@ type FileUploadApplyLocalVO struct {
 // a bare BaseVO; the device only checks success).
 type UploadFileVO struct {
 	envelope.BaseVO
+}
+
+// FileChunkVO is the /api/oss/upload/part response.
+type FileChunkVO struct {
+	envelope.BaseVO
+	UploadID   string `json:"uploadId"`
+	PartNumber int    `json:"partNumber"`
+	TotalParts int    `json:"totalChunks"`
+	ChunkMD5   string `json:"chunkMd5"`
+	Status     string `json:"status"`
 }
 
 // FileUploadFinishLocalDTO is the upload/finish request

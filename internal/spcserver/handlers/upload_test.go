@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/sysop/ultrabridge/internal/notedb"
+	"github.com/sysop/ultrabridge/internal/spcserver/dto"
 	"github.com/sysop/ultrabridge/internal/spcserver/fileids"
 	"github.com/sysop/ultrabridge/internal/spcserver/oss"
 	"github.com/sysop/ultrabridge/internal/spcserver/staging"
@@ -69,6 +70,33 @@ func uploadStreamReq(t *testing.T, fullUploadURL string, body []byte) *http.Requ
 	return req
 }
 
+func uploadPartReq(t *testing.T, partUploadURL, uploadID string, partNumber, totalChunks int, body []byte) *http.Request {
+	t.Helper()
+	u, err := url.Parse(partUploadURL)
+	if err != nil {
+		t.Fatalf("parse partUploadUrl %q: %v", partUploadURL, err)
+	}
+	q := u.Query()
+	q.Set("uploadId", uploadID)
+	q.Set("partNumber", strconv.Itoa(partNumber))
+	q.Set("totalChunks", strconv.Itoa(totalChunks))
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("file", "upload.bin")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write(body); err != nil {
+		t.Fatalf("write part: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close mw: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/oss/upload/part?"+q.Encode(), &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return req
+}
+
 // AC3.1: apply mints an innerName + a fullUploadUrl whose signature validates and
 // whose path decrypts back to the innerName.
 func TestUploadApplyMintsValidURL(t *testing.T) {
@@ -80,8 +108,9 @@ func TestUploadApplyMintsValidURL(t *testing.T) {
 	}
 	inner, _ := out["innerName"].(string)
 	full, _ := out["fullUploadUrl"].(string)
-	if inner == "" || full == "" {
-		t.Fatalf("innerName=%q fullUploadUrl=%q", inner, full)
+	part, _ := out["partUploadUrl"].(string)
+	if inner == "" || full == "" || part == "" {
+		t.Fatalf("innerName=%q fullUploadUrl=%q partUploadUrl=%q", inner, full, part)
 	}
 	u, err := url.Parse(full)
 	if err != nil {
@@ -95,6 +124,55 @@ func TestUploadApplyMintsValidURL(t *testing.T) {
 	dec, err := oss.DecryptPath(q.Get("path"))
 	if err != nil || dec != inner {
 		t.Fatalf("path decrypts to %q (err %v), want innerName %q", dec, err, inner)
+	}
+	partURL, err := url.Parse(part)
+	if err != nil || partURL.Path != "/api/oss/upload/part" || partURL.RawQuery != u.RawQuery {
+		t.Fatalf("partUploadUrl = %q, want signed /api/oss/upload/part matching full URL", part)
+	}
+	if out["bucketName"] != "foo.note" || out["xAmzDate"] == "" || out["authorization"] != q.Get("signature") {
+		t.Fatalf("incomplete apply metadata: %#v", out)
+	}
+}
+
+func TestChunkedUploadRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	h := newUploadHandler(t, root)
+	body := []byte("first-second-third")
+	apply := decodeMap(t, h.Apply,
+		`{"equipmentNo":"SN078","path":"/NOTE/Note/big.note","fileName":"big.note","size":"`+strconv.Itoa(len(body))+`"}`)
+	inner := apply["innerName"].(string)
+	partURL := apply["partUploadUrl"].(string)
+
+	chunks := map[int][]byte{1: []byte("first-"), 2: []byte("second-"), 3: []byte("third")}
+	for _, number := range []int{2, 1, 3} {
+		rec := httptest.NewRecorder()
+		h.UploadPart(rec, uploadPartReq(t, partURL, "upload-123", number, 3, chunks[number]))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("part %d status = %d, body %q", number, rec.Code, rec.Body.String())
+		}
+		var response dto.FileChunkVO
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("part %d response: %v", number, err)
+		}
+		if !response.Success || response.UploadID != "upload-123" || response.PartNumber != number || response.TotalParts != 3 || response.ChunkMD5 != md5Hex(t, chunks[number]) {
+			t.Fatalf("part %d response = %#v", number, response)
+		}
+	}
+
+	finishBody, _ := json.Marshal(map[string]any{
+		"equipmentNo": "SN078", "path": "/NOTE/Note/", "fileName": "big.note",
+		"size": strconv.Itoa(len(body)), "content_hash": md5Hex(t, body), "innerName": inner,
+	})
+	out := decodeMap(t, h.Finish, string(finishBody))
+	if out["success"] != true {
+		t.Fatalf("finish response = %#v", out)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "NOTE", "Note", "big.note"))
+	if err != nil {
+		t.Fatalf("read promoted file: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("promoted bytes = %q, want %q", got, body)
 	}
 }
 
