@@ -815,7 +815,7 @@ func main() {
 		// /register is public dynamic client registration (RFC 7591).
 		mux.HandleFunc("POST /register", webHandler.HandleOAuthRegister)
 
-		mux.Handle("/", authMW.Wrap(webHandler))
+		registerWebRoutes(mux, webHandler, authMW.Wrap(webHandler))
 	}
 
 	// Wire MCP server at /mcp/ — speaks MCP protocol for Claude Web and other MCP clients.
@@ -887,6 +887,12 @@ func main() {
 			backfillCancel()
 		}
 	}
+}
+
+func registerWebRoutes(mux *http.ServeMux, publicWeb, protectedWeb http.Handler) {
+	mux.Handle("/setup", publicWeb)
+	mux.Handle("/setup/save", publicWeb)
+	mux.Handle("/", protectedWeb)
 }
 
 func oauthBaseURL(r *http.Request) string {
