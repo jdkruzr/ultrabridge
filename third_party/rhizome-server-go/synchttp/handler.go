@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/jdkruzr/rhizome/server-go/auth"
+	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/jdkruzr/rhizome/server-go/syncsvc"
 )
 
@@ -31,6 +32,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !h.auth.Authenticate(r) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="rhizome"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if _, exists := r.Header[http.CanonicalHeaderKey(bounded.Header)]; exists {
+		req, limits, err := bounded.ReadRequest(w, r, bounded.Defaults())
+		var body []byte
+		if err == nil {
+			body, err = h.svc.SyncBounded(req, limits)
+		}
+		if err != nil {
+			switch {
+			case errors.Is(err, syncsvc.ErrBadRequest):
+				err = bounded.Fail(400, "bad_request")
+			case errors.Is(err, syncsvc.ErrSchemaMismatch), errors.Is(err, syncsvc.ErrUnsupportedVersion):
+				err = bounded.Fail(409, "schema_mismatch")
+			}
+			bounded.WriteError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
 		return
 	}
 

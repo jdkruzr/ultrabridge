@@ -57,7 +57,10 @@ func NewStore(knownCols map[string][]string) *Store {
 func (s *Store) ApplyBatch(siteID string, ops []Op) ApplyResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.applyBatch(siteID, ops)
+}
 
+func (s *Store) applyBatch(siteID string, ops []Op) ApplyResult {
 	var res ApplyResult
 	rejectedSeqs := make(map[int64]bool) // op_seqs of siteID permanently rejected this call
 	for _, op := range ops {

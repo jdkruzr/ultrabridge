@@ -4,9 +4,11 @@
 package syncsvc
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/jdkruzr/rhizome/server-go/syncstore"
 )
 
@@ -67,19 +69,29 @@ func New(store Store, acceptedHashes []string, batchLimit int) *Service {
 // Sync ingests the request's ops, then returns this device's accepted_through, any rejected ops,
 // and the relay ops it has not yet seen (authored by other sites).
 func (s *Service) Sync(req Request) (Response, error) {
+	if err := s.validate(req); err != nil {
+		return Response{}, err
+	}
+	return s.syncValidated(req), nil
+}
+
+func (s *Service) validate(req Request) error {
 	if req.ProtocolVersion != ProtocolVersion {
-		return Response{}, fmt.Errorf("%w: got %d, want %d", ErrUnsupportedVersion, req.ProtocolVersion, ProtocolVersion)
+		return fmt.Errorf("%w: got %d, want %d", ErrUnsupportedVersion, req.ProtocolVersion, ProtocolVersion)
 	}
 	if !s.accepted[req.SchemaHash] {
-		return Response{}, ErrSchemaMismatch
+		return ErrSchemaMismatch
 	}
 	if !syncstore.IsULID(req.SiteID) {
-		return Response{}, fmt.Errorf("%w: site_id is not a ULID", ErrBadRequest)
+		return fmt.Errorf("%w: site_id is not a ULID", ErrBadRequest)
 	}
 	if req.Cursor < 0 {
-		return Response{}, fmt.Errorf("%w: cursor must be >= 0", ErrBadRequest)
+		return fmt.Errorf("%w: cursor must be >= 0", ErrBadRequest)
 	}
+	return nil
+}
 
+func (s *Service) syncValidated(req Request) Response {
 	applyRes := s.store.ApplyBatch(req.SiteID, req.Ops)
 	ops, newCursor, hasMore := s.store.OpsSince(req.Cursor, req.SiteID, s.batchLimit)
 
@@ -97,5 +109,27 @@ func (s *Service) Sync(req Request) (Response, error) {
 		Ops:             ops,
 		Cursor:          newCursor,
 		HasMore:         hasMore,
-	}, nil
+	}
+}
+
+func (s *Service) SyncBounded(req bounded.Request, limits bounded.Limits) ([]byte, error) {
+	if err := s.validate(Request{ProtocolVersion: req.ProtocolVersion, SchemaHash: req.SchemaHash, SiteID: req.SiteID, Cursor: req.Cursor}); err != nil {
+		return nil, err
+	}
+	if err := req.ValidateRows(limits); err != nil {
+		return nil, err
+	}
+	store, ok := s.store.(interface {
+		ExchangeBounded(string, int64, []syncstore.Op, bounded.Limits) ([]byte, error)
+	})
+	if !ok {
+		return nil, bounded.Fail(503, "bounded_store_unavailable")
+	}
+	ops := make([]syncstore.Op, len(req.Ops))
+	for i, raw := range req.Ops {
+		if err := json.Unmarshal(raw, &ops[i]); err != nil {
+			return nil, bounded.Fail(400, "invalid_op")
+		}
+	}
+	return store.ExchangeBounded(req.SiteID, req.Cursor, ops, limits)
 }

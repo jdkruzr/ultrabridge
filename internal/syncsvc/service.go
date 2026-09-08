@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/sysop/ultrabridge/internal/syncstore"
 )
 
@@ -145,4 +146,31 @@ func normalizeDeviceName(name string) string {
 		return string(r[:MaxDeviceNameLen])
 	}
 	return name
+}
+
+func (s *Service) SyncBounded(ctx context.Context, req bounded.Request, limits bounded.Limits) ([]byte, error) {
+	if req.ProtocolVersion != ProtocolVersion {
+		return nil, bounded.Fail(409, "unsupported_protocol")
+	}
+	if !syncstore.AcceptsSchemaHash(req.SchemaHash) {
+		return nil, bounded.Fail(409, "schema_mismatch")
+	}
+	if !syncstore.IsULID(req.SiteID) || req.Cursor < 0 {
+		return nil, bounded.Fail(400, "bad_request")
+	}
+	store, ok := s.store.(interface {
+		ExchangeBounded(context.Context, bounded.Request, bounded.Limits) ([]byte, []syncstore.TablePK, error)
+	})
+	if !ok {
+		return nil, bounded.Fail(503, "bounded_store_unavailable")
+	}
+	req.DeviceName = normalizeDeviceName(req.DeviceName)
+	body, pages, err := store.ExchangeBounded(ctx, req, limits)
+	if err != nil {
+		return nil, err
+	}
+	if s.bridge != nil && len(pages) > 0 {
+		s.bridge.PagesChanged(ctx, pages)
+	}
+	return body, nil
 }

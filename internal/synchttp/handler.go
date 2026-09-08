@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/sysop/ultrabridge/internal/syncsvc"
 )
 
@@ -39,6 +40,10 @@ func New(svc Syncer, maxBytes int64, logger *slog.Logger) http.Handler {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if _, exists := r.Header[http.CanonicalHeaderKey(bounded.Header)]; exists {
+		h.serveBounded(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "POST required")
 		return
@@ -77,6 +82,32 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Status already sent (200) once the encoder writes; just log.
 		h.logger.Error("sync handler: encode response", "err", err)
 	}
+}
+
+func (h *handler) serveBounded(w http.ResponseWriter, r *http.Request) {
+	limits := bounded.Defaults()
+	if h.maxBytes > 0 && h.maxBytes < int64(limits.MaxBodyBytes) {
+		limits.MaxBodyBytes = int(h.maxBytes)
+		limits.TargetPageBytes = min(limits.TargetPageBytes, limits.MaxBodyBytes)
+	}
+	req, limits, err := bounded.ReadRequest(w, r, limits)
+	var body []byte
+	if err == nil {
+		svc, ok := h.svc.(interface {
+			SyncBounded(context.Context, bounded.Request, bounded.Limits) ([]byte, error)
+		})
+		if !ok {
+			err = bounded.Fail(503, "bounded_service_unavailable")
+		} else {
+			body, err = svc.SyncBounded(r.Context(), req, limits)
+		}
+	}
+	if err != nil {
+		bounded.WriteError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 func writeErr(w http.ResponseWriter, status int, msg string) {

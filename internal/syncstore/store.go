@@ -73,7 +73,20 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 		return res, fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback()
+	res, err = s.applyBatchTx(ctx, tx, siteID, ops)
+	if err != nil {
+		return res, err
+	}
+	if err := tx.Commit(); err != nil {
+		return res, fmt.Errorf("commit: %w", err)
+	}
+	return res, nil
+}
 
+// Shared merge/relay body. The bounded path owns a larger transaction so a
+// refused response cannot commit an acknowledgement, HLC, mirror or log change.
+func (s *Store) applyBatchTx(ctx context.Context, tx *sql.Tx, siteID string, ops []Op) (ApplyResult, error) {
+	var res ApplyResult
 	now := time.Now().UnixMilli()
 	// Durable HLC: read this site's op_ts clock so we can drag it past the greatest incoming op_ts
 	// (clock.ReceiveEvent below). Device ops keep their OWN op_ts (their LWW key) — they are NOT
@@ -172,10 +185,6 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE sync_site SET last_hlc = ? WHERE id = 1`, clock.Last()); err != nil {
 		return res, fmt.Errorf("persist last_hlc: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return res, fmt.Errorf("commit: %w", err)
 	}
 	return res, nil
 }

@@ -2,8 +2,13 @@
 
 Status: **specification only; no runtime, schema, dependency or deployment change** (2026-09-07).
 Stage 1 snapshot above; 2026-09-08 implementation progress is in the
-[Stage 2A headless asset slice](../../../ForestNote/docs/test-plans/forestread-stage-2/README.md).
-The new host adapter/harness is not registered in the production router and advertises no capability.
+[Stage 2A/B headless asset and bounded-row slices](../../../ForestNote/docs/test-plans/forestread-stage-2/README.md).
+Stage 2A commit `581c1f1` was rebuilt on production without activating asset routes or schema.
+Stage 2B is local: opt-in bounded HTTP/SQL exchanges and authenticated capabilities pass tests against
+the disposable harness. Production advertises no new capability; reader registries/migrations and
+asset/capability route activation remain pending. Existing requests without the opt-in header retain
+the legacy path. The bounded path commits incoming relay/mirror/HLC/ACK/cursor state only after its
+encoded response fits, and notifies downstream processing only after commit.
 Companions: [FN domain contract](../../../ForestNote/docs/design-plans/2026-09-07-forestread-stage-1.md),
 [Rhizome assets-v1](../../../rhizome/spec/assets-v1.md), and
 [pending acceptance definitions](../../../ForestNote/docs/test-plans/forestread-stage-1/README.md).

@@ -14,6 +14,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/sysop/ultrabridge/internal/auth"
 	"github.com/sysop/ultrabridge/internal/syncassets"
 	"github.com/sysop/ultrabridge/internal/synchttp"
@@ -56,6 +57,11 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/sync/assets/v1/", syncassets.Handler(db, a))
 	mux.Handle("/sync/v1", a.Wrap(synchttp.New(syncsvc.New(syncstore.New(db), 500, nil, nil), synchttp.DefaultMaxBytes, nil)))
+	capabilities, err := bounded.CapabilityHandler(bounded.Defaults(), syncstore.AcceptedSchemaHashes(), true)
+	if err != nil {
+		log.Fatal(err)
+	}
+	mux.Handle("/sync/capabilities", a.Wrap(capabilities))
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Fatal(err)
