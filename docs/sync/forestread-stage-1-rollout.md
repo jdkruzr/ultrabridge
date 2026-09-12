@@ -15,7 +15,72 @@ Companions: [FN domain contract](../../../ForestNote/docs/design-plans/2026-09-0
 Sibling-checkout links are intentional. These documents govern the proposed addition, not the
 historical pre-Rhizome protocol text or the currently released service.
 
+2026-09-09 Stage 2D8: local, inactive [`internal/readercontract`](../../internal/readercontract/README.md)
+now matches Kotlin's typed reader registry, row validation, pure ownership/dependency rules,
+composite IDs and FNRI1 fingerprints. The headless runner compares the actual production writer
+descriptors too, and derives (but does not accept/activate) the candidate combined schema hash.
+No production route, migration, capability, accepted hash, dependency vendor or deployment changes.
+Full Go annotation projection and durable reader HTTP/mirror integration remain next-stage work.
+
+2026-09-10 Stage 2D9 completes the pure Go projection reducer, with 68 complete Kotlin/Go
+projection scenarios and 12 shuffled orders per scenario. It preserves canonical stroke bytes,
+raw selectors and provenance, uses Kotlin UTF-16 ordering, and derives the same cancellation,
+erase, height, visibility, status and recognition-hash results. It performs no DB/network writes.
+The remaining integration boundary is durable reader ingress/mirrors and bounded snapshot
+acquisition, then real reader HTTP interoperability. No production activation or deployment.
+
+Authentication qualification: current shared Basic credentials authenticate an account, not a
+particular claimed `site_id`. The new pure author guard requires a host-verified site binding;
+it does not implement credential enrollment or derive trust from the request. Resolve device
+binding before claiming client ownership enforcement; server-recognition producers need their
+own authenticated binding. Until then the candidate domain guard rejects server producer rows.
+
+2026-09-10 Stage 2D10 adds inactive [`internal/readerstore`](../../internal/readerstore/README.md):
+explicit additive installation in disposable notedb, prepared receipt, durable pending/quarantine,
+typed LWW mirrors and bounded consistent snapshots. Full ink validation happens off-writer;
+mirror/status updates commit together and reduction/hash happens after snapshot transaction close.
+`Prepared.CommitTx` is a host-transaction seam, not a second relay or acknowledgement path.
+The existing production sync schema/hash/route/migration runner is unchanged. Mixed reader/writer
+HTTP relay and ACK integration, credential binding and production migration remain future work.
+
+2026-09-10 Stage 2D11 connects that storage to the existing bounded relay/ACK transaction in the
+explicit [reader HTTP harness](../../internal/readerlab/README.md). `assetlab --reader` uses fixture
+credentials bound to two sites and only the derived combined candidate hash; production remains
+unchanged. Actual Kotlin repositories round-trip through UB across restarts and compare the UB
+projection with both clients. Mixed reader/writer gaps, durable reader rejections, identity reuse,
+response-size rollback and injected commit failures are covered. Worker/search scheduling,
+production credential enrollment, row-plus-asset coordination and migration qualification remain
+next-stage work. Metadata ACK still does not mean original bytes are backed up.
+
+2026-09-10 Stage 2D12 adds a restart-safe background materializer and independent at-least-once
+downstream delivery loop. The explicit candidate reader schema advances to version 2: mirror
+changes and key-only journal entries commit together, with a contiguous consumer checkpoint.
+Existing v1 mirror keys are queued once without re-authoring. Startup/polling recover lost wake
+hints; unresolved dependencies idle and failed pages back off. The readerlab process starts and
+joins the worker; no actual search consumer is installed, so downstream jobs remain pending.
+Kotlin HTTP tests verify materialization while the host stays running. Production schema/routes,
+accepted hashes, deployment and Android lifecycle integration remain unchanged.
+
+2026-09-12 Stage 2D13 connects the journal to durable paged search jobs and a candidate annotation
+FTS index. Only current fingerprint-matched recognition alternatives, effective highlighted quotes
+and book titles are indexed; stale/deleted/cancelled/unsupported projections are hidden. Snapshot
+publication is guarded against newer mirror changes, with the same invalidation rules at query
+time. Kotlin exercises actual sync → search → restart → ink-change invalidation over fixture HTTP.
+No producer rows are authored by search. Production search federation/UI, migrations/authentication
+and combined reader-row/asset qualification remain separate. See the
+[current plan review](../../../ForestNote/docs/design-plans/2026-09-12-forestread-progress-review.md).
+
 ## 1. Actual integration seams
+
+2026-09-12 D16 adds inactive `internal/syncidentity` plus explicit loopback
+`assetlab --reader --reader-assets --reader-enrollment`. Dedicated credential hashes bind to
+existing author sites; account-admin enrollment retries are idempotent, legacy adoption explicit,
+and revoked bindings stay reserved without deleting cursor/content/provenance. Device credentials
+protect candidate rows, capabilities, assets and search, but cannot manage enrollment. The Kotlin
+fixture saves its private secret before submitting a hash and tests lost replies and restart.
+Production enrollment/Android vault/setup, rotation/recovery and historical credential rollback
+remain unimplemented. No production routes, migration runner or accepted schema hashes changed.
+See [D16 protocol and activation gates](../../../ForestNote/docs/design-plans/2026-09-12-forestread-enrollment-identity.md).
 
 UB currently uses `github.com/jdkruzr/rhizome/server-go` via the local
 `third_party/rhizome-server-go` replacement. Changing the sibling Rhizome repository alone does

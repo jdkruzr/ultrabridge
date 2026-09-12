@@ -86,6 +86,18 @@ func (s *Store) ApplyBatch(ctx context.Context, siteID string, ops []Op) (ApplyR
 // Shared merge/relay body. The bounded path owns a larger transaction so a
 // refused response cannot commit an acknowledgement, HLC, mirror or log change.
 func (s *Store) applyBatchTx(ctx context.Context, tx *sql.Tx, siteID string, ops []Op) (ApplyResult, error) {
+	return s.applyBatchTxExtended(ctx, tx, siteID, ops, nil)
+}
+
+// Candidate extensions participate after reading the pre-batch ACK, and before
+// the shared merge/contiguous-ACK/HLC work. Production callers pass nil.
+type batchExtension struct {
+	stage           func(context.Context, *sql.Tx, int64) (int64, []RejectedOp, error)
+	receipt         func(context.Context, *sql.Tx, string, int64) (bool, error)
+	preservePayload func(string) bool
+}
+
+func (s *Store) applyBatchTxExtended(ctx context.Context, tx *sql.Tx, siteID string, ops []Op, extra *batchExtension) (ApplyResult, error) {
 	var res ApplyResult
 	now := time.Now().UnixMilli()
 	// Durable HLC: read this site's op_ts clock so we can drag it past the greatest incoming op_ts
@@ -130,6 +142,16 @@ func (s *Store) applyBatchTx(ctx context.Context, tx *sql.Tx, siteID string, ops
 			rejectedSeqs[op.OpSeq] = true
 		}
 	}
+	if extra != nil {
+		var err error
+		maxIncoming, res.Rejected, err = extra.stage(ctx, tx, now)
+		if err != nil {
+			return res, err
+		}
+		for _, r := range res.Rejected {
+			rejectedSeqs[r.OpSeq] = true
+		}
+	}
 
 	for _, incoming := range ops {
 		op := withV5Defaults(incoming)
@@ -171,7 +193,7 @@ func (s *Store) applyBatchTx(ctx context.Context, tx *sql.Tx, siteID string, ops
 		}
 	}
 
-	accepted, err := advanceAccepted(ctx, tx, siteID, acked, rejectedSeqs, now)
+	accepted, err := advanceAcceptedExtended(ctx, tx, siteID, acked, rejectedSeqs, now, extra)
 	if err != nil {
 		return res, err
 	}
@@ -195,20 +217,25 @@ func (s *Store) applyBatchTx(ctx context.Context, tx *sql.Tx, siteID string, ops
 // payload and seq allocation, so both kinds of op flow through OpsSince the same
 // way. The op is marshaled as-is to preserve any forward-compat columns.
 func appendOp(ctx context.Context, tx *sql.Tx, op Op, now int64) error {
+	payload, err := json.Marshal(op)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+	return appendPayload(ctx, tx, op, string(payload), now)
+}
+
+// Reader candidates use the same sequence allocation without a float64 codec.
+func appendPayload(ctx context.Context, tx *sql.Tx, op Op, payload string, now int64) error {
 	var seq int64
 	if err := tx.QueryRowContext(ctx,
 		`UPDATE sync_seq SET last_seq = last_seq + 1 WHERE id = 1 RETURNING last_seq`).
 		Scan(&seq); err != nil {
 		return fmt.Errorf("bump seq: %w", err)
 	}
-	payload, err := json.Marshal(op)
-	if err != nil {
-		return fmt.Errorf("marshal payload: %w", err)
-	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO sync_ops (seq, site_id, op_seq, table_name, pk, wall_ts, payload, applied_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		seq, op.SiteID, op.OpSeq, op.Table, op.PK, op.WallTS, string(payload), now); err != nil {
+		seq, op.SiteID, op.OpSeq, op.Table, op.PK, op.WallTS, payload, now); err != nil {
 		return fmt.Errorf("insert sync_ops: %w", err)
 	}
 	return nil
@@ -333,9 +360,13 @@ func wireNullStr(s sql.NullString) any {
 // high-water means a rejected op is counted once (here), advanced past, and
 // never revisited — so a poison op neither wedges the water nor is silently lost.
 func advanceAccepted(ctx context.Context, tx *sql.Tx, siteID string, acked int64, rejectedSeqs map[int64]bool, now int64) (int64, error) {
+	return advanceAcceptedExtended(ctx, tx, siteID, acked, rejectedSeqs, now, nil)
+}
+
+func advanceAcceptedExtended(ctx context.Context, tx *sql.Tx, siteID string, acked int64, rejectedSeqs map[int64]bool, now int64, extra *batchExtension) (int64, error) {
 	h := acked
 
-	for {
+	for h < 1<<63-1 {
 		next := h + 1
 		if rejectedSeqs[next] {
 			h = next
@@ -349,6 +380,16 @@ func advanceAccepted(ctx context.Context, tx *sql.Tx, siteID string, acked int64
 			continue
 		}
 		if err == sql.ErrNoRows {
+			if extra != nil {
+				found, err := extra.receipt(ctx, tx, siteID, next)
+				if err != nil {
+					return 0, err
+				}
+				if found {
+					h = next
+					continue
+				}
+			}
 			break
 		}
 		return 0, fmt.Errorf("accepted walk: %w", err)

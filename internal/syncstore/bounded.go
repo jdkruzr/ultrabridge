@@ -22,6 +22,10 @@ func (s *Store) ExchangeBounded(ctx context.Context, req bounded.Request, limits
 			return nil, nil, bounded.Fail(400, "invalid_op")
 		}
 	}
+	return s.exchangeBounded(ctx, req, limits, ops, nil)
+}
+
+func (s *Store) exchangeBounded(ctx context.Context, req bounded.Request, limits bounded.Limits, ops []Op, extra *batchExtension) ([]byte, []TablePK, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, nil, err
@@ -31,7 +35,7 @@ func (s *Store) ExchangeBounded(ctx context.Context, req bounded.Request, limits
 	if _, err := tx.ExecContext(ctx, `UPDATE sync_seq SET last_seq=last_seq WHERE id=1`); err != nil {
 		return nil, nil, err
 	}
-	res, err := s.applyBatchTx(ctx, tx, req.SiteID, ops)
+	res, err := s.applyBatchTxExtended(ctx, tx, req.SiteID, ops, extra)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -52,12 +56,12 @@ func (s *Store) ExchangeBounded(ctx context.Context, req bounded.Request, limits
 			cap = 0
 		}
 		var seq, opSeq, size int64
-		var site string
+		var site, table string
 		var payload sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT seq,site_id,op_seq,length(CAST(payload AS BLOB)),
+		err := tx.QueryRowContext(ctx, `SELECT seq,site_id,op_seq,table_name,length(CAST(payload AS BLOB)),
 		 CASE WHEN length(CAST(payload AS BLOB))<=? THEN payload ELSE NULL END
 		 FROM sync_ops WHERE seq>? AND site_id<>? ORDER BY seq LIMIT 1`, cap, after, req.SiteID).
-			Scan(&seq, &site, &opSeq, &size, &payload)
+			Scan(&seq, &site, &opSeq, &table, &size, &payload)
 		if err == sql.ErrNoRows {
 			break
 		}
@@ -70,15 +74,19 @@ func (s *Store) ExchangeBounded(ctx context.Context, req bounded.Request, limits
 		}
 		var raw []byte
 		if payload.Valid {
-			var op Op
-			if err := json.Unmarshal([]byte(payload.String), &op); err != nil {
-				return nil, nil, err
+			if extra != nil && extra.preservePayload(table) {
+				raw = []byte(payload.String)
+			} else {
+				var op Op
+				if err := json.Unmarshal([]byte(payload.String), &op); err != nil {
+					return nil, nil, err
+				}
+				raw, err = json.Marshal(withV5Defaults(op))
+				if err != nil {
+					return nil, nil, err
+				}
+				size = int64(len(raw))
 			}
-			raw, err = json.Marshal(withV5Defaults(op))
-			if err != nil {
-				return nil, nil, err
-			}
-			size = int64(len(raw))
 		}
 		added, err := page.Add(seq, site, opSeq, size, raw)
 		if err != nil {

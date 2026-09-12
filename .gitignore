@@ -1,4 +1,7 @@
 .worktrees/
+# Local agent preferences
+AGENTS.md
+CLAUDE.md
 /ultrabridge
 /ub-mcp
 .ultrabridge.env
