@@ -41,12 +41,32 @@ func main() {
 	metadataOnly := flag.Bool("metadata-only", false, "with --reader-backup: omit assets from the newly created snapshot ONLY")
 	inventory := flag.Bool("reader-inventory", false, "with --reader-assets: hash disposable table state and verify book assets, then exit")
 	projection := flag.String("reader-project", "", "with --reader: drain disposable DB, print annotation projection, exit without HTTP")
+	restore := flag.String("reader-restore", "", "offline: restore snapshot into a NEW operation-owned directory")
+	restoreID := flag.String("restore-id", "", "stable restore attempt identifier")
 	flag.Parse()
 	if (*readerAssets && !*reader) || ((*enrollment || *checkpoint != "" || *inspect || *backup != "" || *inventory) && !*readerAssets) || (*metadataOnly && *backup == "") {
 		log.Fatal("reader-assets requires reader; checkpoint requires reader-assets")
 	}
 	if *path == "" {
 		log.Fatal("--db is required; never use your production notedb")
+	}
+	if *restore != "" {
+		if !*readerAssets || !*enrollment {
+			log.Fatal("restore requires enrolled reader-assets fixture")
+		}
+		result, err := prepareRestore(context.Background(), *path, *restore, *restoreID, restoreGate(*checkpoint))
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err = json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if !*inventory && *backup == "" && !*inspect {
+		if err := validateRestoreStartup(*path, *enrollment); err != nil {
+			log.Fatal(err)
+		}
 	}
 	db, err := sql.Open("sqlite", *path)
 	if err != nil {

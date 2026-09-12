@@ -62,6 +62,16 @@ func Install(ctx context.Context, db *sql.DB) error {
 	if strings.Join(strings.Fields(actual), " ") != strings.Join(strings.Fields(schema), " ") {
 		return ErrSchema
 	}
+	const retired = `CREATE TABLE sync_retired_replica (site_id TEXT NOT NULL PRIMARY KEY)`
+	if _, err = tx.ExecContext(ctx, strings.Replace(retired, "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)); err != nil {
+		return err
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE name='sync_retired_replica'`).Scan(&actual); err != nil {
+		return err
+	}
+	if strings.Join(strings.Fields(actual), " ") != strings.Join(strings.Fields(retired), " ") {
+		return ErrSchema
+	}
 	return tx.Commit()
 }
 
@@ -96,6 +106,13 @@ func (s Store) Enroll(ctx context.Context, e Enrollment) error {
 	}
 	if e.SiteID == server {
 		return ErrServerSite
+	}
+	var retired int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM sync_retired_replica WHERE site_id=?`, e.SiteID).Scan(&retired); err != nil {
+		return err
+	}
+	if retired != 0 {
+		return ErrConflict
 	}
 	var hash string
 	var revoked int

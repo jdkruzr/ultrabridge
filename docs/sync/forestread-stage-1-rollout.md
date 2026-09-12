@@ -179,6 +179,24 @@ already-migrated database in place or install an old binary over a new schema as
 Use a matched pre-upgrade DB/software backup for full rollback, retain the failed/new DB, and
 report reader sync unavailable. Devices retain local data and discover missing assets on recovery.
 
+### D21 candidate historical restore fence
+
+ForestNote remains single-user. Device/author IDs distinguish replicas and operation sequences,
+not different people or sharing roles. The [D21 policy and tests](../../../ForestNote/docs/design-plans/2026-09-12-forestread-recovery-safety.md)
+qualify explicit recovery with preserved source snapshots and fresh working replicas. Automatic
+merging of uncertain historical edits and silent whole-image rollback detection are deferred.
+
+The disposable `assetlab` command `--reader --reader-assets --reader-enrollment --db SNAPSHOT
+--reader-restore NEW_DIRECTORY --restore-id STABLE_ID` prepares an offline target. Before serving,
+it retires known replica IDs, revokes restored credentials and assigns UB a new replica/counter
+with a retained clock floor, without reauthoring history. A completion receipt and sidecar fence
+startup; retry preserves the reserved identity. Ordinary restored device credentials cannot regain
+access through legacy adoption. This does not install a production recovery route or operator UI.
+
+New clients pull the snapshot baseline. Work acknowledged after that snapshot is not claimed
+recovered: preserve surviving client libraries separately for later explicit reconciliation.
+Source snapshots, uncertain journals and book bytes are never automatically removed.
+
 ## 5. Acceptance and observability
 
 Required UB acceptance IDs are in the FN pending case catalog (`UB-*` and `COMP-*`). The generic
