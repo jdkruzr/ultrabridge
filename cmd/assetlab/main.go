@@ -14,11 +14,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/sysop/ultrabridge/internal/auth"
+	"github.com/sysop/ultrabridge/internal/libraryrestore"
 	"github.com/sysop/ultrabridge/internal/readerlab"
 	"github.com/sysop/ultrabridge/internal/readersearch"
 	"github.com/sysop/ultrabridge/internal/readerstore"
@@ -35,6 +38,7 @@ func main() {
 	reader := flag.Bool("reader", false, "enable candidate reader row fixture with per-site fixture credentials")
 	readerAssets := flag.Bool("reader-assets", false, "with --reader: enable combined asset fixture")
 	enrollment := flag.Bool("reader-enrollment", false, "with --reader-assets: require enrolled device credentials; fixture admin assetlab:assetlab")
+	restoreSync := flag.Bool("reader-restore-sync", false, "with --reader-enrollment: candidate authoritative publication/adoption")
 	checkpoint := flag.String("checkpoint", "", "with --reader-assets: gate a successful METHOD:path response before delivery")
 	inspect := flag.Bool("reader-inspect", false, "with --reader-assets: inspect disposable DB and annotation n, then exit")
 	backup := flag.String("reader-backup", "", "with --reader-assets: consistent snapshot into a NEW disposable file, then exit")
@@ -44,6 +48,9 @@ func main() {
 	restore := flag.String("reader-restore", "", "offline: restore snapshot into a NEW operation-owned directory")
 	restoreID := flag.String("restore-id", "", "stable restore attempt identifier")
 	flag.Parse()
+	if *restoreSync && !*enrollment {
+		log.Fatal("restore-sync requires enrolled reader fixture")
+	}
 	if (*readerAssets && !*reader) || ((*enrollment || *checkpoint != "" || *inspect || *backup != "" || *inventory) && !*readerAssets) || (*metadataOnly && *backup == "") {
 		log.Fatal("reader-assets requires reader; checkpoint requires reader-assets")
 	}
@@ -140,7 +147,7 @@ func main() {
 	}
 	mux.Handle("/sync/capabilities", a.Wrap(capabilities))
 	var handler http.Handler = mux
-	workerDone := make(chan struct{})
+	var workers *libraryrestore.Workers
 	if *reader {
 		options := readerstore.DefaultWorkerOptions()
 		options.OnError = func(err error) { log.Printf("reader worker: %v", err) }
@@ -151,27 +158,47 @@ func main() {
 			log.Fatal(err)
 		}
 		search := readersearch.New(db)
-		worker, e := readerstore.NewWorker(readerstore.New(db), search.Schedule, options)
-		if e != nil {
-			log.Fatal(e)
-		}
+		var current atomic.Pointer[readerstore.Worker]
+		workers = libraryrestore.NewWorkers(ctx, func(run context.Context) func() {
+			worker, e := readerstore.NewWorker(readerstore.New(db), search.Schedule, options)
+			if e != nil {
+				panic(e)
+			}
+			current.Store(worker)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				searchDone := make(chan struct{})
+				go func() { defer close(searchDone); _ = search.Run(run, options.OnError) }()
+				_ = worker.Run(run)
+				<-searchDone
+			}()
+			return func() { <-done }
+		})
+		wake := func() { current.Load().Wake() }
 		if *enrollment {
-			handler, err = readerlab.HandlerWithEnrollment(ctx, db, worker.Wake, search.Handler(), a)
+			handler, err = readerlab.HandlerWithEnrollment(ctx, db, wake, search.Handler(), a)
 		} else {
-			handler, err = readerlab.HandlerWithAssets(ctx, db, worker.Wake, search.Handler(), *readerAssets)
+			handler, err = readerlab.HandlerWithAssets(ctx, db, wake, search.Handler(), *readerAssets)
 		}
 		if err != nil {
 			log.Fatal(err)
 		}
-		go func() {
-			defer close(workerDone)
-			searchDone := make(chan struct{})
-			go func() { defer close(searchDone); _ = search.Run(ctx, options.OnError) }()
-			_ = worker.Run(ctx)
-			<-searchDone
-		}()
-	} else {
-		close(workerDone)
+		if *restoreSync {
+			if err = libraryrestore.Install(ctx, db); err != nil {
+				log.Fatal(err)
+			}
+			restoreService := &libraryrestore.Service{DB: db, Exclusive: workers.Exclusive}
+			restoreHandler := restoreService.Handler(a)
+			normal := handler
+			handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/sync/restore/v1/") {
+					restoreHandler.ServeHTTP(w, r)
+				} else {
+					normal.ServeHTTP(w, r)
+				}
+			})
+		}
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -188,5 +215,7 @@ func main() {
 		log.Fatal(err)
 	}
 	cancel()
-	<-workerDone // Join before closing the shared database.
+	if workers != nil {
+		workers.Close()
+	} // Join before closing the shared database.
 }

@@ -189,6 +189,15 @@ type Receipt struct {
 // No-op retries do not run replace again. A superseded retry cannot roll back a
 // later restore, even when a previous success response was lost.
 func Publish(ctx context.Context, db *sql.DB, r Request, replace func(context.Context, *sql.Tx) error) (Receipt, error) {
+	if replace == nil {
+		return Receipt{}, ErrInvalid
+	}
+	return PublishWithGeneration(ctx, db, r, func(c context.Context, t *sql.Tx, _ string) error { return replace(c, t) })
+}
+
+// PublishWithGeneration lets a host bind its baseline descriptor to the exact
+// successor in the same transaction; there is never a separately committed pointer.
+func PublishWithGeneration(ctx context.Context, db *sql.DB, r Request, replace func(context.Context, *sql.Tx, string) error) (Receipt, error) {
 	if !digest(r.ID) || !digest(r.Expected) || !digest(r.SnapshotHash) || r.Publisher == "" || len(r.Publisher) > 128 || replace == nil {
 		return Receipt{}, ErrInvalid
 	}
@@ -235,7 +244,7 @@ func Publish(ctx context.Context, db *sql.DB, r Request, replace func(context.Co
 	if next, err = newGeneration(); err != nil {
 		return Receipt{}, err
 	}
-	if err = replace(ctx, tx); err != nil {
+	if err = replace(ctx, tx, next); err != nil {
 		return Receipt{}, err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE sync_library_generation SET generation=? WHERE id=1 AND generation=?`, next, r.Expected)
