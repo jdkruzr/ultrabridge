@@ -10,7 +10,42 @@ import (
 
 // SQLStore uses the host's SQLite library. The host owns the driver, connection
 // lifetime, durable journal policy and quotas. No whole-asset DB transaction.
-type SQLStore struct{ DB *sql.DB }
+type SQLStore struct {
+	DB *sql.DB
+	// BeforeWrite is an optional host admission/epoch check. It runs inside each
+	// short mutation transaction after acquiring SQLite's writer, before changes.
+	// It must not do network I/O or use DB (use tx). Nil preserves existing behavior.
+	BeforeWrite func(context.Context, *sql.Tx) error
+}
+
+func (s *SQLStore) guard(ctx context.Context, tx *sql.Tx) error {
+	if s.BeforeWrite == nil {
+		return nil
+	}
+	// Even an empty store must serialize with the host's publication transaction.
+	if _, err := tx.ExecContext(ctx, `UPDATE rhizome_asset SET generation=generation WHERE 0`); err != nil {
+		return err
+	}
+	return s.BeforeWrite(ctx, tx)
+}
+func (s *SQLStore) write(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err = s.guard(ctx, tx); err != nil {
+		return nil, err
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
 
 // Migrate is deliberately explicit; constructing a store never changes a DB.
 func (s *SQLStore) Migrate(ctx context.Context) error {
@@ -64,6 +99,9 @@ func (s *SQLStore) Stage(ctx context.Context, d Descriptor) (Info, bool, error) 
 		return Info{}, false, err
 	}
 	defer tx.Rollback()
+	if err = s.guard(ctx, tx); err != nil {
+		return Info{}, false, err
+	}
 	r, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO rhizome_asset(asset_id,byte_length,chunk_bytes,state) VALUES(?,?,?,'staging')`, d.ID, d.ByteLength, d.ChunkBytes)
 	if err != nil {
 		return Info{}, false, err
@@ -166,6 +204,9 @@ func (s *SQLStore) WriteChunk(ctx context.Context, id string, index int64, b []b
 		return err
 	}
 	defer tx.Rollback()
+	if err = s.guard(ctx, tx); err != nil {
+		return err
+	}
 	// Acquire SQLite's writer before reading mutable state (avoids snapshot upgrades).
 	if _, err = tx.ExecContext(ctx, `UPDATE rhizome_asset SET generation=generation WHERE asset_id=?`, id); err != nil {
 		return err
@@ -210,7 +251,7 @@ func (s *SQLStore) Complete(ctx context.Context, id string) (Info, error) {
 	if !ValidID(id) {
 		return Info{}, Fail(400, "invalid_asset_id")
 	}
-	if _, err := s.DB.ExecContext(ctx, `UPDATE rhizome_asset SET state='verifying' WHERE asset_id=? AND state='staging'`, id); err != nil {
+	if _, err := s.write(ctx, `UPDATE rhizome_asset SET state='verifying' WHERE asset_id=? AND state='staging'`, id); err != nil {
 		return Info{}, err
 	}
 	i, generation, err := describe(ctx, s.DB, id)
@@ -229,7 +270,7 @@ func (s *SQLStore) Complete(ctx context.Context, id string) (Info, error) {
 		if err != nil {
 			var ae *Error
 			if errors.As(err, &ae) && ae.Code == "missing_chunks" {
-				_, resetErr := s.DB.ExecContext(ctx, `UPDATE rhizome_asset SET state='staging' WHERE asset_id=? AND state='verifying' AND generation=?`, id, generation)
+				_, resetErr := s.write(ctx, `UPDATE rhizome_asset SET state='staging' WHERE asset_id=? AND state='verifying' AND generation=?`, id, generation)
 				if resetErr != nil {
 					return Info{}, resetErr
 				}
@@ -249,7 +290,7 @@ func (s *SQLStore) Complete(ctx context.Context, id string) (Info, error) {
 }
 
 func (s *SQLStore) finish(ctx context.Context, i Info, generation int64, state string) (Info, error) {
-	r, err := s.DB.ExecContext(ctx, `UPDATE rhizome_asset SET state=? WHERE asset_id=? AND state='verifying' AND generation=?`, state, i.ID, generation)
+	r, err := s.write(ctx, `UPDATE rhizome_asset SET state=? WHERE asset_id=? AND state='verifying' AND generation=?`, state, i.ID, generation)
 	if err != nil {
 		return Info{}, err
 	}
@@ -283,6 +324,9 @@ func (s *SQLStore) ResetInvalid(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err = s.guard(ctx, tx); err != nil {
+		return err
+	}
 	r, err := tx.ExecContext(ctx, `UPDATE rhizome_asset SET state='staging',generation=generation+1 WHERE asset_id=? AND state='invalid'`, id)
 	if err != nil {
 		return err

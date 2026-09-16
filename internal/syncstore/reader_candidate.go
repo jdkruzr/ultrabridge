@@ -10,6 +10,7 @@ import (
 	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/sysop/ultrabridge/internal/readercontract"
 	"github.com/sysop/ultrabridge/internal/readerstore"
+	"github.com/sysop/ultrabridge/internal/syncgeneration"
 )
 
 // ExchangeReaderCandidate is opt-in, for the disposable integration harness.
@@ -97,6 +98,12 @@ func (s *Store) ExchangeReaderCandidate(ctx context.Context, req bounded.Request
 		},
 	}
 	extra.stage = func(ctx context.Context, tx *sql.Tx, now int64) (int64, []RejectedOp, error) {
+		if err := syncgeneration.CheckTx(ctx, tx, verifiedSite); err != nil {
+			if errors.Is(err, syncgeneration.ErrReplaced) {
+				return 0, nil, bounded.Fail(409, "library_replaced")
+			}
+			return 0, nil, err
+		}
 		// Check collisions across BOTH halves before generic writer dedup can hide
 		// one. Never materialize an oversized historical relay payload.
 		for _, e := range entries {

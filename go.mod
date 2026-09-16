@@ -46,6 +46,7 @@ require (
 )
 
 // Vendored in-tree (third_party/) so the creds-free Docker build can resolve this private module
-// from the build context — the source is byte-identical to the published v0.8.0 tag (verified). Only
+// from the build context — v0.8.0 plus the integration branch's optional asset
+// transaction admission hook (assets/sqlite.go), kept identical to ~/rhizome. Only
 // registry/syncstore/hlc/compaction are imported; server-go is pure-stdlib so it adds no deps.
 replace github.com/jdkruzr/rhizome/server-go => ./third_party/rhizome-server-go

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sysop/ultrabridge/internal/auth"
+	"github.com/sysop/ultrabridge/internal/syncgeneration"
 )
 
 // AdminHandler must be wrapped with the host's account authentication. It also
@@ -71,7 +72,7 @@ func (s Store) AdminHandler() http.Handler {
 			code := http.StatusBadRequest
 			message := "invalid_enrollment_request"
 			switch {
-			case errors.Is(err, ErrConflict), errors.Is(err, ErrAdoption):
+			case errors.Is(err, ErrConflict), errors.Is(err, ErrAdoption), errors.Is(err, syncgeneration.ErrReplaced):
 				code = 409
 				message = err.Error()
 			case errors.Is(err, ErrServerSite):
@@ -109,7 +110,20 @@ func (s Store) Bind(next func(site string, w http.ResponseWriter, r *http.Reques
 			}
 			return
 		}
-		next(site, w, r)
+		ctx, generation, err := syncgeneration.Admit(r.Context(), s.DB, site)
+		if generation != "" {
+			w.Header().Set(syncgeneration.Header, generation)
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		if err != nil {
+			if errors.Is(err, syncgeneration.ErrReplaced) {
+				http.Error(w, "library_replaced", 409)
+			} else {
+				http.Error(w, "identity_store_unavailable", 503)
+			}
+			return
+		}
+		next(site, w, r.WithContext(ctx))
 	})
 }
 func unauthorized(w http.ResponseWriter) {

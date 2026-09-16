@@ -5,14 +5,16 @@ package readerlab
 import (
 	"context"
 	"database/sql"
-	"github.com/jdkruzr/rhizome/server-go/assets"
+	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/jdkruzr/rhizome/server-go/assets"
 	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/sysop/ultrabridge/internal/auth"
 	"github.com/sysop/ultrabridge/internal/readercontract"
 	"github.com/sysop/ultrabridge/internal/readerstore"
+	"github.com/sysop/ultrabridge/internal/syncgeneration"
 	"github.com/sysop/ultrabridge/internal/synchttp"
 	"github.com/sysop/ultrabridge/internal/syncidentity"
 	"github.com/sysop/ultrabridge/internal/syncstore"
@@ -110,7 +112,13 @@ func candidateRoutes(ctx context.Context, db *sql.DB, wake func(), search http.H
 	if err != nil {
 		return nil, err
 	}
-	assetHandler := assets.NewHandler(&assets.SQLStore{DB: db})
+	assetHandler := assets.NewHandler(&assets.SQLStore{DB: db, BeforeWrite: func(ctx context.Context, tx *sql.Tx) error {
+		err := syncgeneration.CheckRequestTx(ctx, tx)
+		if errors.Is(err, syncgeneration.ErrReplaced) {
+			return assets.Fail(409, "library_replaced")
+		}
+		return err
+	}})
 	return func(site string, w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/sync/capabilities":

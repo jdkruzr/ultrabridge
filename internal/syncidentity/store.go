@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sysop/ultrabridge/internal/syncgeneration"
 	"github.com/sysop/ultrabridge/internal/syncstore"
 )
 
@@ -72,6 +73,9 @@ func Install(ctx context.Context, db *sql.DB) error {
 	if strings.Join(strings.Fields(actual), " ") != strings.Join(strings.Fields(retired), " ") {
 		return ErrSchema
 	}
+	if err = syncgeneration.InstallTx(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -121,6 +125,15 @@ func (s Store) Enroll(ctx context.Context, e Enrollment) error {
 		if hash != e.TokenHash || revoked != 0 {
 			return ErrConflict
 		}
+		// Enrollment retry proves possession, not consent to replace this device's
+		// library after a restore. Never advance its generation here.
+		var bound, current string
+		if err = tx.QueryRowContext(ctx, `SELECT d.generation,g.generation FROM sync_device_generation d CROSS JOIN sync_library_generation g WHERE d.site_id=? AND g.id=1`, e.SiteID).Scan(&bound, &current); err != nil {
+			return err
+		}
+		if bound != current {
+			return syncgeneration.ErrReplaced
+		}
 		return tx.Commit()
 	}
 	if err != sql.ErrNoRows {
@@ -144,6 +157,9 @@ func (s Store) Enroll(ctx context.Context, e Enrollment) error {
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO sync_device_identity(site_id,token_hash,created_at) VALUES(?,?,?)`, e.SiteID, e.TokenHash, time.Now().UnixMilli())
 	if err != nil {
+		return err
+	}
+	if err = syncgeneration.EnrollTx(ctx, tx, e.SiteID); err != nil {
 		return err
 	}
 	return tx.Commit()
