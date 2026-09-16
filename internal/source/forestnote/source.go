@@ -43,9 +43,10 @@ type Source struct {
 	deps   source.SharedDeps
 	fnDeps ForestNoteDeps
 
-	store   *syncstore.Store
-	bridge  *syncbridge.Bridge
-	syncSvc *syncsvc.Service
+	store      *syncstore.Store
+	bridge     *syncbridge.Bridge
+	syncSvc    *syncsvc.Service
+	background *backgroundWork
 }
 
 // NewSource constructs a ForestNote source from a source row and dependencies.
@@ -96,22 +97,23 @@ func (s *Source) Start(ctx context.Context) error {
 		logger = slog.Default()
 	}
 
+	s.background = newBackgroundWork(ctx)
 	s.bridge = syncbridge.New(s.store, bdeps, logger)
-	s.bridge.Start(ctx)
+	s.bridge.Start(s.background.ctx)
 	s.syncSvc = syncsvc.New(s.store, s.cfg.BatchLimit, s.bridge, logger)
 
 	// One-shot: push any pre-feature OCR text (already in note_content) down to devices
 	// as page_text_from_server. Runs after Migrate + store construction; idempotent
 	// (skips pages that already have a row), so it's safe on every Start. Off the
 	// startup path so a large catalog doesn't delay the source coming up.
-	go func() {
+	s.background.launch(func(ctx context.Context) {
 		n, err := backfillPageText(ctx, s.db, s.store, logger)
 		if err != nil {
 			logger.Warn("forestnote: page-text backfill failed", "err", err)
 		} else if n > 0 {
 			logger.Info("forestnote: page-text backfill complete", "authored", n)
 		}
-	}()
+	})
 
 	// Relay-log compaction: gated OFF by default (cfg.Compaction) so the first post-cutover deploy
 	// never sweeps the durable sync_ops log until the operator has inspected/backed it up.
@@ -132,7 +134,7 @@ func (s *Source) startCompaction(ctx context.Context, logger *slog.Logger) {
 		intervalSec = defaultCompactionIntervalSec
 	}
 	interval := time.Duration(intervalSec) * time.Second
-	go func() {
+	s.background.launch(func(ctx context.Context) {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
@@ -147,7 +149,7 @@ func (s *Source) startCompaction(ctx context.Context, logger *slog.Logger) {
 				}
 			}
 		}
-	}()
+	})
 	logger.Info("forestnote: relay-log compaction enabled",
 		"interval", interval, "stale_horizon_sec", s.staleHorizonMs()/1000)
 }
@@ -197,6 +199,9 @@ func logCompactOutcome(logger *slog.Logger, o syncstore.CompactOutcome) {
 }
 
 func (s *Source) Stop() {
+	if s.background != nil {
+		s.background.close()
+	}
 	if s.bridge != nil {
 		s.bridge.Stop()
 	}
@@ -257,19 +262,29 @@ func (s *Source) ReprocessNotebook(ctx context.Context, notebookID string) error
 	}
 	// Enqueue off the request goroutine, chunked, so a large notebook neither
 	// blocks the caller nor overruns the bridge's bounded queue in one burst.
-	go func() {
-		bg := context.Background()
+	if !s.background.launch(func(bg context.Context) {
 		for off := 0; off < len(pks); off += reprocessChunk {
+			if bg.Err() != nil {
+				return
+			}
 			end := off + reprocessChunk
 			if end > len(pks) {
 				end = len(pks)
 			}
 			s.bridge.PagesChanged(bg, pks[off:end])
 			if end < len(pks) {
-				time.Sleep(50 * time.Millisecond)
+				timer := time.NewTimer(50 * time.Millisecond)
+				select {
+				case <-bg.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
 			}
 		}
-	}()
+	}) {
+		return fmt.Errorf("forestnote source is stopping")
+	}
 	return nil
 }
 

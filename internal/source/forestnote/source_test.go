@@ -138,7 +138,9 @@ func TestReprocessNotebook_EnqueuesLivePages(t *testing.T) {
 	}
 
 	got := map[string]bool{}
-	timeout := time.After(5 * time.Second)
+	// Two complete page renders/JPEG encodes run under the race detector too.
+	// This is a deadlock guard, not a renderer performance assertion.
+	timeout := time.After(20 * time.Second)
 	for len(got) < 2 {
 		select {
 		case p := <-idx.indexed:

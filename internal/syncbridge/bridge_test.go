@@ -415,8 +415,10 @@ func TestBridge_StartPagesChangedStop(t *testing.T) {
 		if got != "forestnote://"+nb1+"/"+pg1 {
 			t.Errorf("indexed path = %q", got)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("bridge did not process the page within 2s")
+	// Full rasterization/JPEG encoding exceeds two seconds under -race.
+	// Keep the functional wait bounded without treating it as a benchmark.
+	case <-time.After(10 * time.Second):
+		t.Fatal("bridge did not process the page within 10s")
 	}
 }
 
