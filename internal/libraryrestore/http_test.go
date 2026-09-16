@@ -49,6 +49,15 @@ func TestNativeRestoreAuthorizationAndBehindGenerationReadBoundary(t *testing.T)
 	}
 	b, err := s.Baseline(ctx)
 	must(t, err)
+	if w := call("GET", "/sync/restore/v1/publications/"+r.ID, "", token(pub), false, false); w.Code != 200 {
+		t.Fatal("publisher cannot recover receipt")
+	}
+	if w := call("GET", "/sync/restore/v1/publications/"+r.ID, "", token(peer), false, false); w.Code != 404 {
+		t.Fatal("peer can claim publisher receipt")
+	}
+	if w := call("GET", "/sync/restore/v1/publications/"+strings.Repeat("0", 64), "", token(pub), false, false); w.Code != 404 {
+		t.Fatal("absent receipt not distinguished")
+	}
 	if w := call("GET", "/sync/restore/v1/state", "", token(peer), false, false); w.Code != 200 || !strings.Contains(w.Body.String(), `"needs_adoption":true`) {
 		t.Fatal("old key cannot discover replacement")
 	}

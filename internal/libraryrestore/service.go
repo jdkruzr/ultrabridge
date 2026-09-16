@@ -65,6 +65,26 @@ func (s *Service) Baseline(ctx context.Context) (Baseline, error) {
 	return b, err
 }
 
+// Receipt is a read-only lost-response check using the publisher's own device
+// key. It never grants a device key permission to initiate a replacement.
+func (s *Service) Receipt(ctx context.Context, publisher, id string) (Baseline, error) {
+	if !assets.ValidID(id) {
+		return Baseline{}, syncgeneration.ErrInvalid
+	}
+	var generation string
+	if err := s.DB.QueryRowContext(ctx, `SELECT generation FROM sync_library_replacement WHERE request_id=? AND publisher=?`, id, publisher).Scan(&generation); err != nil {
+		return Baseline{}, err
+	}
+	b, err := s.Baseline(ctx)
+	if err != nil {
+		return Baseline{}, err
+	}
+	if b.Generation != generation {
+		return Baseline{}, syncgeneration.ErrConflict
+	}
+	return b, nil
+}
+
 func (s *Service) Publish(ctx context.Context, r syncgeneration.Request) (Baseline, error) {
 	if !assets.ValidID(r.ID) || !assets.ValidID(r.Expected) || !assets.ValidID(r.SnapshotHash) || !syncstore.IsULID(r.Publisher) || r.Publisher[0] > '7' {
 		return Baseline{}, syncgeneration.ErrInvalid

@@ -9,6 +9,9 @@ with newer offline edits. The generation fence remains the normal row/asset gate
 - `POST /sync/restore/v1/publish`: native Basic-admin authorization, exact request
   ID/expected generation/snapshot digest/publisher. Device keys cannot publish.
 - `GET /sync/restore/v1/state`: authenticated device discovery, including stale keys.
+- `GET /sync/restore/v1/publications/<request ID>`: the publishing device can read
+  its own current receipt without storing or resubmitting the server login password.
+  Another device receives 404; a superseded publication receives 409. Read-only.
 - `GET /sync/restore/v1/assets/<current snapshot>` and chunk reads: only that baseline,
   with its exact `generation` query parameter. No old-key writes or general browsing.
 - `POST /sync/restore/v1/adopt`: old device key plus generation, snapshot, fresh actor
@@ -30,5 +33,5 @@ unreferenced after replacement; garbage collection is separate.
 Clients must validate a fresh local stage and persist its new identity/key before
 adoption, close the old owner, and atomically select the replacement before enabling
 ordinary sync. Old outboxes must never be replayed. Native UI/startup orchestration
-and production rollout remain gated. The detailed plan and Kotlin/Android evidence
+is qualified against this candidate; production rollout remains gated. The detailed plan and Kotlin/Android evidence
 live in Alexandria's `docs/design-plans/2026-09-16-alexandria-authoritative-restore-sync.md`.

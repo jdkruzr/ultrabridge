@@ -94,6 +94,19 @@ func (s *Service) Handler(admin *auth.Middleware) http.Handler {
 			b, err := s.Adopt(r.Context(), site, a)
 			respond(w, b, err)
 		default:
+			if strings.HasPrefix(r.URL.Path, "/sync/restore/v1/publications/") {
+				if r.Method != "GET" {
+					http.Error(w, "method_not_allowed", 405)
+					return
+				}
+				b, e := s.Receipt(r.Context(), site, strings.TrimPrefix(r.URL.Path, "/sync/restore/v1/publications/"))
+				if e == sql.ErrNoRows {
+					http.NotFound(w, r)
+					return
+				}
+				respond(w, b, e)
+				return
+			}
 			// Only the current baseline is downloadable through this exception.
 			// A stale key cannot list arbitrary assets or write even a single chunk.
 			if r.Method != "GET" {
