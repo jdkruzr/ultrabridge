@@ -178,8 +178,9 @@ type noteService struct {
 	booxImporter  BooxImporter
 	booxProc      BooxProcessor
 	searchIndex   search.SearchIndex
-	embedIndex    EmbedIndex            // optional; set via SetEmbedIndex
-	fnReader      ForestNoteReader      // optional; set via SetForestNoteReader
+	embedIndex    EmbedIndex       // optional; set via SetEmbedIndex
+	fnReader      ForestNoteReader // optional; set via SetForestNoteReader
+	fnAdmission   func(context.Context, func(context.Context) error) error
 	fnReprocessor ForestNoteReprocessor // optional; set via SetForestNoteReprocessor
 	rmReader      RemarkableReader      // optional; set via SetRemarkableReader
 	rmReprocessor RemarkableReprocessor // optional; set via SetRemarkableReprocessor
@@ -230,6 +231,9 @@ func (s *noteService) SetEmbedIndex(d EmbedIndex) { s.embedIndex = d }
 // synced ForestNote notebooks and render pages on the fly. Nil-safe in the same
 // way as SetEmbedIndex; keeps NewNoteService's signature untouched.
 func (s *noteService) SetForestNoteReader(r ForestNoteReader) { s.fnReader = r }
+func (s *noteService) SetForestNoteAdmission(admit func(context.Context, func(context.Context) error) error) {
+	s.fnAdmission = admit
+}
 
 // SetForestNoteReprocessor wires the source's re-OCR trigger. Nil-safe in the
 // same way as SetForestNoteReader.
@@ -972,6 +976,12 @@ func (s *noteService) GetForestNoteNotebookDetail(ctx context.Context, notebookI
 // see syncstore.SoftDeleteNotebook — but LWW means a later device edit wins
 // and resurrects the row.
 func (s *noteService) DeleteForestNoteNotebook(ctx context.Context, notebookID string) error {
+	if s.fnAdmission != nil {
+		return s.fnAdmission(ctx, func(run context.Context) error { return s.deleteForestNoteNotebook(run, notebookID) })
+	}
+	return s.deleteForestNoteNotebook(ctx, notebookID)
+}
+func (s *noteService) deleteForestNoteNotebook(ctx context.Context, notebookID string) error {
 	if s.fnReader == nil {
 		return fmt.Errorf("forestnote source not available")
 	}

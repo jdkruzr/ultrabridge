@@ -121,10 +121,20 @@ func (b *Bridge) Status() Status {
 
 // Start launches the worker. ctx bounds its lifetime (in addition to Stop).
 func (b *Bridge) Start(ctx context.Context) {
+	b.StartWithInitializer(ctx, nil)
+}
+
+// Initial rebuild shares the normal worker, so it cannot race newer page jobs.
+func (b *Bridge) StartWithInitializer(ctx context.Context, initialize func(context.Context)) {
 	wctx, cancel := context.WithCancel(ctx)
 	b.cancel = cancel
 	b.wg.Add(1)
-	go b.run(wctx)
+	go func() {
+		if initialize != nil {
+			initialize(wctx)
+		}
+		b.run(wctx)
+	}()
 }
 
 // Stop cancels the worker and waits for the in-flight page to finish.

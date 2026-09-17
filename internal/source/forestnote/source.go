@@ -14,8 +14,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
+	"github.com/sysop/ultrabridge/internal/auth"
+	"github.com/sysop/ultrabridge/internal/libraryhost"
 	"github.com/sysop/ultrabridge/internal/source"
 	"github.com/sysop/ultrabridge/internal/syncbridge"
 	"github.com/sysop/ultrabridge/internal/syncstore"
@@ -28,8 +31,10 @@ import (
 // that the narrower SharedDeps types omit, so main captures the concretes in the
 // factory closure (mirroring how boox.BooxDeps carries its ContentDeleter).
 type ForestNoteDeps struct {
-	Indexer    syncbridge.Indexer    // never nil
-	EmbedStore syncbridge.EmbedStore // nil when embedding is disabled
+	Account          *auth.Middleware
+	ForgetEmbeddings func(string)
+	Indexer          syncbridge.Indexer    // never nil
+	EmbedStore       syncbridge.EmbedStore // nil when embedding is disabled
 	// OCRPrompt is read per page so a Settings change applies without a restart
 	// (empty → the bridge's built-in default prompt).
 	OCRPrompt func() string
@@ -47,6 +52,8 @@ type Source struct {
 	bridge     *syncbridge.Bridge
 	syncSvc    *syncsvc.Service
 	background *backgroundWork
+	host       *libraryhost.Host
+	writer     atomic.Pointer[Source]
 }
 
 // NewSource constructs a ForestNote source from a source row and dependencies.
@@ -69,10 +76,22 @@ func (s *Source) Name() string { return s.name }
 // Start migrates the mirror, builds the bridge, and starts the relay service.
 // Idempotent within a process lifecycle (Migrate is idempotent).
 func (s *Source) Start(ctx context.Context) error {
+	if err := s.checkCutover(ctx); err != nil {
+		return err
+	}
 	if err := syncstore.Migrate(ctx, s.db); err != nil {
 		return fmt.Errorf("syncstore migrate: %w", err)
 	}
 	s.store = syncstore.New(s.db)
+	if s.cfg.SharedLibrary {
+		return s.startShared(ctx)
+	}
+	s.startWriter(ctx, false)
+	return nil
+}
+
+// A fresh writer generation is created by the shared host after every replacement.
+func (s *Source) startWriter(ctx context.Context, rebuildSaved bool) {
 
 	// Guard concrete-pointer deps so a nil *OCRClient/Embedder/EmbedStore isn't
 	// boxed into a non-nil interface (would panic on call) — same discipline as
@@ -99,28 +118,37 @@ func (s *Source) Start(ctx context.Context) error {
 
 	s.background = newBackgroundWork(ctx)
 	s.bridge = syncbridge.New(s.store, bdeps, logger)
-	s.bridge.Start(s.background.ctx)
+	if rebuildSaved {
+		s.bridge.StartWithInitializer(s.background.ctx, func(ctx context.Context) {
+			if err := s.rebuildSavedText(ctx); err != nil && ctx.Err() == nil {
+				logger.Warn("saved text rebuild failed", "err", err)
+			}
+		})
+	} else {
+		s.bridge.Start(s.background.ctx)
+	}
 	s.syncSvc = syncsvc.New(s.store, s.cfg.BatchLimit, s.bridge, logger)
 
 	// One-shot: push any pre-feature OCR text (already in note_content) down to devices
 	// as page_text_from_server. Runs after Migrate + store construction; idempotent
 	// (skips pages that already have a row), so it's safe on every Start. Off the
 	// startup path so a large catalog doesn't delay the source coming up.
-	s.background.launch(func(ctx context.Context) {
-		n, err := backfillPageText(ctx, s.db, s.store, logger)
-		if err != nil {
-			logger.Warn("forestnote: page-text backfill failed", "err", err)
-		} else if n > 0 {
-			logger.Info("forestnote: page-text backfill complete", "authored", n)
-		}
-	})
+	if !rebuildSaved {
+		s.background.launch(func(ctx context.Context) {
+			n, err := backfillPageText(ctx, s.db, s.store, logger)
+			if err != nil {
+				logger.Warn("forestnote: page-text backfill failed", "err", err)
+			} else if n > 0 {
+				logger.Info("forestnote: page-text backfill complete", "authored", n)
+			}
+		})
+	}
 
 	// Relay-log compaction: gated OFF by default (cfg.Compaction) so the first post-cutover deploy
 	// never sweeps the durable sync_ops log until the operator has inspected/backed it up.
 	if s.cfg.Compaction {
 		s.startCompaction(ctx, logger)
 	}
-	return nil
 }
 
 // startCompaction launches a low-frequency background goroutine that periodically reclaims the
@@ -199,6 +227,10 @@ func logCompactOutcome(logger *slog.Logger, o syncstore.CompactOutcome) {
 }
 
 func (s *Source) Stop() {
+	if s.host != nil {
+		s.host.Close()
+		return
+	}
 	if s.background != nil {
 		s.background.close()
 	}
@@ -223,7 +255,7 @@ func (s *Source) EditTextBox(ctx context.Context, boxID, newText string) error {
 	if s == nil {
 		return errSourceStopping
 	}
-	return s.background.run(ctx, func(ctx context.Context) error { return s.editTextBox(ctx, boxID, newText) })
+	return s.withWriter(ctx, func(ctx context.Context, w *Source) error { return w.editTextBox(ctx, boxID, newText) })
 }
 func (s *Source) editTextBox(ctx context.Context, boxID, newText string) error {
 	if s.store == nil {
@@ -255,7 +287,7 @@ func (s *Source) ReprocessNotebook(ctx context.Context, notebookID string) error
 	if s == nil {
 		return errSourceStopping
 	}
-	return s.background.run(ctx, func(ctx context.Context) error { return s.reprocessNotebook(ctx, notebookID) })
+	return s.withWriter(ctx, func(ctx context.Context, w *Source) error { return w.reprocessNotebook(ctx, notebookID) })
 }
 func (s *Source) reprocessNotebook(ctx context.Context, notebookID string) error {
 	if s.store == nil || s.bridge == nil {
@@ -318,9 +350,9 @@ func (s *Source) PruneDevice(ctx context.Context, siteID string) (bool, error) {
 		return false, fmt.Errorf("forestnote source not started")
 	}
 	var deleted bool
-	err := s.background.run(ctx, func(ctx context.Context) error {
+	err := s.withWriter(ctx, func(ctx context.Context, w *Source) error {
 		var e error
-		deleted, e = s.store.DeleteDevice(ctx, siteID)
+		deleted, e = w.store.DeleteDevice(ctx, siteID)
 		return e
 	})
 	return deleted, err
@@ -334,9 +366,9 @@ func (s *Source) SetDeviceLabel(ctx context.Context, siteID, label string) (bool
 		return false, fmt.Errorf("forestnote source not started")
 	}
 	var changed bool
-	err := s.background.run(ctx, func(ctx context.Context) error {
+	err := s.withWriter(ctx, func(ctx context.Context, w *Source) error {
 		var e error
-		changed, e = s.store.SetDeviceLabel(ctx, siteID, label)
+		changed, e = w.store.SetDeviceLabel(ctx, siteID, label)
 		return e
 	})
 	return changed, err
@@ -351,10 +383,13 @@ func (s *Source) CompactNow(ctx context.Context) (syncstore.CompactOutcome, erro
 	if s == nil {
 		return syncstore.CompactOutcome{}, errSourceStopping
 	}
+	if s.cfg.SharedLibrary {
+		return syncstore.CompactOutcome{}, fmt.Errorf("compaction is unavailable for the shared library")
+	}
 	var outcome syncstore.CompactOutcome
-	err := s.background.run(ctx, func(ctx context.Context) error {
+	err := s.withWriter(ctx, func(ctx context.Context, w *Source) error {
 		var e error
-		outcome, e = s.compactNow(ctx)
+		outcome, e = w.compactNow(ctx)
 		return e
 	})
 	return outcome, err
@@ -379,6 +414,9 @@ func (s *Source) compactNow(ctx context.Context) (syncstore.CompactOutcome, erro
 // source hasn't been started — caller should treat that as "no work" rather
 // than as an error, since the UI polls this every few seconds.
 func (s *Source) Status() syncbridge.Status {
+	if s != nil && s.host != nil {
+		return s.writer.Load().Status()
+	}
 	if s == nil || s.bridge == nil {
 		return syncbridge.Status{}
 	}

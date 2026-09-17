@@ -317,6 +317,29 @@ func TestDeleteForestNoteNotebook_SoftDeleteThenDeindex(t *testing.T) {
 	}
 }
 
+func TestDeleteForestNoteNotebook_AdmitsEntireMutation(t *testing.T) {
+	r := &fakeFNReader{deletePages: map[string][]string{"nbA": {"pgA"}}}
+	si, emb := &fakeSearchIndex{}, &fakeEmbedIndex{}
+	s := &noteService{fnReader: r, searchIndex: si, embedIndex: emb, logger: slog.Default()}
+	blocked := errors.New("replacement in progress")
+	s.SetForestNoteAdmission(func(context.Context, func(context.Context) error) error { return blocked })
+	if err := s.DeleteForestNoteNotebook(context.Background(), "nbA"); !errors.Is(err, blocked) || len(r.deleted) != 0 {
+		t.Fatal("mutation escaped admission", err, r.deleted)
+	}
+	admitted := false
+	s.SetForestNoteAdmission(func(ctx context.Context, work func(context.Context) error) error {
+		admitted = true
+		err := work(ctx)
+		if len(r.deleted) != 1 || len(si.deleted) != 1 || len(emb.deleted) != 1 {
+			t.Fatal("admission ended before derived cleanup")
+		}
+		return err
+	})
+	if err := s.DeleteForestNoteNotebook(context.Background(), "nbA"); err != nil || !admitted {
+		t.Fatal("admitted delete failed", err)
+	}
+}
+
 func TestReprocessForestNoteNotebook_DelegatesAndNilSafe(t *testing.T) {
 	// Nil reprocessor → error, not panic.
 	s := &noteService{logger: slog.Default()}

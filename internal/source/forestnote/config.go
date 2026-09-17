@@ -5,7 +5,10 @@ package forestnote
 // over the /sync/v1 device-sync protocol and live in the syncstore mirror. The
 // relay batch size is the only hot-path knob; the rest gate relay-log compaction.
 type Config struct {
-	BatchLimit int `json:"batch_limit"` // 0 → defaultBatchLimit
+	// Explicit, restart-required cutover to enrolled reader/writer sync. Once
+	// activated, disabling this flag must never reopen an unbound legacy route.
+	SharedLibrary bool `json:"shared_library"`
+	BatchLimit    int  `json:"batch_limit"` // 0 → defaultBatchLimit
 
 	// Compaction enables periodic reclamation of the sync_ops relay log (collapse superseded
 	// full-row snapshots + purge tombstones every device has pulled past). OFF by default: the

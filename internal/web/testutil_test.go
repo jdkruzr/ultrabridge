@@ -346,8 +346,10 @@ func (m *mockNoteService) BulkDelete(ctx context.Context, paths []string) error 
 	m.deletedPaths = append(m.deletedPaths, paths...)
 	return nil
 }
-func (m *mockNoteService) SetEmbedIndex(d service.EmbedIndex)                       {}
-func (m *mockNoteService) SetForestNoteReader(r service.ForestNoteReader)           {}
+func (m *mockNoteService) SetEmbedIndex(d service.EmbedIndex)             {}
+func (m *mockNoteService) SetForestNoteReader(r service.ForestNoteReader) {}
+func (m *mockNoteService) SetForestNoteAdmission(func(context.Context, func(context.Context) error) error) {
+}
 func (m *mockNoteService) HasForestNoteSource() bool                                { return m.forestNoteEnabled }
 func (m *mockNoteService) SetRemarkableReader(r service.RemarkableReader)           {}
 func (m *mockNoteService) SetRemarkableReprocessor(r service.RemarkableReprocessor) {}

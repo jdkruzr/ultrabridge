@@ -47,7 +47,6 @@ import (
 	"github.com/sysop/ultrabridge/internal/spcserver/fileids"
 	"github.com/sysop/ultrabridge/internal/spcserver/notify"
 	"github.com/sysop/ultrabridge/internal/spcserver/staging"
-	"github.com/sysop/ultrabridge/internal/synchttp"
 	"github.com/sysop/ultrabridge/internal/taskattach"
 	"github.com/sysop/ultrabridge/internal/taskdb"
 	"github.com/sysop/ultrabridge/internal/web"
@@ -190,17 +189,7 @@ func main() {
 			logger.Info("loaded embeddings into memory", "count", n)
 		}
 
-		// Startup backfill (AC1.4) — runs in background with cancellable context
-		var backfillCtx context.Context
-		backfillCtx, backfillCancel = context.WithCancel(context.Background())
-		go func() {
-			n, err := rag.Backfill(backfillCtx, embedStore, embedder, cfg.OllamaEmbedModel, logger)
-			if err != nil {
-				logger.Warn("startup backfill failed", "err", err)
-			} else if n > 0 {
-				logger.Info("startup backfill complete", "embedded", n)
-			}
-		}()
+		// Start only after source replacement admission is connected below.
 	}
 
 	// Create retriever if embedding is available (also works FTS-only when embedStore is nil)
@@ -262,8 +251,23 @@ func main() {
 	// ForestNote factory (registered here, after the Delete-capable concretes si/
 	// embedStore exist, since the bridge's Indexer/EmbedStore interfaces need
 	// Delete which the narrow SharedDeps types omit — captured like boox's deps).
+	accountCredentials := func() (string, string) {
+		u, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyUsername)
+		h, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyPasswordHash)
+		if u == "" {
+			u = cfg.Username
+		}
+		if h == "" {
+			h = cfg.PasswordHash
+		}
+		return u, h
+	}
+	// Account-only: generic MCP bearer tokens must not authorize device enrollment
+	// or authoritative replacement. Device credentials have their own bound routes.
+	libraryAccount := auth.NewDynamic(accountCredentials)
 	registry.Register("forestnote", func(db *sql.DB, row source.SourceRow, sharedDeps source.SharedDeps) (source.Source, error) {
 		fnDeps := forestnote.ForestNoteDeps{
+			Account: libraryAccount,
 			Indexer: si,
 			OCRPrompt: func() string {
 				v, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyForestNoteOCRPrompt)
@@ -272,6 +276,7 @@ func main() {
 		}
 		if embedStore != nil {
 			fnDeps.EmbedStore = embedStore
+			fnDeps.ForgetEmbeddings = embedStore.ForgetPrefix
 		}
 		return forestnote.NewSource(db, row, sharedDeps, fnDeps)
 	})
@@ -317,14 +322,32 @@ func main() {
 	}
 
 	// Start sources
+	fnCount := 0
+	for _, row := range rows {
+		if row.Type == "forestnote" {
+			fnCount++
+		}
+	}
+	if fnCount > 1 {
+		logger.Error("only one ForestNote/Alexandria source may own the shared library")
+		os.Exit(1)
+	}
 	var sources []source.Source
 	for _, row := range rows {
 		s, err := registry.Create(noteDB, row, deps)
 		if err != nil {
+			if row.Type == "forestnote" {
+				logger.Error("library configuration rejected", "err", err)
+				os.Exit(1)
+			}
 			logger.Warn("skipping source", "type", row.Type, "name", row.Name, "err", err)
 			continue // AC2.7 + AC2.8: unknown type or bad config → skip, don't crash
 		}
 		if err := s.Start(context.Background()); err != nil {
+			if row.Type == "forestnote" {
+				logger.Error("library startup rejected", "err", err)
+				os.Exit(1)
+			}
 			logger.Warn("source start failed", "type", row.Type, "name", row.Name, "err", err)
 			continue
 		}
@@ -551,20 +574,7 @@ func main() {
 	rand.Read(internalTokenBytes)
 	internalToken := hex.EncodeToString(internalTokenBytes)
 
-	authMW := auth.NewDynamic(func() (string, string) {
-		// Read credentials from DB on each request so changes from
-		// seed-user, setup page, or Settings UI take effect immediately.
-		// Falls back to bootstrap env var values if DB has no credentials.
-		u, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyUsername)
-		h, _ := notedb.GetSetting(context.Background(), noteDB, appconfig.KeyPasswordHash)
-		if u == "" {
-			u = cfg.Username
-		}
-		if h == "" {
-			h = cfg.PasswordHash
-		}
-		return u, h
-	})
+	authMW := auth.NewDynamic(accountCredentials)
 	// Enable bearer token auth (MCP tokens from Settings UI + internal loopback)
 	authMW.SetTokenValidator(func(token string) (string, error) {
 		if token == internalToken {
@@ -659,8 +669,20 @@ func main() {
 		}
 	}
 	if fnSource != nil {
-		mux.Handle("/sync/v1", authMW.Wrap(synchttp.New(fnSource.SyncService(), synchttp.DefaultMaxBytes, logger)))
+		fnSource.RegisterRoutes(mux, authMW)
 		logger.Info("ForestNote device sync enabled", "route", "/sync/v1")
+	}
+	if embedStore != nil {
+		if fnSource != nil {
+			embedStore.SetBackfillAdmission(fnSource.AdmitEmbedding)
+		}
+		backfillCtx, cancel := context.WithCancel(context.Background())
+		backfillCancel = cancel
+		go func() {
+			if _, err := rag.Backfill(backfillCtx, embedStore, embedder, cfg.OllamaEmbedModel, logger); err != nil {
+				logger.Warn("startup backfill failed", "err", err)
+			}
+		}()
 	}
 	if rmSource != nil {
 		rmSource.RegisterRoutes(mux)
@@ -762,6 +784,7 @@ func main() {
 		// and render pages on the fly from the syncstore mirror.
 		if fnSource != nil {
 			noteSvc.SetForestNoteReader(fnSource.Store())
+			noteSvc.SetForestNoteAdmission(fnSource.Admit)
 			noteSvc.SetForestNoteReprocessor(fnSource)
 		}
 		if rmSource != nil {

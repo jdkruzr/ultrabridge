@@ -249,16 +249,16 @@ type RemarkablePage struct {
 // RemarkableDocumentDetail is the structural detail view for a synced
 // reMarkable node.
 type RemarkableDocumentDetail struct {
-	ID              string           `json:"id"`
-	Name            string           `json:"name"`
-	Type            string           `json:"type"`
-	Parent          string           `json:"parent"`
-	Path            string           `json:"path"`
-	PageCount       int              `json:"page_count"`
-	FileType        string           `json:"file_type,omitempty"`
-	FolderPath      []string         `json:"folder_path,omitempty"`
-	RenderAvailable bool             `json:"render_available"`
-	OCRAvailable    bool             `json:"ocr_available"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	Parent          string   `json:"parent"`
+	Path            string   `json:"path"`
+	PageCount       int      `json:"page_count"`
+	FileType        string   `json:"file_type,omitempty"`
+	FolderPath      []string `json:"folder_path,omitempty"`
+	RenderAvailable bool     `json:"render_available"`
+	OCRAvailable    bool     `json:"ocr_available"`
 	// DownloadAvailable reports whether the original PDF/EPUB payload is on
 	// disk and can be streamed back out.
 	DownloadAvailable bool             `json:"download_available"`
@@ -415,6 +415,7 @@ type NoteService interface {
 	// SetForestNoteReader wires the syncstore mirror for browsing/rendering
 	// synced ForestNote notebooks.
 	SetForestNoteReader(r ForestNoteReader)
+	SetForestNoteAdmission(func(context.Context, func(context.Context) error) error)
 	// SetForestNoteReprocessor wires the source's re-OCR trigger (re-enqueues a
 	// notebook's pages onto the sync bridge). Nil-safe.
 	SetForestNoteReprocessor(r ForestNoteReprocessor)
