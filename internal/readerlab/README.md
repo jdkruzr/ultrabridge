@@ -1,5 +1,10 @@
 # Disposable reader HTTP integration (Stages 2D11–16)
 
+September 16 follow-up: protocol routing and enrolled host assembly now live in
+[`libraryhost`](../libraryhost/README.md), shared by assetlab rather than copied
+into production later. This package retains fixture-only authentication and
+projection helpers. The production executable still mounts its legacy routes.
+
 This package is a **test harness**, reachable only through explicit `cmd/assetlab --reader`.
 That command binds loopback and requires a disposable `--db`. It installs the candidate reader
 tables alongside the existing writer/relay schema; it does not change production migrations,

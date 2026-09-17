@@ -4,6 +4,7 @@ package rag
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 )
 
@@ -28,8 +29,23 @@ func Backfill(ctx context.Context, store *Store, embedder Embedder, model string
 			return embedded, ctx.Err()
 		}
 
-		if n := EmbedAndStorePage(ctx, embedder, store, p.NotePath, p.Page, p.BodyText, model, logger); n > 0 {
-			embedded++
+		err := store.admitBackfill(ctx, p.NotePath, func(run context.Context) error {
+			// The inventory may predate a library replacement. Re-read after
+			// admission so queued global work cannot publish old text afterward.
+			var body string
+			if err := store.db.QueryRowContext(run, `SELECT body_text FROM note_content WHERE note_path=? AND page=?`, p.NotePath, p.Page).Scan(&body); err != nil {
+				if err == sql.ErrNoRows {
+					return nil
+				}
+				return err
+			}
+			if n := EmbedAndStorePage(run, embedder, store, p.NotePath, p.Page, body, model, logger); n > 0 {
+				embedded++
+			}
+			return nil
+		})
+		if err != nil {
+			return embedded, err
 		}
 	}
 

@@ -14,16 +14,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/jdkruzr/rhizome/server-go/bounded"
 	"github.com/sysop/ultrabridge/internal/auth"
-	"github.com/sysop/ultrabridge/internal/libraryrestore"
+	"github.com/sysop/ultrabridge/internal/libraryhost"
 	"github.com/sysop/ultrabridge/internal/readerlab"
-	"github.com/sysop/ultrabridge/internal/readersearch"
 	"github.com/sysop/ultrabridge/internal/readerstore"
 	"github.com/sysop/ultrabridge/internal/syncassets"
 	"github.com/sysop/ultrabridge/internal/synchttp"
@@ -147,57 +144,28 @@ func main() {
 	}
 	mux.Handle("/sync/capabilities", a.Wrap(capabilities))
 	var handler http.Handler = mux
-	var workers *libraryrestore.Workers
+	var workers interface{ Close() }
 	if *reader {
 		options := readerstore.DefaultWorkerOptions()
 		options.OnError = func(err error) { log.Printf("reader worker: %v", err) }
-		if err := readerstore.Install(ctx, db); err != nil {
-			log.Fatal(err)
-		}
-		if err := readersearch.Install(ctx, db); err != nil {
-			log.Fatal(err)
-		}
-		search := readersearch.New(db)
-		var current atomic.Pointer[readerstore.Worker]
-		workers = libraryrestore.NewWorkers(ctx, func(run context.Context) func() {
-			worker, e := readerstore.NewWorker(readerstore.New(db), search.Schedule, options)
-			if e != nil {
-				panic(e)
-			}
-			current.Store(worker)
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				searchDone := make(chan struct{})
-				go func() { defer close(searchDone); _ = search.Run(run, options.OnError) }()
-				_ = worker.Run(run)
-				<-searchDone
-			}()
-			return func() { <-done }
-		})
-		wake := func() { current.Load().Wake() }
 		if *enrollment {
-			handler, err = readerlab.HandlerWithEnrollment(ctx, db, wake, search.Handler(), a)
+			host, e := libraryhost.New(ctx, db, libraryhost.Options{Account: a, Worker: options, Restore: *restoreSync})
+			if e != nil {
+				log.Fatal(e)
+			}
+			handler = host
+			workers = host
 		} else {
-			handler, err = readerlab.HandlerWithAssets(ctx, db, wake, search.Handler(), *readerAssets)
-		}
-		if err != nil {
-			log.Fatal(err)
-		}
-		if *restoreSync {
-			if err = libraryrestore.Install(ctx, db); err != nil {
+			owner, e := libraryhost.NewReaderWorkers(ctx, db, options, nil)
+			if e != nil {
+				log.Fatal(e)
+			}
+			workers = owner
+			handler, err = readerlab.HandlerWithAssets(ctx, db, owner.Wake, owner.SearchHandler(), *readerAssets)
+			if err != nil {
+				owner.Close()
 				log.Fatal(err)
 			}
-			restoreService := &libraryrestore.Service{DB: db, Exclusive: workers.Exclusive}
-			restoreHandler := restoreService.Handler(a)
-			normal := handler
-			handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasPrefix(r.URL.Path, "/sync/restore/v1/") {
-					restoreHandler.ServeHTTP(w, r)
-				} else {
-					normal.ServeHTTP(w, r)
-				}
-			})
 		}
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

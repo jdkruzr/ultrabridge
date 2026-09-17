@@ -3,6 +3,12 @@
 Mounted only by `cmd/assetlab --reader --reader-assets --reader-enrollment
 --reader-restore-sync`. Not wired into the production service.
 
+Assembly is now owned by `libraryhost`, not duplicated in the executable. Its
+request admission and fresh-worker lifetime surround publication. Production
+hosts can supply transactional derived-data invalidation and a post-commit cache
+hook; tests verify failure rollback before cache invalidation. Closed worker
+owners cannot be restarted by late publication calls.
+
 A deliberate restore replaces the one author's shared library; it is not a merge
 with newer offline edits. The generation fence remains the normal row/asset gate.
 

@@ -23,7 +23,10 @@ type Service struct {
 	DB        *sql.DB
 	StageRoot string
 	Exclusive Exclusive
-	mu        sync.Mutex
+	// Host-owned derived state only, in the SAME transaction as replacement.
+	// No external I/O or cache mutation: a failure must roll back everything.
+	ReplaceDerived func(context.Context, *sql.Tx) error
+	mu             sync.Mutex
 }
 type Baseline struct {
 	Generation string `json:"generation"`
@@ -124,6 +127,11 @@ func (s *Service) Publish(ctx context.Context, r syncgeneration.Request) (Baseli
 	}
 	err = s.Exclusive(ctx, func() error {
 		_, e := syncgeneration.PublishWithGeneration(ctx, s.DB, r, func(ctx context.Context, tx *sql.Tx, next string) error {
+			if s.ReplaceDerived != nil {
+				if err := s.ReplaceDerived(ctx, tx); err != nil {
+					return err
+				}
+			}
 			// Explicit allowlist: no settings, sources, credentials, tasks, or other UB tables.
 			for _, def := range readercontract.CandidateCombined().Tables {
 				if e := replaceTable(ctx, tx, p.db, "fn_"+def.Name); e != nil {

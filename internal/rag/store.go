@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"sync"
 	"time"
 )
@@ -26,8 +27,41 @@ type Store struct {
 	db     *sql.DB
 	logger *slog.Logger
 
-	mu    sync.RWMutex
-	cache []EmbeddingRecord // all embeddings loaded into memory
+	mu                sync.RWMutex
+	cache             []EmbeddingRecord // all embeddings loaded into memory
+	backfillMu        sync.RWMutex
+	backfillAdmission func(context.Context, string, func(context.Context) error) error
+}
+
+// SetBackfillAdmission connects library replacement admission before starting
+// global backfill. Other source paths may pass straight through the callback.
+func (s *Store) SetBackfillAdmission(admit func(context.Context, string, func(context.Context) error) error) {
+	s.backfillMu.Lock()
+	defer s.backfillMu.Unlock()
+	s.backfillAdmission = admit
+}
+func (s *Store) admitBackfill(ctx context.Context, path string, work func(context.Context) error) error {
+	s.backfillMu.RLock()
+	admit := s.backfillAdmission
+	s.backfillMu.RUnlock()
+	if admit != nil {
+		return admit(ctx, path, work)
+	}
+	return work(ctx)
+}
+
+// ForgetPrefix follows a committed source-scoped SQL invalidation while all
+// writers for that prefix remain quiesced. Other sources' cached vectors survive.
+func (s *Store) ForgetPrefix(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.cache[:0]
+	for _, record := range s.cache {
+		if !strings.HasPrefix(record.NotePath, prefix) {
+			kept = append(kept, record)
+		}
+	}
+	s.cache = kept
 }
 
 func NewStore(db *sql.DB, logger *slog.Logger) *Store {

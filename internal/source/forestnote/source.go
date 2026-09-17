@@ -220,6 +220,12 @@ func (s *Source) Store() *syncstore.Store { return s.store }
 // sync), then the affected page is re-enqueued on the bridge so its rendered
 // image and search index refresh. No-op-safe if the source isn't started.
 func (s *Source) EditTextBox(ctx context.Context, boxID, newText string) error {
+	if s == nil {
+		return errSourceStopping
+	}
+	return s.background.run(ctx, func(ctx context.Context) error { return s.editTextBox(ctx, boxID, newText) })
+}
+func (s *Source) editTextBox(ctx context.Context, boxID, newText string) error {
 	if s.store == nil {
 		return fmt.Errorf("forestnote source not started")
 	}
@@ -246,6 +252,12 @@ const reprocessChunk = 128
 // worker; this returns once the pages are read. No-op if the source isn't
 // started (bridge nil).
 func (s *Source) ReprocessNotebook(ctx context.Context, notebookID string) error {
+	if s == nil {
+		return errSourceStopping
+	}
+	return s.background.run(ctx, func(ctx context.Context) error { return s.reprocessNotebook(ctx, notebookID) })
+}
+func (s *Source) reprocessNotebook(ctx context.Context, notebookID string) error {
 	if s.store == nil || s.bridge == nil {
 		return fmt.Errorf("forestnote source not started")
 	}
@@ -305,7 +317,13 @@ func (s *Source) PruneDevice(ctx context.Context, siteID string) (bool, error) {
 	if s == nil || s.store == nil {
 		return false, fmt.Errorf("forestnote source not started")
 	}
-	return s.store.DeleteDevice(ctx, siteID)
+	var deleted bool
+	err := s.background.run(ctx, func(ctx context.Context) error {
+		var e error
+		deleted, e = s.store.DeleteDevice(ctx, siteID)
+		return e
+	})
+	return deleted, err
 }
 
 // SetDeviceLabel sets (or clears, on an empty label) the operator's name for a
@@ -315,7 +333,13 @@ func (s *Source) SetDeviceLabel(ctx context.Context, siteID, label string) (bool
 	if s == nil || s.store == nil {
 		return false, fmt.Errorf("forestnote source not started")
 	}
-	return s.store.SetDeviceLabel(ctx, siteID, label)
+	var changed bool
+	err := s.background.run(ctx, func(ctx context.Context) error {
+		var e error
+		changed, e = s.store.SetDeviceLabel(ctx, siteID, label)
+		return e
+	})
+	return changed, err
 }
 
 // CompactNow runs one watermark + sweep pass on demand. Deliberately NOT gated
@@ -324,6 +348,18 @@ func (s *Source) SetDeviceLabel(ctx context.Context, siteID, label string) (bool
 // operator opting in — the driving scenario is prune-dead-device → reclaim the
 // history it pinned.
 func (s *Source) CompactNow(ctx context.Context) (syncstore.CompactOutcome, error) {
+	if s == nil {
+		return syncstore.CompactOutcome{}, errSourceStopping
+	}
+	var outcome syncstore.CompactOutcome
+	err := s.background.run(ctx, func(ctx context.Context) error {
+		var e error
+		outcome, e = s.compactNow(ctx)
+		return e
+	})
+	return outcome, err
+}
+func (s *Source) compactNow(ctx context.Context) (syncstore.CompactOutcome, error) {
 	if s == nil || s.store == nil {
 		return syncstore.CompactOutcome{}, fmt.Errorf("forestnote source not started")
 	}

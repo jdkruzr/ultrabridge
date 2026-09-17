@@ -2,6 +2,7 @@ package forestnote
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,68 @@ import (
 
 	"github.com/sysop/ultrabridge/internal/source"
 )
+
+func TestManualWorkCancelledJoinedAndRefusedAfterStop(t *testing.T) {
+	w := newBackgroundWork(context.Background())
+	entered, cancelled, release, closed := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- w.run(context.Background(), func(ctx context.Context) error {
+			close(entered)
+			<-ctx.Done()
+			close(cancelled)
+			<-release
+			return ctx.Err()
+		})
+	}()
+	<-entered
+	go func() { w.close(); close(closed) }()
+	select {
+	case <-cancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("manual request not cancelled")
+	}
+	select {
+	case <-closed:
+		t.Fatal("manual request not joined")
+	default:
+	}
+	if err := w.run(context.Background(), func(context.Context) error { t.Error("late request ran"); return nil }); !errors.Is(err, errSourceStopping) {
+		t.Fatal(err)
+	}
+	close(release)
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown stuck")
+	}
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestStoppedSourceRefusesEveryManualMutation(t *testing.T) {
+	s, err := NewSource(testDB(t), source.SourceRow{Name: "fixture"}, source.SharedDeps{}, ForestNoteDeps{Indexer: nopIndexer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s.Stop()
+	checks := []error{s.EditTextBox(context.Background(), "box", "late"), s.ReprocessNotebook(context.Background(), "notebook")}
+	_, err = s.PruneDevice(context.Background(), "site")
+	checks = append(checks, err)
+	_, err = s.SetDeviceLabel(context.Background(), "site", "late")
+	checks = append(checks, err)
+	_, err = s.CompactNow(context.Background())
+	checks = append(checks, err)
+	for _, err := range checks {
+		if !errors.Is(err, errSourceStopping) {
+			t.Fatal("stopped mutation was admitted", err)
+		}
+	}
+}
 
 func TestBackgroundCloseCancelsJoinsAndRejectsLateWork(t *testing.T) {
 	w := newBackgroundWork(context.Background())
