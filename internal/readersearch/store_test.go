@@ -187,6 +187,38 @@ func TestCurrentRecognitionAlternativesAndStaleSuppression(t *testing.T) {
 	}
 }
 
+func TestHumanCorrectionWinsUntilExplicitReset(t *testing.T) {
+	f := setup(t)
+	f.annotation(t, "n")
+	hash := f.hash(t, "n")
+	f.recognition(t, site, "n", hash, "machineword", "ready")
+	correct := func(author, status, text string) {
+		producer := "correction:" + author
+		key, _ := readercontract.CompositeID("n", producer)
+		f.author(t, author, "reader_recognition", key, map[string]any{"annotation_id": "n", "producer_id": producer, "input_hash": hash, "engine": "manual-correction-v1", "model": nil, "language": nil, "status": status, "text": text})
+	}
+	correct(site, "ready", "humanword")
+	f.drain(t)
+	if len(f.hits(t, "humanword")) != 1 || len(f.hits(t, "machineword")) != 0 {
+		t.Fatal("machine text overrode correction")
+	}
+	f.recognition(t, site, "n", hash, "newmachineword", "ready")
+	f.drain(t)
+	if len(f.hits(t, "humanword")) != 1 || len(f.hits(t, "newmachineword")) != 0 {
+		t.Fatal("recognition overwrote correction")
+	}
+	correct(siteB, "unavailable", "")
+	f.drain(t)
+	if len(f.hits(t, "humanword")) != 0 || len(f.hits(t, "newmachineword")) != 1 {
+		t.Fatal("reset did not expose machine text")
+	}
+	correct(site, "ready", "")
+	f.drain(t)
+	if len(f.hits(t, "newmachineword")) != 0 {
+		t.Fatal("empty correction was ignored")
+	}
+}
+
 func TestLifecycleCancelAndBookFanoutResume(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "library.db")
 	f := open(t, path)

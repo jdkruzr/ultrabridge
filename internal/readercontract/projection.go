@@ -233,7 +233,7 @@ func Reduce(rows AnnotationRows) AnnotationProjection {
 			raw, id = selected.text("value_json"), selected.ID
 		}
 		parsed, version, _ := versioned(raw) // shape validation above established a valid object
-		if version != 1 {
+		if version != 1 && !(name == "anchor" && stickyAnchor(parsed, version)) {
 			unsupported = true
 			issue(id, "Unsupported "+name+" version")
 			return nil, nil

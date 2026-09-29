@@ -89,7 +89,7 @@ func CheckPrepared(table string, r Record, lookup Lookup) Decision {
 	if table == "reader_position" && r.text("site_id") != author {
 		return invalid("Position owner mismatch")
 	}
-	if table == "reader_recognition" && r.text("producer_id") != "client:"+author {
+	if table == "reader_recognition" && r.text("producer_id") != "client:"+author && r.text("producer_id") != "correction:"+author {
 		return invalid("Producer is not this client; authenticated server-producer binding is not activated")
 	}
 	if table == "reader_edit_session" {

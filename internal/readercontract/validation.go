@@ -171,7 +171,8 @@ func anchor(s string) bool {
 	if err != nil {
 		return false
 	}
-	if v != 1 {
+	sticky := stickyAnchor(o, v)
+	if v != 1 && !sticky {
 		return true
 	}
 	section, e1 := jsonInteger(o["section"])
@@ -186,7 +187,41 @@ func anchor(s string) bool {
 			return false
 		}
 	}
+	if sticky {
+		if section > 2147483647 {
+			return false
+		}
+		var target map[string]json.RawMessage
+		if json.Unmarshal(o["target"], &target) != nil {
+			return false
+		}
+		var kind string
+		if json.Unmarshal(target["type"], &kind) != nil {
+			return false
+		}
+		switch kind {
+		case "text":
+			var quote string
+			return end > start && json.Unmarshal(o["quote"], &quote) == nil && quote != ""
+		case "image":
+			n, err := jsonInteger(target["index"])
+			return err == nil && n >= 0 && n <= 2147483647
+		case "section":
+			return true
+		case "page":
+			x, ex := jsonInteger(target["x"])
+			y, ey := jsonInteger(target["y"])
+			return ex == nil && ey == nil && x >= 0 && x <= 1000000 && y >= 0 && y <= 1000000
+		default:
+			return false
+		}
+	}
 	return true
+}
+
+func stickyAnchor(o map[string]json.RawMessage, version int64) bool {
+	var presentation string
+	return version == 2 && json.Unmarshal(o["presentation"], &presentation) == nil && presentation == "sticky"
 }
 func property(name, s string) bool {
 	if name != "anchor" && name != "height" && name != "highlight_present" {
@@ -195,6 +230,9 @@ func property(name, s string) bool {
 	o, v, err := versioned(s)
 	if err != nil {
 		return false
+	}
+	if name == "anchor" {
+		return anchor(s)
 	}
 	if v != 1 {
 		return true
@@ -261,7 +299,7 @@ func validateShape(table string, r Record, inspectInk bool) error {
 	valid := false
 	switch table {
 	case "reader_book":
-		valid = digestPattern.MatchString(r.ID) && r.text("asset_id") == r.ID && r.number("byte_length") >= 0 && (r.text("media_type") == "application/epub+zip" || r.text("media_type") == "application/x-mobipocket-ebook") && jsonOK("metadata_json")
+		valid = digestPattern.MatchString(r.ID) && r.text("asset_id") == r.ID && r.number("byte_length") >= 0 && (r.text("media_type") == "application/epub+zip" || r.text("media_type") == "application/x-mobipocket-ebook" || r.text("media_type") == "application/pdf") && jsonOK("metadata_json")
 	case "reader_book_title":
 		valid = !kotlinBlank(r.text("title")) && utf16Length(r.text("title")) <= 4096
 	case "reader_annotation":
@@ -283,6 +321,9 @@ func validateShape(table string, r Record, inspectInk bool) error {
 		valid = digestPattern.MatchString(r.text("book_id")) && sitePattern.MatchString(r.text("site_id")) && jsonOK("locator_json") && composite("book_id", "site_id")
 	case "reader_recognition":
 		valid = id("annotation_id") && id("producer_id") && digestPattern.MatchString(r.text("input_hash")) && composite("annotation_id", "producer_id") && !kotlinBlank(r.text("engine")) && (r.text("status") == "ready" || r.text("status") == "failed" || r.text("status") == "unavailable")
+		if strings.HasPrefix(r.text("producer_id"), "correction:") {
+			valid = valid && sitePattern.MatchString(strings.TrimPrefix(r.text("producer_id"), "correction:")) && r.text("engine") == "manual-correction-v1" && (r.text("status") == "ready" || r.text("status") == "unavailable") && utf16Length(r.text("text")) <= 65536 && r.Columns["model"] == nil && r.Columns["language"] == nil
+		}
 	case "content_anchor":
 		valid = jsonOK("selector_json")
 	case "content_reference":

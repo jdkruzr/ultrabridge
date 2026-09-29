@@ -52,7 +52,15 @@ func project(input *readerstore.SearchInput) (*document, error) {
 	// Current alternatives only; preserve producer/model/language instead of
 	// synthesizing a new OCR authority. Client class precedes future server class.
 	matching := []readercontract.Record{}
+	var correction *readercontract.Record
 	for _, r := range input.Recognition {
+		if strings.HasPrefix(r.Columns["producer_id"].(string), "correction:") {
+			if correction == nil || newerRecognition(r, *correction) {
+				row := r
+				correction = &row
+			}
+			continue
+		}
 		if r.Columns["status"] == "ready" && r.Columns["input_hash"] == d.hash {
 			matching = append(matching, r)
 		}
@@ -72,6 +80,11 @@ func project(input *readerstore.SearchInput) (*document, error) {
 		}
 		return a.Version.SiteID > b.Version.SiteID
 	})
+	// A human correction survives changed ink. An explicit reset wins by the
+	// same version ordering and exposes current machine output again.
+	if correction != nil && correction.Columns["status"] == "ready" {
+		matching = []readercontract.Record{*correction}
+	}
 	alts := []Alternative{}
 	seen := map[string]bool{}
 	var texts []string
@@ -95,4 +108,17 @@ func project(input *readerstore.SearchInput) (*document, error) {
 		return nil, readerstore.ErrBudget
 	}
 	return d, nil
+}
+
+func newerRecognition(a, b readercontract.Record) bool {
+	if a.Version.OpTS != b.Version.OpTS {
+		return a.Version.OpTS > b.Version.OpTS
+	}
+	if a.Version.OpSeq != b.Version.OpSeq {
+		return a.Version.OpSeq > b.Version.OpSeq
+	}
+	if a.Version.SiteID != b.Version.SiteID {
+		return a.Version.SiteID > b.Version.SiteID
+	}
+	return a.ID > b.ID
 }
