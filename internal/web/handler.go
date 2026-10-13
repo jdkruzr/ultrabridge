@@ -1537,6 +1537,7 @@ func (h *Handler) settingsData(r *http.Request) map[string]interface{} {
 		ocrPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxOCRPrompt)
 		todoEnabled, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoEnabled)
 		todoPrompt, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoPrompt)
+		todoInkColors, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoInkColors)
 		importNotes, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxImportNotes)
 		importPDFs, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxImportPDFs)
 		importOnyx, _ := notedb.GetSetting(ctx, h.noteDB, appconfig.KeyBooxImportOnyxPaths)
@@ -1544,6 +1545,7 @@ func (h *Handler) settingsData(r *http.Request) map[string]interface{} {
 		data["BooxOCRPrompt"] = ocrPrompt
 		data["BooxTodoEnabled"] = todoEnabled == "true"
 		data["BooxTodoPrompt"] = todoPrompt
+		data["BooxTodoInkColors"] = todoInkColors
 		data["BooxImportNotes"] = importNotes == "true"
 		data["BooxImportPDFs"] = importPDFs == "true"
 		data["BooxImportOnyxPaths"] = importOnyx == "true"
@@ -1932,6 +1934,8 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			if v := r.FormValue("todo_prompt"); v != "" {
 				_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoPrompt, v)
 			}
+			// Empty clears back to the default red pen.
+			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeyBooxTodoInkColors, strings.TrimSpace(r.FormValue("todo_ink_colors")))
 			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeyBooxImportNotes, r.FormValue("import_notes"))
 			_ = notedb.SetSetting(ctx, h.noteDB, appconfig.KeyBooxImportPDFs, r.FormValue("import_pdfs"))
 			// external_base_url: explicit empty string clears it (so the

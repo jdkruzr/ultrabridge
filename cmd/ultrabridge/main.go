@@ -173,6 +173,19 @@ func main() {
 	// Shared infrastructure (not per-source)
 	si := search.New(noteDB)
 
+	// Red-ink to-do ledger (boox_todo_ledger in notedb). Seeded from every
+	// red-ink task — tombstones included — on each boot, so a to-do the user
+	// deleted is never re-created when its note is re-processed, even after
+	// the tombstone is hard-purged. Seeding is idempotent and best-effort.
+	todoLedger := booxpipeline.NewStore(noteDB)
+	if allTasks, err := store.ListIncludingDeleted(context.Background()); err != nil {
+		logger.Warn("todo ledger: list tasks for seeding", "err", err)
+	} else if added, err := todoLedger.SeedTodoLedger(context.Background(), allTasks); err != nil {
+		logger.Warn("todo ledger: seed", "err", err)
+	} else if added > 0 {
+		logger.Info("todo ledger: seeded from existing tasks", "added", added)
+	}
+
 	// Initialize embedding pipeline if enabled
 	var embedder rag.Embedder
 	var embedStore *rag.Store
@@ -221,7 +234,7 @@ func main() {
 				// Read the external base URL each time so changes from Settings
 				// take effect immediately without a restart.
 				externalBaseURL, _ := notedb.GetSetting(ctx, noteDB, appconfig.KeyBooxExternalBaseURL)
-				created := booxpipeline.CreateTasksFromTodos(ctx, store, notePath, todos, externalBaseURL, logger)
+				created := booxpipeline.CreateTasksFromTodos(ctx, store, todoLedger, notePath, todos, externalBaseURL, logger)
 				if created > 0 {
 					_ = taskNotifier.Notify(ctx)
 				}

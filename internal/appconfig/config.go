@@ -21,6 +21,7 @@ var runtimeKeys = []string{
 	KeyBooxOCRPrompt,
 	KeyBooxTodoEnabled,
 	KeyBooxTodoPrompt,
+	KeyBooxTodoInkColors,
 	KeyBooxImportPath,
 	KeyBooxImportNotes,
 	KeyBooxImportPDFs,

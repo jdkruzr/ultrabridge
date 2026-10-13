@@ -332,7 +332,7 @@
         <input type="hidden" name="section" value="boox">
         <div class="form-group">
             <label for="boox-todo-enabled">Red Ink To-Do Extraction</label>
-            <p class="device-info" style="margin-bottom: 0.5rem;">When enabled, a second OCR pass looks for red handwriting and creates CalDAV tasks from it.</p>
+            <p class="device-info" style="margin-bottom: 0.5rem;">When enabled, handwriting in the to-do ink color is isolated from each page (exactly, from stroke data for .note files; by pixel color for PDFs) and transcribed into CalDAV tasks. Pages without that ink are skipped.</p>
             <select id="boox-todo-enabled" name="todo_enabled">
               <option value="false" {{if not .BooxTodoEnabled}}selected{{end}}>Disabled</option>
               <option value="true" {{if .BooxTodoEnabled}}selected{{end}}>Enabled</option>
@@ -340,7 +340,13 @@
         </div>
         <div class="form-group">
             <label for="boox-todo-prompt">To-do Extraction Prompt</label>
+            <p class="device-info" style="margin-bottom: 0.5rem;">The model only sees the extracted to-do ink, black on white, so the prompt should ask it to transcribe passages, not to look for a color. Leave blank for the built-in prompt.</p>
             <textarea id="boox-todo-prompt" name="todo_prompt" rows="4">{{.BooxTodoPrompt}}</textarea>
+        </div>
+        <div class="form-group">
+            <label for="boox-todo-ink-colors">To-do Ink Colors</label>
+            <p class="device-info" style="margin-bottom: 0.5rem;">Pen colors treated as to-do ink, as hex <code>RRGGBB</code> or <code>AARRGGBB</code>, comma-separated. Leave blank for the Boox red pen (<code>FF6163</code>). Other pens, including orange-red (<code>FF4400</code>), are ignored unless listed here.</p>
+            <input id="boox-todo-ink-colors" name="todo_ink_colors" type="text" placeholder="FF6163" value="{{.BooxTodoInkColors}}">
         </div>
         <div class="form-group">
             <label for="boox-external-base-url">External Base URL (optional)</label>

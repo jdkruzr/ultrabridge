@@ -98,6 +98,16 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			requeue_after INTEGER,
 			FOREIGN KEY (note_path) REFERENCES boox_notes(path)
 		)`,
+		// Every red-ink to-do ever emitted, keyed by source note basename and
+		// normalized text. Rows are never deleted: a to-do the user deleted,
+		// completed, or hard-purged must not be re-created when its note is
+		// re-processed (Boox devices periodically re-upload whole libraries).
+		`CREATE TABLE IF NOT EXISTS boox_todo_ledger (
+			note_name  TEXT NOT NULL,
+			text_key   TEXT NOT NULL,
+			first_seen INTEGER NOT NULL,
+			PRIMARY KEY (note_name, text_key)
+		)`,
 		`CREATE TABLE IF NOT EXISTS settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT ''

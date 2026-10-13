@@ -67,6 +67,10 @@ func (s *Source) Start(ctx context.Context) error {
 			v, _ := notedb.GetSetting(context.Background(), s.db, "boox_todo_prompt")
 			return v
 		},
+		TodoInkColors: func() []uint32 {
+			v, _ := notedb.GetSetting(context.Background(), s.db, "boox_todo_ink_colors")
+			return booxpipeline.ParseInkColors(v)
+		},
 		OnTodosFound: s.booxDeps.OnTodosFound,
 	}
 	if s.deps.OCRClient != nil {

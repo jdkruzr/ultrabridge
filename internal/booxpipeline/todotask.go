@@ -17,12 +17,15 @@ type TaskCreator interface {
 
 // CreateTasksFromTodos creates CalDAV tasks from extracted red ink todos,
 // deduplicating against existing tasks by title (both incomplete and
-// completed). externalBaseURL, when non-empty, is prepended to the
+// completed) and, when ledger is non-nil, against every to-do ever emitted
+// from a note with the same basename — so a to-do whose task was deleted or
+// purged stays gone when its note is re-processed. A ledger read error skips
+// that to-do: missing one beats re-flooding the task list. externalBaseURL, when non-empty, is prepended to the
 // /files/boox?detail=... link in the task's Detail so CalDAV clients see
 // an absolute URL they can render as clickable (e.g.
 // https://ub.example.com/files/boox?detail=...). Empty fallback emits
 // the bare relative path.
-func CreateTasksFromTodos(ctx context.Context, tc TaskCreator, notePath string, todos []TodoItem, externalBaseURL string, logger *slog.Logger) int {
+func CreateTasksFromTodos(ctx context.Context, tc TaskCreator, ledger TodoLedger, notePath string, todos []TodoItem, externalBaseURL string, logger *slog.Logger) int {
 	existing, err := tc.List(ctx)
 	if err != nil {
 		logger.Error("todo: list tasks for dedup", "error", err)
@@ -35,10 +38,32 @@ func CreateTasksFromTodos(ctx context.Context, tc TaskCreator, notePath string, 
 		}
 	}
 
+	noteName := filepath.Base(notePath)
+	record := func(text string) {
+		if ledger == nil {
+			return
+		}
+		if err := ledger.RecordTodo(ctx, noteName, text); err != nil {
+			logger.Warn("todo: record in ledger", "text", text, "error", err)
+		}
+	}
+
 	created := 0
 	for _, todo := range todos {
+		if ledger != nil {
+			seen, err := ledger.TodoEmitted(ctx, noteName, todo.Text)
+			if err != nil {
+				logger.Error("todo: ledger lookup, skipping", "text", todo.Text, "error", err)
+				continue
+			}
+			if seen {
+				logger.Info("todo: skipping previously emitted", "text", todo.Text, "note", noteName)
+				continue
+			}
+		}
 		if titleSet[todo.Text] {
 			logger.Info("todo: skipping duplicate", "text", todo.Text)
+			record(todo.Text)
 			continue
 		}
 		// Detail format:
@@ -50,7 +75,6 @@ func CreateTasksFromTodos(ctx context.Context, tc TaskCreator, notePath string, 
 		// this format to render a proper <a href> that navigates via HTMX
 		// to /files/boox?detail=<path>. CalDAV clients which auto-linkify
 		// URLs will also expose the second line as a clickable link.
-		basename := filepath.Base(notePath)
 		detailURL := "/files/boox?detail=" + url.QueryEscape(notePath)
 		if externalBaseURL != "" {
 			// Trim any trailing slash so we don't emit "https://host//files/...".
@@ -63,7 +87,7 @@ func CreateTasksFromTodos(ctx context.Context, tc TaskCreator, notePath string, 
 		task := &taskstore.Task{
 			Title: taskstore.SqlStr(todo.Text),
 			Detail: taskstore.SqlStr(
-				"From Boox red ink in " + basename + "\nOpen: " + detailURL,
+				"From Boox red ink in " + noteName + "\nOpen: " + detailURL,
 			),
 		}
 		if err := tc.Create(ctx, task); err != nil {
@@ -71,6 +95,7 @@ func CreateTasksFromTodos(ctx context.Context, tc TaskCreator, notePath string, 
 		} else {
 			logger.Info("todo: created task from red ink", "text", todo.Text, "task_id", task.TaskID)
 			titleSet[todo.Text] = true
+			record(todo.Text)
 			created++
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"io"
 	"math"
@@ -45,7 +46,8 @@ type WorkerConfig struct {
 	OCR            OCRer                                                        // nil = OCR disabled
 	OCRPrompt      func() string                                                // returns current OCR prompt; nil = use default
 	TodoEnabled    func() bool                                                  // returns whether red ink to-do extraction is on
-	TodoPrompt     func() string                                                // returns current to-do extraction prompt
+	TodoPrompt     func() string                                                // returns current to-do extraction prompt; "" = DefaultTodoPrompt
+	TodoInkColors  func() []uint32                                              // packed ARGB inks the to-do pass extracts; nil/empty = DefaultTodoInkColors
 	OnTodosFound   func(ctx context.Context, notePath string, todos []TodoItem) // callback for extracted todos
 	CachePath      string                                                       // base dir for rendered page cache
 	Embedder       rag.Embedder                                                 // nil = embedding disabled
@@ -159,8 +161,17 @@ func (p *Processor) executeNoteJob(ctx context.Context, job *BooxJob) error {
 		}
 	}
 
-	// 7. Second OCR pass: red ink to-do extraction.
-	p.runTodoPass(ctx, notePath, len(note.Pages))
+	// 7. Second OCR pass: red ink to-do extraction. Works from the parsed
+	// strokes, not the cached render: only shapes in the to-do ink are drawn,
+	// so the model never has to judge color.
+	p.runTodoPass(ctx, notePath, len(note.Pages), func(i int, colors []uint32) (image.Image, bool, error) {
+		inkPage := inkOnlyPage(note.Pages[i], colors)
+		if inkPage == nil {
+			return nil, false, nil
+		}
+		img, err := booxrender.RenderPage(inkPage)
+		return img, err == nil, err
+	})
 
 	return nil
 }
@@ -255,8 +266,20 @@ func (p *Processor) executePDFJob(ctx context.Context, job *BooxJob) error {
 		}
 	}
 
-	// 8. Second OCR pass: red ink to-do extraction.
-	p.runTodoPass(ctx, pdfPath, pageCount)
+	// 8. Second OCR pass: red ink to-do extraction. PDFs carry no stroke
+	// colors, so the cached render is pixel-filtered down to the to-do ink.
+	p.runTodoPass(ctx, pdfPath, pageCount, func(i int, colors []uint32) (image.Image, bool, error) {
+		data, err := os.ReadFile(filepath.Join(cacheDir, fmt.Sprintf("page_%d.jpg", i)))
+		if err != nil {
+			return nil, false, fmt.Errorf("read cached page: %w", err)
+		}
+		img, err := jpeg.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, false, fmt.Errorf("decode cached page: %w", err)
+		}
+		inkImg, kept := inkOnlyImage(img, colors)
+		return inkImg, kept >= minInkPixelsPage, nil
+	})
 
 	return nil
 }
@@ -319,35 +342,51 @@ func (p *Processor) resolveMetadata(ctx context.Context, filePath string) (devic
 	return "", "", ""
 }
 
+// todoPageImage yields page i reduced to the to-do ink colors, drawn
+// black-on-white. ok=false means the page has no such ink and is skipped
+// without a model call.
+type todoPageImage func(i int, colors []uint32) (img image.Image, ok bool, err error)
+
 // runTodoPass performs the second OCR pass for red ink to-do extraction.
-func (p *Processor) runTodoPass(ctx context.Context, filePath string, pageCount int) {
+// Color selection happens here, deterministically, before the model sees
+// anything; the model only transcribes the passages it is shown.
+func (p *Processor) runTodoPass(ctx context.Context, filePath string, pageCount int, pageImage todoPageImage) {
 	if p.cfg.OCR == nil || p.cfg.TodoEnabled == nil || !p.cfg.TodoEnabled() {
 		return
 	}
 
-	var allTodos []TodoItem
 	todoPrompt := ""
 	if p.cfg.TodoPrompt != nil {
 		todoPrompt = p.cfg.TodoPrompt()
 	}
-
-	// Derive cache dir from the note record.
-	note, err := p.store.GetNote(ctx, filePath)
-	if err != nil || note == nil {
-		p.logger.Warn("todo pass: could not look up note", "path", filePath, "error", err)
-		return
+	if todoPrompt == "" {
+		todoPrompt = DefaultTodoPrompt
 	}
-	cacheDir := filepath.Join(p.cfg.CachePath, note.NoteID)
+	colors := DefaultTodoInkColors
+	if p.cfg.TodoInkColors != nil {
+		if c := p.cfg.TodoInkColors(); len(c) > 0 {
+			colors = c
+		}
+	}
 
+	var allTodos []TodoItem
 	for i := 0; i < pageCount; i++ {
-		cachePath := filepath.Join(cacheDir, fmt.Sprintf("page_%d.jpg", i))
-		jpegData, err := os.ReadFile(cachePath)
+		img, ok, err := pageImage(i, colors)
 		if err != nil {
-			p.logger.Warn("todo pass: read cached page", "page", i, "error", err)
+			p.logger.Warn("todo pass: prepare page", "page", i, "path", filePath, "error", err)
+			continue
+		}
+		if !ok {
 			continue
 		}
 
-		resp, err := p.cfg.OCR.Recognize(ctx, jpegData, todoPrompt)
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+			p.logger.Warn("todo pass: encode page", "page", i, "error", err)
+			continue
+		}
+
+		resp, err := p.cfg.OCR.Recognize(ctx, buf.Bytes(), todoPrompt)
 		if err != nil {
 			p.logger.Warn("todo pass: OCR failed", "page", i, "error", err)
 			continue

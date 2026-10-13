@@ -92,6 +92,10 @@ const (
 	KeyBooxOCRPrompt       = "boox_ocr_prompt"
 	KeyBooxTodoEnabled     = "boox_todo_enabled"
 	KeyBooxTodoPrompt      = "boox_todo_prompt"
+	// KeyBooxTodoInkColors lists the pen colors (hex RRGGBB/AARRGGBB,
+	// comma-separated) the red-ink to-do pass extracts. Empty = the Boox red
+	// pen, booxpipeline.DefaultTodoInkColors.
+	KeyBooxTodoInkColors   = "boox_todo_ink_colors"
 	KeyBooxImportPath      = "boox_import_path"
 	KeyBooxImportNotes     = "boox_import_notes"
 	KeyBooxImportPDFs      = "boox_import_pdfs"

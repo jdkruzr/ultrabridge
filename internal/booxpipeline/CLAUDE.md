@@ -1,6 +1,6 @@
 # Boox Pipeline
 
-Last verified: 2026-07-26 (Transient-failure retry: `FailJob` is no longer the only terminal path. `Processor.handleJobError` classifies via `processor.IsTransient` — OCR failures that never got a verdict from the model (dial/timeout, 5xx, 429, 408) are requeued with exponential backoff through the new `Store.RequeueJob` + the long-dormant `requeue_after` column, up to `maxJobAttempts`; a 4xx or a parse error still fails on the first attempt. Shutdown mid-job now leaves the row `in_progress` for the startup reclaim instead of marking a good note failed. `Processor` also gained `Running()` and idempotent Start/Stop with a per-Start `done` channel — it previously panicked on a stop/start/stop cycle.)
+Last verified: 2026-10-13 (Red-ink to-do pass rebuilt: ink is selected deterministically before the model sees anything — `.note` pages by exact stroke ARGB (`inkOnlyPage`), PDFs by an angular pixel filter (`inkOnlyImage`) — and sent black-on-white with a prompt that never mentions color; pages without to-do ink skip the model call. `boox_todo_ledger` makes emitted to-dos permanent so re-processed notes never resurrect deleted ones. Prior: 2026-07-26 (Transient-failure retry: `FailJob` is no longer the only terminal path. `Processor.handleJobError` classifies via `processor.IsTransient` — OCR failures that never got a verdict from the model (dial/timeout, 5xx, 429, 408) are requeued with exponential backoff through the new `Store.RequeueJob` + the long-dormant `requeue_after` column, up to `maxJobAttempts`; a 4xx or a parse error still fails on the first attempt. Shutdown mid-job now leaves the row `in_progress` for the startup reclaim instead of marking a good note failed. `Processor` also gained `Running()` and idempotent Start/Stop with a per-Start `done` channel — it previously panicked on a stop/start/stop cycle.)
 
 ## Purpose
 Processing pipeline for Boox notes. Orchestrates parse → render → OCR → index → embed workflow
@@ -52,10 +52,21 @@ for .note files uploaded via WebDAV, triggered by file uploads.
 ## Key Files
 
 - `store.go` — SQLite CRUD: UpsertNote, EnqueueJob, ClaimNextJob, CompleteJob, FailJob, GetNote, ReclaimStuckJobs, RetryAllFailed, DeleteNote, SkipNote, UnskipNote, GetQueueStatus, ListNotesWithPrefix, UpdateNotePath, ReclaimAllInProgress
+- `inkfilter.go` — to-do ink selection: `DefaultTodoInkColors`, `DefaultTodoPrompt`, `ParseInkColors`, `inkOnlyPage` (strokes), `inkOnlyImage` (pixels)
+- `todoledger.go` — `TodoLedger` interface, `Store.{TodoEmitted,RecordTodo,SeedTodoLedger}`, `TodoSourceNote`
+- `todotask.go` — `CreateTasksFromTodos` (title + ledger dedup, task Detail format)
 - `worker.go` — job dispatch loop; dispatches by file extension (.note via booxnote+booxrender, .pdf via pdfrender); watchdog goroutine for stuck jobs
 - `processor.go` — Processor interface implementation: Start, Stop, Enqueue
 - `importer.go` — `ScanAndEnqueue(ctx, ImportConfig) (ImportResult, error)`: walks import directory, discovers .note and .pdf files, calls ExtractImportMetadata, enqueues each. `ExtractImportMetadata` extracts title/author from filename or embedded metadata. `ImportConfig` holds source path and options; `ImportResult` holds counts of enqueued/skipped/failed files.
 - `migrate.go` — `MigrateImportedFiles(ctx) error`: copies files that were imported from outside the Boox notes directory into the notes directory, then updates DB paths via UpdateNotePath
+
+## Red-Ink To-Do Pass
+- **Color selection is code, not model judgment.** The previous prompt asked a no-think vision model to find "RED ink" on the full-color render; it reported red on notes with zero red strokes (~1,000 junk tasks on 2026-10-09 when a Boox re-uploaded its library). Never reintroduce color wording into the prompt.
+- `.note`: `inkOnlyPage` keeps shapes whose packed ARGB exactly matches a to-do ink and recolors them black; the page is rendered from that copy (the cached full render is untouched). No match = no model call.
+- `.pdf`: no stroke data, so `inkOnlyImage` filters the cached render. Pixels are modeled as white blended toward the ink; the off-axis test is **angular** (tan 6°), because a fixed RGB tolerance let anti-aliased orange-red (`FF4400`) edges through. Fewer than `minInkPixelsPage` kept pixels = no model call.
+- Ink colors: setting `boox_todo_ink_colors` (hex, comma-separated) via `ParseInkColors`; empty/invalid → `DefaultTodoInkColors` = `FFFF6163` (the Boox red pen, measured across 737 real notes). Orange-red `FFFF4400` is a distinct pen and deliberately excluded by default.
+- Prompt: setting `boox_todo_prompt`; empty → `DefaultTodoPrompt` ("transcribe each separate passage", JSON lines).
+- Ledger: `boox_todo_ledger(note_name, text_key)` — note basename + `todoTextKey`-normalized text. `CreateTasksFromTodos` skips anything already emitted (regardless of whether its task was later completed, deleted, or hard-purged), records everything it creates or title-dedups, and **fails closed** on ledger errors. `Store.SeedTodoLedger` backfills from every red-ink task (tombstones included, both Detail formats via `TodoSourceNote`) on each boot from `cmd/ultrabridge`.
 
 ## Gotchas
 - `Indexer` interface defined in processor package; `ContentDeleter` defined locally in worker.go (to avoid circular imports)
