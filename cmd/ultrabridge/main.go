@@ -805,7 +805,12 @@ func main() {
 
 		webHandler = web.NewHandler(taskSvc, noteSvc, searchSvc, configSvc, noteDB, snNotesPath, booxNotesPath, logger, broadcaster)
 		webHandler.SetDigestService(digestSvc)
-		webHandler.SetSPCFileRoot(cfg.SPCFileRoot) // resolves digest source pages for /digests/{id}/render
+		if spcSrv != nil {
+			webHandler.SetSPCFileRoot(cfg.SPCFileRoot)
+			if n, ok := taskNotifier.(interface{ NotifyFile(context.Context) error }); ok {
+				webHandler.SetSPCFileNotifier(n.NotifyFile)
+			}
+		}
 		// Wire ForestNote sync device management (Settings card + /api/v1/sync/*).
 		// NewSyncDeviceService returns nil for a nil source, which keeps the card
 		// hidden and the routes 404ing when no ForestNote source is active.

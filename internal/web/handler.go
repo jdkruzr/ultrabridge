@@ -77,6 +77,7 @@ type Handler struct {
 	booxNotesPath   string
 	booxImportPath  string
 	spcFileRoot     string // UB-as-SPC file tree root; resolves digest source paths (set via SetSPCFileRoot)
+	spcFileNotify   func(context.Context) error
 	tmpl            *template.Template
 	mux             *http.ServeMux
 	logger          *slog.Logger
@@ -335,6 +336,8 @@ func NewHandler(
 
 	h.mux.HandleFunc("GET /files", h.handleFiles)
 	h.mux.HandleFunc("GET /files/supernote", h.handleFilesSupernote)
+	h.mux.HandleFunc("GET /files/supernote/download", h.handleSPCDownload)
+	h.mux.HandleFunc("POST /files/supernote/upload", h.handleSPCUpload)
 	h.mux.HandleFunc("GET /files/boox", h.handleFilesBoox)
 	h.mux.HandleFunc("GET /files/forestnote", h.handleFilesForestNote)
 	h.mux.HandleFunc("GET /files/remarkable", h.handleFilesRemarkable)
@@ -560,6 +563,10 @@ func (h *Handler) handleFiles(w http.ResponseWriter, r *http.Request) {
 // directory/breadcrumb browser model of the legacy /files route but excludes
 // Boox notes entirely.
 func (h *Handler) handleFilesSupernote(w http.ResponseWriter, r *http.Request) {
+	if h.spcFileRoot != "" && r.URL.Query().Get("detail") == "" {
+		h.handleSPCFiles(w, r)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	data := map[string]interface{}{"activeTab": "files-supernote"}
@@ -2617,6 +2624,9 @@ func (h *Handler) baseTemplateData(ctx context.Context) map[string]interface{} {
 		fnSourceWired = h.notes.HasForestNoteSource()
 	}
 	// Source-type flags for the search facet and the device-grouped nav.
+	if h.spcFileRoot != "" {
+		data["HasSupernoteSource"] = true
+	}
 	// Digests are available whenever the digest store is wired (server mode).
 	data["HasDigests"] = h.digests != nil
 	// ForestNote is present when a source is wired (the new first-class path);

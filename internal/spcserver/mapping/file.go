@@ -80,6 +80,39 @@ func SafeResolve(root, reqPath string) (string, error) {
 	return filepath.Join(root, filepath.FromSlash(rel)), nil
 }
 
+// NativePath translates device-local folder names to the SPC wire namespace.
+// The Nomad creates /Document but uploads to /DOCUMENT/Document; these must
+// resolve to the same directory and registry ID. Already-native paths and the
+// other three standard folders are unchanged.
+func NativePath(reqPath string) string {
+	rel := strings.TrimPrefix(path.Clean("/"+reqPath), "/")
+	first, rest, _ := strings.Cut(rel, "/")
+	switch first {
+	case "Document":
+		first = "DOCUMENT/Document"
+	case "Note":
+		first = "NOTE/Note"
+	case "MyStyle":
+		first = "NOTE/MyStyle"
+	}
+	return "/" + path.Join(first, rest)
+}
+
+// ResolveDevicePath validates traversal before normalizing native aliases.
+// SafeResolve itself remains a physical-path helper for signed downloads and
+// legacy reads, which must continue to address the exact file they signed.
+func ResolveDevicePath(root, reqPath string) (string, error) {
+	abs, err := SafeResolve(root, reqPath)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(filepath.Clean(root), abs)
+	if err != nil {
+		return "", err
+	}
+	return SafeResolve(root, NativePath(filepath.ToSlash(rel)))
+}
+
 // displayPath returns the SPC path_display: root-relative, leading slash,
 // forward slashes. The root itself is "/".
 func displayPath(root, absPath string) string {

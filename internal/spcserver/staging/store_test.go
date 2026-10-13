@@ -147,7 +147,7 @@ func TestFinalizePromotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	want := filepath.Join(s.Root, "Note", "Personal", "bar.note")
+	want := filepath.Join(s.Root, "NOTE", "Note", "Personal", "bar.note")
 	if abs != want {
 		t.Fatalf("promoted to %q, want %q", abs, want)
 	}

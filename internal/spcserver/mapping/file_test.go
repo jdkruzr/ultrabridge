@@ -147,3 +147,25 @@ func TestSafeResolveCleansAndContains(t *testing.T) {
 		t.Errorf("SafeResolve(/) = %q, %v; want %q", got, err, filepath.Clean(root))
 	}
 }
+
+func TestNativeDevicePaths(t *testing.T) {
+	root := t.TempDir()
+	for input, want := range map[string]string{
+		"/Document": "DOCUMENT/Document", "/Document//book.epub": "DOCUMENT/Document/book.epub",
+		"/DOCUMENT/Document/book.epub": "DOCUMENT/Document/book.epub",
+		"/Note":                        "NOTE/Note", "/Note/Personal/x.note": "NOTE/Note/Personal/x.note",
+		"/MyStyle/style.png": "NOTE/MyStyle/style.png", "/NOTE/MyStyle": "NOTE/MyStyle",
+		"/EXPORT/a.pdf": "EXPORT/a.pdf", "/SCREENSHOT/a.png": "SCREENSHOT/a.png", "/INBOX": "INBOX",
+		"/Documentary/a.epub": "Documentary/a.epub",
+	} {
+		got, err := ResolveDevicePath(root, input)
+		if err != nil || got != filepath.Join(root, want) {
+			t.Errorf("%s = %s, %v; want %s", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"/../escape", "/Document/../../escape"} {
+		if _, err := ResolveDevicePath(root, input); err == nil {
+			t.Errorf("accepted traversal %s", input)
+		}
+	}
+}

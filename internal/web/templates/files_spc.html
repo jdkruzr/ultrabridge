@@ -1,0 +1,28 @@
+<div id="files" class="tab-content active">
+  <div class="card">
+    {{template "_files_breadcrumb" .navCrumbs}}
+    {{if .spcPath}}
+    <form action="/files/supernote/upload?path={{.spcPath | urlquery}}" method="post" enctype="multipart/form-data" class="toolbar">
+      <label>Upload to {{.spcPath}} <input type="file" name="file" required></label>
+      <button type="submit" class="btn-small">Upload</button>
+      <span class="text-small">Up to 512 MiB. Existing files are kept; use a new filename.</span>
+    </form>
+    {{end}}
+    <div class="table-container">
+      <table class="task-table">
+        <thead><tr><th>Name</th><th>Size</th><th>Actions</th></tr></thead>
+        <tbody>
+        {{range .spcEntries}}
+          <tr>
+            <td>{{if .IsDir}}📁 <a href="{{.URL}}" hx-get="{{.URL}}" hx-target="#main-content" hx-push-url="true">{{.Name}}</a>{{else}}{{.Name}}{{end}}</td>
+            <td>{{if not .IsDir}}{{.Size}} bytes{{end}}</td>
+            <td>{{if not .IsDir}}<a href="{{.DownloadURL}}" class="btn-small">Download</a>{{if .DetailURL}} <a href="{{.DetailURL}}" hx-get="{{.DetailURL}}" hx-target="#main-content" hx-push-url="true" class="btn-small">Details</a>{{end}}{{end}}</td>
+          </tr>
+        {{else}}
+          <tr><td colspan="3">This folder is empty.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

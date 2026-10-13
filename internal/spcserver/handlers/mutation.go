@@ -357,7 +357,7 @@ func (h *MutationHandler) resolveSource(r *http.Request, rawID string) (id int64
 // Traversal-guarded. On a collision it returns errSameNameCode unless autorename
 // is set, in which case it appends " (n)" before the extension until free.
 func (h *MutationHandler) targetPath(toPath string, autorename bool) (dest, code string) {
-	dest, err := mapping.SafeResolve(h.Root, toPath)
+	dest, err := mapping.ResolveDevicePath(h.Root, toPath)
 	if err != nil {
 		return "", errSameNameCode // escaping path: refuse (never write outside root)
 	}

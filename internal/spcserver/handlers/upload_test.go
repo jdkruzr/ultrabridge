@@ -213,7 +213,7 @@ func TestUploadRoundTrip(t *testing.T) {
 	}
 
 	// File landed at the target with the right bytes.
-	got, err := os.ReadFile(filepath.Join(root, "Note", "foo.note"))
+	got, err := os.ReadFile(filepath.Join(root, "NOTE", "Note", "foo.note"))
 	if err != nil {
 		t.Fatalf("read promoted file: %v", err)
 	}

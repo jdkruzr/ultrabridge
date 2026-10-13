@@ -62,6 +62,29 @@ The device runs this on a fresh login (after a logout, which is `POST /api/termi
 
 `equipment=3` = terminal, `loginMethod="2"` = email.
 
+### Native folder identity (Nomad hardware, 2026-09-15)
+
+The device uses two path forms during the same sync. It creates `/Document`
+via `create_folder_v2`, then finishes document uploads under
+`/DOCUMENT/Document`. Likewise, `Note` and `MyStyle` belong under `NOTE/Note`
+and `NOTE/MyStyle`. These are aliases, not independent directories. Resolve
+device writes and browser uploads to the native paths before assigning IDs.
+Physical-path resolution for signed downloads must remain unchanged.
+
+A live failure demonstrated why: local Document already referenced server ID
+17, but the server subsequently advertised a second Document folder, ID 57.
+The Nomad's saved log at 01:31:47 showed `CREATE NO_CHANGE`, a same-name/local
+sync-record collision, and a device-issued `move_v3` for ID 57 to a generated
+`Document_CONFLICT_...` path. Files later listed under bare `/Document` did
+not download to the device. Successful upload and HTTP status alone therefore
+do not establish bidirectional compatibility.
+
+The regression test `TestLocalCreateThenNativeUploadKeepsFolderIdentity`
+replays the mixed-path create/upload sequence for Document, Note, and MyStyle.
+Existing deployments that already contain both identities require an offline,
+checkpointed recovery of their files and registry paths; changing the resolver
+does not merge old directories or reset device sync state automatically.
+
 ### 2.1 Password verification recipe (RECOVERED 2026-05-22 via javap)
 
 `loginEquipment` / `login` / `isPassword` resist **both** CFR and JADX — they carry control-flow obfuscation that trips decompiler block analysis ("Found unreachable blocks"). **Bytecode disassembly reads straight through it:** `javap -p -c -classpath /home/sysop/spc-rev/decrypted-classes com.ratta.user.info.LoginUtil`. The same applies to `SHA256Util` / `MD5StrUtil`. Use `javap` for any method the decompilers refuse.

@@ -232,15 +232,11 @@ func (h *FileHandler) resolveQueryPath(reqPath string) (string, bool) {
 }
 
 func queryPathCandidates(reqPath string) []string {
-	out := []string{reqPath}
-	rel := strings.TrimPrefix(reqPath, "/")
-	if rest, ok := strings.CutPrefix(rel, "Note/"); ok {
-		out = append(out, "/NOTE/Note/"+rest)
+	// Validate the original path before NativePath can clean away traversal.
+	if _, err := mapping.SafeResolve("/", reqPath); err != nil {
+		return nil
 	}
-	if rest, ok := strings.CutPrefix(rel, "Document/"); ok {
-		out = append(out, "/DOCUMENT/Document/"+rest)
-	}
-	return out
+	return []string{mapping.NativePath(reqPath), reqPath}
 }
 
 // CapacityQuery serves /api/file/capacity/query (the variant the device hits):
@@ -283,7 +279,7 @@ func (h *FileHandler) CreateFolderV2(w http.ResponseWriter, r *http.Request) {
 	var req dto.CreateFolderLocalDTO
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	abs, err := mapping.SafeResolve(h.Root, req.Path)
+	abs, err := mapping.ResolveDevicePath(h.Root, req.Path)
 	if err != nil {
 		h.log().Warn("create_folder_v2 bad path", "path", req.Path, "err", err)
 		envelope.WriteError(w, "E0322", "invalid path")

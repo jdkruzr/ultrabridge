@@ -229,7 +229,7 @@ func (s *Store) Finalize(ctx context.Context, innerName, claimedMD5 string, clai
 		return "", fmt.Errorf("staging Finalize %q: md5 mismatch (staged %s, claimed %s)", innerName, sum, claimedMD5)
 	}
 
-	dst, err := mapping.SafeResolve(s.Root, targetRelPath)
+	dst, err := mapping.ResolveDevicePath(s.Root, targetRelPath)
 	if err != nil {
 		return "", fmt.Errorf("staging Finalize %q: %w", innerName, err)
 	}

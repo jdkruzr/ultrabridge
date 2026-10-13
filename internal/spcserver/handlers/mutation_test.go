@@ -155,7 +155,7 @@ var errDeindexBoom = fmt.Errorf("boom")
 func TestMoveReindexes(t *testing.T) {
 	root := t.TempDir()
 	src := writeFile(t, root, "Note/m.note", []byte("move me"))
-	if err := os.MkdirAll(filepath.Join(root, "Document"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "DOCUMENT", "Document"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h, reg := newMutationHandler(t, root)
@@ -164,7 +164,7 @@ func TestMoveReindexes(t *testing.T) {
 	files := &recordingFileMover{}
 	h.ContentIndex, h.EmbedIndex, h.FileRecords = content, embed, files
 	id, _ := reg.IDFor(context.Background(), src)
-	dst := filepath.Join(root, "Document", "m.note")
+	dst := filepath.Join(root, "DOCUMENT", "Document", "m.note")
 
 	out := decodeMap(t, h.Move,
 		`{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`","to_path":"/Document/m.note"}`)
@@ -187,7 +187,7 @@ func TestMoveReindexes(t *testing.T) {
 func TestCopyReindexes(t *testing.T) {
 	root := t.TempDir()
 	src := writeFile(t, root, "Note/c.note", []byte("copy me"))
-	if err := os.MkdirAll(filepath.Join(root, "Document"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "DOCUMENT", "Document"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h, reg := newMutationHandler(t, root)
@@ -195,7 +195,7 @@ func TestCopyReindexes(t *testing.T) {
 	embed := &recordingIndex{}
 	h.ContentIndex, h.EmbedIndex = content, embed
 	id, _ := reg.IDFor(context.Background(), src)
-	dst := filepath.Join(root, "Document", "c.note")
+	dst := filepath.Join(root, "DOCUMENT", "Document", "c.note")
 
 	out := decodeMap(t, h.Copy,
 		`{"equipmentNo":"SN078","id":"`+strconv.FormatInt(id, 10)+`","to_path":"/Document/c.note"}`)
@@ -218,7 +218,7 @@ func TestCopyReindexes(t *testing.T) {
 func TestMoveCopyReindexBestEffort(t *testing.T) {
 	root := t.TempDir()
 	src := writeFile(t, root, "Note/x.note", []byte("x"))
-	if err := os.MkdirAll(filepath.Join(root, "Document"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "DOCUMENT", "Document"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h, reg := newMutationHandler(t, root)
@@ -349,7 +349,7 @@ func entryOf(t *testing.T, out map[string]any) map[string]any {
 func TestMovePreservesID(t *testing.T) {
 	root := t.TempDir()
 	src := writeFile(t, root, "Note/m.note", []byte("move me"))
-	if err := os.MkdirAll(filepath.Join(root, "Document"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "DOCUMENT", "Document"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h, reg := newMutationHandler(t, root)
@@ -365,8 +365,8 @@ func TestMovePreservesID(t *testing.T) {
 		t.Fatalf("move success = %v (%v)", out["success"], out)
 	}
 	e := entryOf(t, out)
-	if e["path_display"] != "/Document/m.note" {
-		t.Fatalf("moved path_display = %v, want /Document/m.note", e["path_display"])
+	if e["path_display"] != "/DOCUMENT/Document/m.note" {
+		t.Fatalf("moved path_display = %v, want /DOCUMENT/Document/m.note", e["path_display"])
 	}
 	if e["id"] != strconv.FormatInt(id, 10) {
 		t.Fatalf("moved id = %v, want stable %d", e["id"], id)
@@ -374,11 +374,11 @@ func TestMovePreservesID(t *testing.T) {
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Fatalf("original should be gone, err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "Document", "m.note")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "DOCUMENT", "Document", "m.note")); err != nil {
 		t.Fatalf("moved file missing at new path: %v", err)
 	}
 	// The stable id now resolves to the new path.
-	if p, found, _ := reg.PathFor(context.Background(), id); !found || p != filepath.Join(root, "Document", "m.note") {
+	if p, found, _ := reg.PathFor(context.Background(), id); !found || p != filepath.Join(root, "DOCUMENT", "Document", "m.note") {
 		t.Fatalf("id %d resolves to %q (found %v); want new path", id, p, found)
 	}
 }
@@ -387,7 +387,7 @@ func TestMovePreservesID(t *testing.T) {
 func TestCopyFreshID(t *testing.T) {
 	root := t.TempDir()
 	src := writeFile(t, root, "Note/c.note", []byte("copy me"))
-	if err := os.MkdirAll(filepath.Join(root, "Document"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "DOCUMENT", "Document"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h, reg := newMutationHandler(t, root)
@@ -402,14 +402,14 @@ func TestCopyFreshID(t *testing.T) {
 		t.Fatalf("copy success = %v (%v)", out["success"], out)
 	}
 	e := entryOf(t, out)
-	if e["path_display"] != "/Document/c.note" {
+	if e["path_display"] != "/DOCUMENT/Document/c.note" {
 		t.Fatalf("copy path_display = %v", e["path_display"])
 	}
 	if e["id"] == strconv.FormatInt(id, 10) {
 		t.Fatalf("copy id should be fresh, got same %v", e["id"])
 	}
 	// Both files exist.
-	for _, p := range []string{src, filepath.Join(root, "Document", "c.note")} {
+	for _, p := range []string{src, filepath.Join(root, "DOCUMENT", "Document", "c.note")} {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("expected file at %q: %v", p, err)
 		}
@@ -420,7 +420,7 @@ func TestCopyFreshID(t *testing.T) {
 func TestCopyCollision(t *testing.T) {
 	root := t.TempDir()
 	src := writeFile(t, root, "Note/dup.note", []byte("orig"))
-	writeFile(t, root, "Document/dup.note", []byte("existing"))
+	writeFile(t, root, "DOCUMENT/Document/dup.note", []byte("existing"))
 	h, reg := newMutationHandler(t, root)
 	id, _ := reg.IDFor(context.Background(), src)
 	idStr := strconv.FormatInt(id, 10)
@@ -435,7 +435,7 @@ func TestCopyCollision(t *testing.T) {
 	if out["success"] != true {
 		t.Fatalf("collision w/ autorename should succeed, got %v", out)
 	}
-	if e := entryOf(t, out); e["path_display"] != "/Document/dup (1).note" {
-		t.Fatalf("autorename path_display = %v, want /Document/dup (1).note", e["path_display"])
+	if e := entryOf(t, out); e["path_display"] != "/DOCUMENT/Document/dup (1).note" {
+		t.Fatalf("autorename path_display = %v, want /DOCUMENT/Document/dup (1).note", e["path_display"])
 	}
 }

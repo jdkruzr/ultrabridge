@@ -58,7 +58,15 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.tmpl.ExecuteTemplate(w, "setup.html", nil); err != nil {
+	// Keep the shared template unexecuted so normal pages can still clone it
+	// after the administrator completes setup.
+	t, err := h.tmpl.Clone()
+	if err != nil {
+		h.logger.Error("failed to clone setup template", "error", err)
+		http.Error(w, "failed to render page", http.StatusInternalServerError)
+		return
+	}
+	if err := t.ExecuteTemplate(w, "setup.html", nil); err != nil {
 		h.logger.Error("failed to render setup template", "error", err)
 		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
