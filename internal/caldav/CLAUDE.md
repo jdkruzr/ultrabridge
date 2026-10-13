@@ -1,6 +1,6 @@
 # CalDAV Backend
 
-Last verified: 2026-08-03 (sync-collection REPORT + sync-token/getctag/supported-report-set on PROPFIND)
+Last verified: 2026-10-13 (missing objects answer 404 via `davError`, not 500. Prior: 2026-08-03 sync-collection REPORT + sync-token/getctag/supported-report-set on PROPFIND)
 
 ## Purpose
 Exposes tasks as a standard CalDAV VTODO collection so any CalDAV client
@@ -34,6 +34,7 @@ Exposes tasks as a standard CalDAV VTODO collection so any CalDAV client
 - Calendar object paths are `{prefix}/tasks/{task_id}.ics`
 - PutCalendarObject is upsert: creates if missing, updates if exists
 - Delete is soft-delete (delegates to store)
+- A missing object (never existed, or tombstoned — the store hides those) answers **404**, via `davError` wrapping `taskstore.ErrNotFound` in `webdav.NewHTTPError`. go-webdav turns every unwrapped backend error into a 500, and its multiget/OPTIONS paths test for the 404 specifically. Any new Backend method that can hit a missing task must go through `davError`.
 - DB fields always win over blob fields on read (blob is supplementary)
 - `extractForestNoteMetadata` runs on every `VTODOToTask`; tasks that never carried X-FORESTNOTE-* see the four columns as `sql.NullString{}` (not empty string) so `WHERE forestnote_notebook_id IS NOT NULL` is the canonical filter.
 

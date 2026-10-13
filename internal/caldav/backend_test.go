@@ -63,6 +63,11 @@ func (m *mockTaskStore) Update(ctx context.Context, t *taskstore.Task) error {
 }
 
 func (m *mockTaskStore) Delete(ctx context.Context, taskID string) error {
+	// Mirror taskdb.Store: deleting a missing (or already-deleted) task is
+	// ErrNotFound, not a silent success.
+	if _, ok := m.tasks[taskID]; !ok {
+		return taskstore.ErrNotFound
+	}
 	delete(m.tasks, taskID)
 	return nil
 }

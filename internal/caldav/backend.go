@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"path"
 	"strings"
 	"sync"
 
 	ical "github.com/emersion/go-ical"
+	webdav "github.com/emersion/go-webdav"
 	gocaldav "github.com/emersion/go-webdav/caldav"
 	"github.com/sysop/ultrabridge/internal/taskattach"
 	"github.com/sysop/ultrabridge/internal/taskstore"
@@ -113,7 +115,7 @@ func (b *Backend) GetCalendarObject(ctx context.Context, urlPath string, req *go
 	}
 	task, err := b.store.Get(ctx, taskID)
 	if err != nil {
-		return nil, err
+		return nil, davError(err)
 	}
 	return b.taskToCalendarObject(task), nil
 }
@@ -250,7 +252,7 @@ func (b *Backend) DeleteCalendarObject(ctx context.Context, urlPath string) erro
 		return fmt.Errorf("invalid path")
 	}
 	if err := b.store.Delete(ctx, taskID); err != nil {
-		return err
+		return davError(err)
 	}
 
 	// Notify device of sync after successful store operation
@@ -319,4 +321,19 @@ func (b *Backend) taskIDFromPath(urlPath string) string {
 	}
 	base := path.Base(urlPath)
 	return strings.TrimSuffix(base, ".ics")
+}
+
+// davError maps a store error onto the status go-webdav should answer with.
+// go-webdav turns any error that is not a *webdav.HTTPError into a 500, so a
+// missing task must be wrapped explicitly. Clients rely on the 404: a 500 on
+// DELETE of an object that is already gone (Cfait cleaning up its companion
+// evt-*.ics objects, a client replaying a delete) reads as a server fault and
+// can wedge the client's retry queue, and go-webdav's own multiget and OPTIONS
+// paths check for exactly this status. Tombstoned tasks are not-found too,
+// since the store hides them.
+func davError(err error) error {
+	if taskstore.IsNotFound(err) {
+		return webdav.NewHTTPError(http.StatusNotFound, err)
+	}
+	return err
 }
